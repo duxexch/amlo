@@ -9,6 +9,7 @@ import { Home } from "@/pages/Home";
 import { Room } from "@/pages/Room";
 import { Wallet } from "@/pages/Wallet";
 import { Admin } from "@/pages/Admin";
+import { AdminLogin } from "@/pages/AdminLogin";
 import { CallPopup } from "@/components/ui/CallPopup";
 import { useState, useEffect } from "react";
 
@@ -20,7 +21,8 @@ function Router() {
         <Route path="/room" component={Room} />
         <Route path="/room/:id" component={Room} />
         <Route path="/wallet" component={Wallet} />
-        <Route path="/admin" component={Admin} />
+        <Route path="/admin" component={AdminLogin} />
+        <Route path="/admin/dashboard" component={Admin} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>
@@ -34,8 +36,8 @@ function App() {
   // Simulate an incoming call after 10 seconds for the demo
   useEffect(() => {
     const timer = setTimeout(() => {
-      // Don't show popup if already in a room
-      if (!location.startsWith('/room')) {
+      // Don't show popup if already in a room or in admin
+      if (!location.startsWith('/room') && !location.startsWith('/admin')) {
         setIncomingCall(true);
       }
     }, 10000);

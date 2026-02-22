@@ -6,11 +6,16 @@ import { motion } from "framer-motion";
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
+  // Don't show the layout (sidebar/nav) on the admin login page
+  if (location === "/admin") {
+    return <div className="min-h-screen bg-black" dir="rtl">{children}</div>;
+  }
+
   const navItems = [
     { icon: Home, label: "الرئيسية", path: "/" },
     { icon: Video, label: "بث مباشر", path: "/room" },
     { icon: Wallet, label: "المحفظة", path: "/wallet" },
-    { icon: LayoutDashboard, label: "لوحة التحكم", path: "/admin" },
+    { icon: LayoutDashboard, label: "لوحة التحكم", path: "/admin/dashboard" },
   ];
 
   return (
@@ -25,7 +30,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 space-y-2">
           {navItems.map((item) => {
             const isActive = location === item.path || (location.startsWith(item.path) && item.path !== '/' && item.path !== '/room');
-            // Make /room active state explicitly handled so it doesn't stay lit when going to random
             const isRoomActive = item.path === '/room' && location.startsWith('/room');
             const actuallyActive = isActive || isRoomActive;
 
