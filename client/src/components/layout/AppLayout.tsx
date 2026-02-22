@@ -1,13 +1,14 @@
 import { Link, useLocation } from "wouter";
-import { Home, Wallet, LayoutDashboard, Video } from "lucide-react";
+import { Home, Wallet, LayoutDashboard, Video, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
-  // Don't show the layout (sidebar/nav) on the admin login page
-  if (location === "/admin") {
+  // Pages without navigation
+  const noNavPages = ["/admin", "/auth"];
+  if (noNavPages.includes(location)) {
     return <div className="min-h-screen bg-black" dir="rtl">{children}</div>;
   }
 
@@ -15,6 +16,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { icon: Home, label: "الرئيسية", path: "/" },
     { icon: Video, label: "بث مباشر", path: "/room" },
     { icon: Wallet, label: "المحفظة", path: "/wallet" },
+    { icon: User, label: "حسابي", path: "/profile" },
     { icon: LayoutDashboard, label: "لوحة التحكم", path: "/admin/dashboard" },
   ];
 
@@ -52,6 +54,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 overflow-y-auto">
+        <div className="md:hidden flex justify-between items-center mb-6">
+           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white">A</div>
+           <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20">تسجيل دخول</button></Link>
+        </div>
         {children}
       </main>
 
