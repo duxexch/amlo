@@ -56,9 +56,9 @@ function wrapIoredisForConnectRedis(redis: Redis) {
       else if (opts.PX) args.push("PX", opts.PX);
       if (opts.NX) args.push("NX");
       else if (opts.XX) args.push("XX");
-      return originalSet(...args);
+      return (originalSet as any)(...args);
     }
-    return originalSet(key, value, opts);
+    return (originalSet as any)(key, value, opts);
   };
   return redis;
 }
