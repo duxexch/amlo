@@ -170,3 +170,9 @@
 .animate-pulse-ring-accent {
   animation: pulse-ring-accent 2s infinite cubic-bezier(0.66, 0, 0, 1);
 }
+
+/* TikTok-style chat fade at top */
+.mask-fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 25%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 25%);
+}

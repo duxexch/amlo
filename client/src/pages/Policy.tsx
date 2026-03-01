@@ -1,22 +1,24 @@
 import { motion } from "framer-motion";
 import { Shield, FileText, CheckCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function Policy({ type }: { type: 'privacy' | 'terms' }) {
+  const { t } = useTranslation();
   const content = type === 'privacy' ? {
-    title: "سياسة الخصوصية",
+    title: t("policy.privacyTitle"),
     icon: Shield,
     sections: [
-      { t: "جمع المعلومات", c: "نقوم بجمع المعلومات التي تقدمها لنا مباشرة عند إنشاء حسابك، مثل الاسم والبريد الإلكتروني." },
-      { t: "استخدام البيانات", c: "نستخدم بياناتك لتحسين تجربة المستخدم، وتوفير الدعم الفني، وضمان أمان المنصة." },
-      { t: "حماية البيانات", c: "نحن نستخدم أحدث تقنيات التشفير لضمان حماية بياناتك الشخصية والمحادثات." }
+      { t: t("policy.privacy.s1Title"), c: t("policy.privacy.s1Content") },
+      { t: t("policy.privacy.s2Title"), c: t("policy.privacy.s2Content") },
+      { t: t("policy.privacy.s3Title"), c: t("policy.privacy.s3Content") }
     ]
   } : {
-    title: "اتفاقية الاستخدام",
+    title: t("policy.termsTitle"),
     icon: FileText,
     sections: [
-      { t: "شروط العضوية", c: "يجب أن يكون عمر المستخدم 18 عاماً على الأقل لاستخدام خدمات البث المباشر." },
-      { t: "السلوك المقبول", c: "يمنع تماماً استخدام الألفاظ النابية أو المحتوى غير الأخلاقي داخل الغرف." },
-      { t: "نظام النقاط", c: "النقاط المشتراة غير قابلة للاسترداد بعد استخدامها في إرسال الهدايا." }
+      { t: t("policy.terms.s1Title"), c: t("policy.terms.s1Content") },
+      { t: t("policy.terms.s2Title"), c: t("policy.terms.s2Content") },
+      { t: t("policy.terms.s3Title"), c: t("policy.terms.s3Content") }
     ]
   };
 
@@ -27,7 +29,7 @@ export function Policy({ type }: { type: 'privacy' | 'terms' }) {
           <content.icon className="w-10 h-10 text-primary" />
         </div>
         <h1 className="text-4xl font-black text-white mb-4">{content.title}</h1>
-        <p className="text-white/40">آخر تحديث: 22 فبراير 2026</p>
+        <p className="text-white/40">{t("policy.lastUpdated")}</p>
       </div>
 
       <div className="glass p-10 rounded-[3rem] border-white/10 space-y-10 leading-relaxed">

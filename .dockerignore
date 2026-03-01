@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.local
+.env.production
+*.md
+logs
+tests
+vitest.config.ts
+nginx.conf
+ecosystem.config.cjs
+.vscode
+معلومات

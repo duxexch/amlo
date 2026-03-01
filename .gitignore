@@ -4,3 +4,13 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# ── Replit state ──
+.local/
+.replit
+replit.nix
+
+# ── Secrets ──
+.env
+.env.local
+.env.production

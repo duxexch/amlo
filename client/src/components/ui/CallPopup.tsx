@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Phone, Video, X } from "lucide-react";
 import avatarImg from "@/assets/images/avatar-3d.png";
+import { useTranslation } from "react-i18next";
 
 interface CallPopupProps {
   isOpen: boolean;
@@ -10,11 +11,14 @@ interface CallPopupProps {
   isVideo?: boolean;
 }
 
-export function CallPopup({ isOpen, onAccept, onDecline, callerName = "مستخدم عشوائي", isVideo = true }: CallPopupProps) {
+export function CallPopup({ isOpen, onAccept, onDecline, callerName, isVideo = true }: CallPopupProps) {
+  const { t, i18n } = useTranslation();
+  const dir = i18n.dir();
+  const displayName = callerName || t("callPopup.defaultCaller");
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" dir="rtl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" dir={dir}>
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -39,9 +43,9 @@ export function CallPopup({ isOpen, onAccept, onDecline, callerName = "مستخ�
                 <div className="absolute inset-0 rounded-full animate-pulse-ring pointer-events-none" />
               </div>
               
-              <h3 className="text-2xl font-bold text-white mb-2">{callerName}</h3>
+              <h3 className="text-2xl font-bold text-white mb-2">{displayName}</h3>
               <p className="text-primary font-medium animate-pulse mb-8 text-lg">
-                {isVideo ? "مكالمة فيديو واردة..." : "مكالمة صوتية واردة..."}
+                {isVideo ? t("callPopup.incomingVideo") : t("callPopup.incomingAudio")}
               </p>
               
               <div className="flex gap-6 w-full justify-center">
