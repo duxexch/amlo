@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Video, Mic, MicOff, Headphones, Radio, Users, Eye, Crown, Shield, Flame, Play, UserPlus, X, Send, Heart, Gift, Share2, VideoOff, Phone, PhoneOff, UserCheck, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
+import { getSocket, socketManager } from "@/lib/socketManager";
+import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 
 // ══════════════════════════════════════════════════════════
 // Mock Data
@@ -207,6 +209,8 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
   const [isHost] = useState(true); // mock: user is host
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [showGiftModal, setShowGiftModal] = useState(false);
+  const conn = useConnectionQuality();
+  const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
 
   const [messages, setMessages] = useState<ChatMsg[]>([
     { id: 1, type: 'join', user: { id: 'u1', name: 'أحمد', avatar: avatarImg, level: 15 }, color: 'text-yellow-400', timestamp: Date.now() - 30000 },
@@ -220,13 +224,32 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Simulate incoming messages
+  // Socket-based chat + fallback simulation
   useEffect(() => {
+    const socket = getSocket();
+    const roomId = stream.id;
+    socket.emit('join-room', roomId);
+
+    const handleChatMessage = (data: any) => {
+      if (!data?.message) return;
+      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+        id: data.id || Date.now(),
+        type: 'message',
+        user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 } : mockChatUsers[0],
+        text: data.message,
+        color: 'text-cyan-400',
+        timestamp: data.ts || Date.now(),
+      }]);
+    };
+    socket.on('chat-message', handleChatMessage);
+
+    // Fallback mock messages (slower on weak connections)
     const phrases = ["ما شاء الله 🌟", "يا سلام!", "هههههه 😂", "أبدعت 💪", "قلبي ❤️", "المزيد! ☝️", "رائع 🔥"];
+    const intervalMs = conn.quality === 'poor' ? 10000 : conn.quality === 'fair' ? 7000 : 5000;
     const interval = setInterval(() => {
       const u = mockChatUsers[Math.floor(Math.random() * mockChatUsers.length)];
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
-      setMessages(prev => [...prev.slice(-40), {
+      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
         id: Date.now(),
         type: 'message',
         user: u,
@@ -234,9 +257,14 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
         color: colors[Math.floor(Math.random() * colors.length)],
         timestamp: Date.now(),
       }]);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    }, intervalMs);
+
+    return () => {
+      clearInterval(interval);
+      socket.emit('leave-room', roomId);
+      socket.off('chat-message', handleChatMessage);
+    };
+  }, [conn.quality]);
 
   const addHeart = () => {
     const id = Date.now();
@@ -246,7 +274,14 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    setMessages(prev => [...prev, {
+    // Send via socket
+    socketManager.emit('chat-message', {
+      roomId: stream.id,
+      message: inputValue.trim(),
+      user: { id: 'me', name: 'أنت' },
+    });
+    // Optimistic local add
+    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
       id: Date.now(),
       type: 'message',
       user: { id: 'me', name: 'أنت', avatar: avatarImg, level: 10 },

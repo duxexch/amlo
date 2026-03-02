@@ -15,18 +15,14 @@ import {
 import { useTranslation } from "react-i18next";
 import { chatApi, callsApi, chatBlocksApi, messageReportsApi } from "@/lib/socialApi";
 import { useLocation } from "wouter";
-import { io as socketIO, Socket } from "socket.io-client";
+import { getSocket, socketManager } from "@/lib/socketManager";
+import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 
 type ViewMode = "list" | "chat";
 
-// ── Socket singleton ──
-let socket: Socket | null = null;
-function getSocket(): Socket {
-  if (!socket) {
-    socket = socketIO({ transports: ["websocket", "polling"] });
-  }
-  return socket;
-}
+// ── Typing throttle: client-side (complementary to server-side throttle) ──
+const TYPING_THROTTLE_MS = 2500;
+let lastTypingEmit = 0;
 
 // ── User Avatar ──
 function UserAvatar({ user, size = "md" }: { user: any; size?: "sm" | "md" | "lg" }) {
@@ -531,13 +527,24 @@ export function Chat() {
     setNewMessage(e.target.value);
     if (!activeConv) return;
 
-    const s = getSocket();
-    s.emit("typing", { conversationId: activeConv.id, receiverId: activeConv.otherUser?.id });
+    // ── Throttled typing indicator: max 1 emit per 2.5s ──
+    const now = Date.now();
+    if (now - lastTypingEmit >= TYPING_THROTTLE_MS) {
+      lastTypingEmit = now;
+      // Use volatile emit — if connection is slow, typing events are expendable
+      socketManager.emitVolatile("typing", {
+        conversationId: activeConv.id,
+        receiverId: activeConv.otherUser?.id,
+      });
+    }
 
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
-      s.emit("stop-typing", { conversationId: activeConv.id, receiverId: activeConv.otherUser?.id });
-    }, 2000);
+      socketManager.emitVolatile("stop-typing", {
+        conversationId: activeConv.id,
+        receiverId: activeConv.otherUser?.id,
+      });
+    }, 3000);
   };
 
   const handleReport = async (category: string, reason: string) => {

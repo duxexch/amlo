@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield } from "lucide-react";
 import { useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
+import { getSocket, socketManager } from "@/lib/socketManager";
+import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 
 // ── Mock chat data ─────────────────────────────────────
 interface ChatMessage {
@@ -218,8 +220,13 @@ export function Room() {
   const [selectedUser, setSelectedUser] = useState<ChatMessage['user'] | null>(null);
   const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set(['u2', 'u4']));
   const [inputValue, setInputValue] = useState('');
+  const [viewerCount, setViewerCount] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const conn = useConnectionQuality();
+
+  // Keep max 40 messages in buffer (prevents DOM bloat in long streams)
+  const MAX_MESSAGES = conn.quality === 'poor' ? 20 : 40;
 
   // Cleanup heart timers on unmount
   useEffect(() => {
@@ -243,8 +250,33 @@ export function Room() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Simulate incoming messages
+  // Simulate incoming messages (will be replaced by real socket events in production)
   useEffect(() => {
+    const socket = getSocket();
+    const roomId = 'default'; // TODO: get from route params
+
+    // Join room via socket
+    socket.emit('join-room', roomId);
+
+    // Listen for real chat messages from server
+    const handleChatMessage = (data: any) => {
+      if (!data?.message) return;
+      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+        id: data.id || Date.now(),
+        type: 'message',
+        user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, isFollowed: false } : mockUsers[0],
+        text: data.message,
+        color: 'text-white',
+        timestamp: data.ts || Date.now(),
+      }]);
+    };
+
+    const handleViewerCount = (count: number) => setViewerCount(count);
+
+    socket.on('chat-message', handleChatMessage);
+    socket.on('viewer-count', handleViewerCount);
+
+    // Fallback: simulate messages if no real ones arrive (for demo/testing)
     const phrases = [
       t("room.mockPhrase1", "ما شاء الله 🌟"),
       t("room.mockPhrase2", "يا سلام عليك!"),
@@ -254,13 +286,15 @@ export function Room() {
       t("room.mockPhrase6", "قلبي عليك ❤️"),
       t("room.mockPhrase7", "يا جماعة اللايك ☝️"),
     ];
+    // Slower interval for weak connections
+    const intervalMs = conn.quality === 'poor' ? 8000 : conn.quality === 'fair' ? 6000 : 4000;
     const interval = setInterval(() => {
       const randomUser = mockUsers[Math.floor(Math.random() * mockUsers.length)];
       const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400', 'text-yellow-400'];
       const randomColor = colors[Math.floor(Math.random() * colors.length)];
       
-      setMessages(prev => [...prev.slice(-30), {
+      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
         id: Date.now(),
         type: 'message',
         user: { ...randomUser, isFollowed: followedUsers.has(randomUser.id) },
@@ -268,10 +302,15 @@ export function Room() {
         color: randomColor,
         timestamp: Date.now(),
       }]);
-    }, 4000);
+    }, intervalMs);
 
-    return () => clearInterval(interval);
-  }, [followedUsers]);
+    return () => {
+      clearInterval(interval);
+      socket.emit('leave-room', roomId);
+      socket.off('chat-message', handleChatMessage);
+      socket.off('viewer-count', handleViewerCount);
+    };
+  }, [followedUsers, conn.quality]);
 
   const addHeart = () => {
     const id = Date.now();
@@ -293,7 +332,15 @@ export function Room() {
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    setMessages(prev => [...prev, {
+    const roomId = 'default'; // TODO: get from route params
+    // Send via socket (server will broadcast to all viewers)
+    socketManager.emit('chat-message', {
+      roomId,
+      message: inputValue.trim(),
+      user: { id: 'me', name: t("room.you", "أنت") },
+    });
+    // Optimistic local add
+    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
       id: Date.now(),
       type: 'message',
       user: { id: 'me', name: t("room.you", "أنت"), username: 'me', avatar: avatarImg, level: 10, isFollowed: false },
@@ -332,7 +379,7 @@ export function Room() {
               <p className="text-white text-xs font-bold leading-tight">{t("room.hostName", "سارة أحمد")}</p>
               <div className="flex items-center gap-1 text-white/70 text-[10px]">
                 <Users className="w-2.5 h-2.5" />
-                <span>1,205</span>
+                <span>{viewerCount > 0 ? viewerCount.toLocaleString() : '1,205'}</span>
               </div>
             </div>
             <button className="w-7 h-7 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors">

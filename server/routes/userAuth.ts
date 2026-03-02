@@ -314,8 +314,9 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
     const tokenKey = `pwd_reset:${token}`;
 
     // Store in Redis with 30 min TTL (or fallback to log)
-    const stored = await cacheSet(tokenKey, user.id, 1800);
-    if (!stored) {
+    try {
+      await cacheSet(tokenKey, user.id, 1800);
+    } catch {
       // Fallback: log the token for manual reset (production should use email service)
       authLog.warn({ userId: user.id, token }, "Could not store reset token in Redis — token logged for manual recovery");
     }

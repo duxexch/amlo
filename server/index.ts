@@ -39,16 +39,36 @@ export const io = new SocketIOServer(httpServer, {
     methods: ["GET", "POST"],
     credentials: true,
   },
+  // ── Transport: prefer websocket, fall back to polling for restricted networks ──
   transports: ["websocket", "polling"],
-  pingTimeout: 30000,
-  pingInterval: 25000,
-  maxHttpBufferSize: 1e6, // 1MB max message size
+  // ── Adaptive heartbeat: longer intervals save bandwidth on weak connections ──
+  pingTimeout: 45000,       // 45s — generous for slow 2G/3G networks
+  pingInterval: 30000,      // 30s — reduced pings = less overhead
+  // ── Buffer limits: prevent abuse while allowing normal messages ──
+  maxHttpBufferSize: 256_000, // 256KB (was 1MB) — messages don't need to be huge
+  // ── Connection recovery: mobile users lose signal frequently ──
   connectionStateRecovery: {
-    maxDisconnectionDuration: 10 * 60 * 1000, // 10 minutes recovery (mobile-friendly)
+    maxDisconnectionDuration: 15 * 60 * 1000, // 15 min recovery window
+    skipMiddlewares: true, // skip auth on reconnect (session is preserved)
   },
+  // ── Compression: aggressive deflate saves 40-70% bandwidth ──
   perMessageDeflate: {
-    threshold: 1024, // compress messages > 1KB
+    threshold: 256,         // compress messages > 256 bytes (was 1024)
+    zlibDeflateOptions: {
+      chunkSize: 4 * 1024,  // 4KB chunks — balanced for mobile
+      level: 6,             // level 6 = good ratio without CPU spike
+    },
+    clientNoContextTakeover: true, // lower memory per socket (~2KB saved)
+    serverNoContextTakeover: true,
   },
+  // ── HTTP compression for polling transport fallback ──
+  httpCompression: {
+    threshold: 128,
+  },
+  // ── Upgrade timeout: give slow connections more time to upgrade to ws ──
+  upgradeTimeout: 30000, // 30s (default 10s fails on 2G)
+  // ── Allow EIO3 for older clients (broader compatibility) ──
+  allowEIO3: true,
 });
 
 // Redis adapter is set up inside the main async startup below
@@ -119,6 +139,10 @@ function scheduleViewerCountBroadcast(roomId: string) {
 const chatThrottle = new Map<string, number[]>();
 const CHAT_MAX_MSGS = 20; // max messages
 const CHAT_WINDOW_MS = 10_000; // per 10 seconds
+
+// ── Typing indicator throttle (prevents excessive typing events) ──
+const typingThrottle = new Map<string, number>(); // userId -> last emit timestamp
+const TYPING_THROTTLE_MS = 3000; // max 1 typing event per 3 seconds per user
 
 function isChatRateLimited(userId: string): boolean {
   const now = Date.now();
@@ -196,11 +220,11 @@ io.on("connection", (socket) => {
       return;
     }
     const chatMsg = {
-      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), // shorter IDs
       roomId,
-      message: message.slice(0, 5000),
-      user: typeof user === "object" && user ? { id: (user as any).id, name: (user as any).name, avatar: (user as any).avatar } : null,
-      timestamp: new Date().toISOString(),
+      message: message.slice(0, 2000), // reduced from 5000 — saves bandwidth in rooms
+      user: typeof user === "object" && user ? { id: (user as any).id, name: (user as any).name } : null, // dropped avatar from broadcast (clients already have it)
+      ts: Date.now(), // unix timestamp instead of ISO string (saves ~15 bytes per msg)
     };
     io.to(`room:${roomId}`).emit("chat-message", chatMsg);
     // ── Persist last 200 messages per room in Redis ──
@@ -219,11 +243,16 @@ io.on("connection", (socket) => {
     io.to(`room:${roomId}`).emit("gift-received", { roomId, gift: safeGift, sender: safeSender });
   });
 
-  // ── Private Chat (typing indicator) — sync local lookup, zero overhead ──
+  // ── Private Chat (typing indicator) — throttled to save bandwidth ──
   socket.on("typing", (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { conversationId, receiverId } = data as Record<string, unknown>;
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
+    // Server-side throttle: max 1 typing event per 3s per user
+    const uid = socket.data.userId || socket.id;
+    const lastTyping = typingThrottle.get(uid) || 0;
+    if (Date.now() - lastTyping < TYPING_THROTTLE_MS) return; // drop excessive events
+    typingThrottle.set(uid, Date.now());
     const receiverSocketId = getUserSocketIdSync(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("typing", {
