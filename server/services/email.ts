@@ -45,7 +45,7 @@ let otpConfig: OtpConfig = {
   codeLength: 6,
   expiryMinutes: 5,
   maxAttempts: 5,
-  cooldownMinutes: 1,
+  cooldownMinutes: 5,
 };
 
 let transporter: Transporter | null = null;

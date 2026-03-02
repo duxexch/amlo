@@ -1584,7 +1584,7 @@ const advancedSettings: Record<string, any> = {
       codeLength: 6,
       expiryMinutes: 5,
       maxAttempts: 5,
-      cooldownMinutes: 1,
+      cooldownMinutes: 5,
     },
   },
   branding: {
