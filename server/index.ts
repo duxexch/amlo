@@ -622,8 +622,9 @@ app.use((req, res, next) => {
   });
 
   // Apply DB-level constraints on startup (idempotent)
-  const { applyDatabaseConstraints } = await import("./db");
+  const { applyDatabaseConstraints, ensureDefaultAdmin } = await import("./db");
   await applyDatabaseConstraints();
+  await ensureDefaultAdmin();
 
   // Hash mock agent account passwords at startup
   const { initMockAccountHashes } = await import("./routes/admin");

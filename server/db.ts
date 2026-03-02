@@ -85,6 +85,7 @@ export async function applyDatabaseConstraints(): Promise<void> {
   if (!p) return;
 
   const constraints = [
+    // ── CHECK constraints — prevent invalid values ──
     `DO $$ BEGIN
        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_coins_non_negative') THEN
          ALTER TABLE users ADD CONSTRAINT users_coins_non_negative CHECK (coins >= 0);
@@ -105,6 +106,57 @@ export async function applyDatabaseConstraints(): Promise<void> {
          ALTER TABLE users ADD CONSTRAINT users_level_positive CHECK (level >= 1);
        END IF;
      END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_xp_non_negative') THEN
+         ALTER TABLE users ADD CONSTRAINT users_xp_non_negative CHECK (xp >= 0);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gifts_price_positive') THEN
+         ALTER TABLE gifts ADD CONSTRAINT gifts_price_positive CHECK (price > 0);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gift_transactions_quantity_positive') THEN
+         ALTER TABLE gift_transactions ADD CONSTRAINT gift_transactions_quantity_positive CHECK (quantity > 0);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gift_transactions_total_positive') THEN
+         ALTER TABLE gift_transactions ADD CONSTRAINT gift_transactions_total_positive CHECK (total_price > 0);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wallet_tx_amount_not_zero') THEN
+         ALTER TABLE wallet_transactions ADD CONSTRAINT wallet_tx_amount_not_zero CHECK (amount != 0);
+       END IF;
+     END $$;`,
+    // ── UNIQUE constraints — prevent duplicate relationships ──
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_follows_unique_pair') THEN
+         ALTER TABLE user_follows ADD CONSTRAINT user_follows_unique_pair UNIQUE (follower_id, following_id);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_blocks_unique_pair') THEN
+         ALTER TABLE chat_blocks ADD CONSTRAINT chat_blocks_unique_pair UNIQUE (blocker_id, blocked_id);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_follows_no_self') THEN
+         ALTER TABLE user_follows ADD CONSTRAINT user_follows_no_self CHECK (follower_id != following_id);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_blocks_no_self') THEN
+         ALTER TABLE chat_blocks ADD CONSTRAINT chat_blocks_no_self CHECK (blocker_id != blocked_id);
+       END IF;
+     END $$;`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'friendships_no_self') THEN
+         ALTER TABLE friendships ADD CONSTRAINT friendships_no_self CHECK (sender_id != receiver_id);
+       END IF;
+     END $$;`,
   ];
 
   try {
@@ -113,8 +165,55 @@ export async function applyDatabaseConstraints(): Promise<void> {
       await client.query(sql);
     }
     client.release();
-    log("Database CHECK constraints applied", "db");
+    log("Database constraints applied", "db");
   } catch (err: any) {
     log(`Failed to apply constraints: ${err.message}`, "db");
+  }
+}
+
+/**
+ * Ensure a default admin user exists on every startup.
+ * - If no admin with username "admin" exists, create one.
+ * - If it exists, update the password to match ADMIN_PASSWORD env var.
+ * This guarantees admin panel access even after fresh deployments.
+ */
+export async function ensureDefaultAdmin(): Promise<void> {
+  const d = getDb();
+  if (!d) return;
+
+  const bcrypt = await import("bcryptjs");
+  const { admins } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+
+  const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+  const adminHash = bcrypt.hashSync(adminPassword, 12);
+
+  try {
+    const [existing] = await d
+      .select()
+      .from(admins)
+      .where(eq(admins.username, "admin"))
+      .limit(1);
+
+    if (!existing) {
+      await d.insert(admins).values({
+        username: "admin",
+        email: "admin@ablox.app",
+        passwordHash: adminHash,
+        displayName: "مدير النظام",
+        role: "super_admin",
+        isActive: true,
+      });
+      log("Default admin user created (admin)", "db");
+    } else {
+      // Always sync password with env var
+      await d
+        .update(admins)
+        .set({ passwordHash: adminHash, isActive: true, updatedAt: new Date() })
+        .where(eq(admins.username, "admin"));
+      log("Default admin password synced", "db");
+    }
+  } catch (err: any) {
+    log(`Failed to ensure admin: ${err.message}`, "db");
   }
 }
