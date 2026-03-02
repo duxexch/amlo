@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "سکه‌ها",
     "live": "زنده",
     "startNow": "همین الان شروع کن",
@@ -41,7 +41,7 @@
     "social": "ارتباطات"
   },
   "home": {
-    "heroTitle": "دنیای Aplo",
+    "heroTitle": "دنیای Ablox",
     "heroSubtitle": "متصل شو، گفتگو کن، لحظاتت رو با دنیا به اشتراک بذار و هدیه بگیر",
     "tabRandomChat": "چت تصادفی",
     "tabLiveStream": "پخش زنده",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "پنل مدیریت",
-      "mobileName": "Aplo مدیر"
+      "mobileName": "Ablox مدیر"
     },
     "role": {
       "superAdmin": "مدیر ارشد",
       "moderator": "ناظر"
     },
     "login": {
-      "title": "Aplo مدیر",
+      "title": "Ablox مدیر",
       "subtitle": "پنل مدیریت مرکزی",
       "usernameLabel": "نام کاربری",
       "passwordLabel": "رمز عبور",
@@ -989,7 +989,7 @@
       "devNoteTitle": "اطلاعات آزمایشی:",
       "devNoteEmail": "ایمیل:",
       "devNotePass": "رمز عبور:",
-      "footer": "پورتال نماینده — Aplo"
+      "footer": "پورتال نماینده — Ablox"
     },
     "dashboard": {
       "title": "داشبورد نماینده",
@@ -1014,7 +1014,7 @@
   },
   "agentApply": {
     "title": "درخواست نمایندگی",
-    "subtitle": "اطلاعات خود را برای درخواست نمایندگی در Aplo وارد کنید",
+    "subtitle": "اطلاعات خود را برای درخواست نمایندگی در Ablox وارد کنید",
     "referredBy": "معرفی‌شده توسط",
     "sectionPersonal": "اطلاعات شخصی",
     "fullName": "نام کامل",
@@ -1039,7 +1039,7 @@
   },
   "accountApply": {
     "title": "درخواست حساب نمایندگی",
-    "subtitle": "برای دریافت حساب نمایندگی در Aplo ثبت نام کنید",
+    "subtitle": "برای دریافت حساب نمایندگی در Ablox ثبت نام کنید",
     "fullName": "نام کامل",
     "fullNamePlaceholder": "نام کامل خود را وارد کنید",
     "email": "آدرس ایمیل",

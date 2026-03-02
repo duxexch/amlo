@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════
-# Aplo — APK/AAB Signing Setup
+# Ablox — APK/AAB Signing Setup
 # ═══════════════════════════════════════════════════════
 # Run this on a machine with Java installed (server/CI)
 # Generates: signing keystore + updates assetlinks.json
@@ -11,13 +11,13 @@
 set -euo pipefail
 
 KEYSTORE_DIR="signing"
-KEYSTORE_FILE="$KEYSTORE_DIR/aplo-release.keystore"
-ALIAS="aplo"
+KEYSTORE_FILE="$KEYSTORE_DIR/ablox-release.keystore"
+ALIAS="ablox"
 VALIDITY=10000  # ~27 years
 ASSETLINKS="client/public/.well-known/assetlinks.json"
 
 echo "═══════════════════════════════════════════"
-echo "  Aplo — APK/AAB Signing Key Setup"
+echo "  Ablox — APK/AAB Signing Key Setup"
 echo "═══════════════════════════════════════════"
 
 # Check Java
@@ -86,7 +86,7 @@ echo "Next steps:"
 echo "  1. Keep $KEYSTORE_FILE SAFE — never commit to git!"
 echo "  2. Use PWABuilder (pwabuilder.com) to create APK/AAB:"
 echo "     - Upload your signing key when prompted"
-echo "     - Package name: app.aplo.twa"
+echo "     - Package name: app.ablox.twa"
 echo "  3. Or use Bubblewrap CLI:"
 echo "     npx @nicolo-ribaudo/bubblewrap init --manifest=https://yourdomain.com/manifest.json"
 echo "     npx @nicolo-ribaudo/bubblewrap build"

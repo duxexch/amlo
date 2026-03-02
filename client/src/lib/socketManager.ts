@@ -299,7 +299,7 @@ class SocketManager {
     this.connectionInfo.dataSaver = enabled;
     this.notifyListeners();
     // Persist preference
-    try { localStorage.setItem("aplo:dataSaver", enabled ? "1" : "0"); } catch {}
+    try { localStorage.setItem("ablox:dataSaver", enabled ? "1" : "0"); } catch {}
   }
 
   /**
@@ -308,7 +308,7 @@ class SocketManager {
   isDataSaverEnabled(): boolean {
     if (this.connectionInfo.dataSaver) return true;
     try {
-      return localStorage.getItem("aplo:dataSaver") === "1";
+      return localStorage.getItem("ablox:dataSaver") === "1";
     } catch {
       return false;
     }

@@ -22,7 +22,7 @@ interface UsePWAReturn {
   platform: "ios" | "android" | "desktop" | "unknown";
 }
 
-const DISMISS_KEY = "aplo_pwa_dismiss";
+const DISMISS_KEY = "ablox_pwa_dismiss";
 const DISMISS_DAYS = 7;
 
 function getPlatform(): "ios" | "android" | "desktop" | "unknown" {

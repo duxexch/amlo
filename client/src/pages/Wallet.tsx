@@ -169,7 +169,7 @@ export function Wallet() {
               </div>
               <div>
                 <p className="text-white/90 font-bold text-sm tracking-wider uppercase">{t("wallet.currentBalance")}</p>
-                <p className="text-white/40 text-xs">Aplo Wallet</p>
+                <p className="text-white/40 text-xs">Ablox Wallet</p>
               </div>
             </div>
             <motion.div 

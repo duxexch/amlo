@@ -1629,10 +1629,10 @@ interface AppDownloadForm {
 
 const defaultAppDownload: AppDownloadForm = {
   enabled: false,
-  domain: "https://aplo.app",
+  domain: "https://ablox.app",
   pwa: { enabled: true, url: "", extension: "/", description: "" },
-  apk: { enabled: false, url: "", extension: "/download/aplo.apk", description: "" },
-  aab: { enabled: false, url: "", extension: "/download/aplo.aab", description: "" },
+  apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "" },
+  aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "" },
 };
 
 function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
@@ -1681,7 +1681,7 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
             className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors font-mono"
             value={form.domain}
             onChange={(e) => setForm(prev => ({ ...prev, domain: e.target.value }))}
-            placeholder="https://aplo.app"
+            placeholder="https://ablox.app"
             dir="ltr"
           />
           <p className="text-[11px] text-white/30 flex items-center gap-1.5 mt-1">
@@ -1742,7 +1742,7 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
                     className="flex-1 bg-transparent h-10 px-3 text-sm text-white font-mono focus:outline-none placeholder:text-white/15"
                     value={form[key].url}
                     onChange={(e) => updateVersion(key, "url", e.target.value)}
-                    placeholder={`https://aplo.app${form[key].extension}`}
+                    placeholder={`https://ablox.app${form[key].extension}`}
                     dir="ltr"
                   />
                 </div>

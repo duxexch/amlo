@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "Koin",
     "live": "LANGSUNG",
     "startNow": "Mulai Sekarang",
@@ -41,7 +41,7 @@
     "social": "Sosial"
   },
   "home": {
-    "heroTitle": "Dunia Aplo",
+    "heroTitle": "Dunia Ablox",
     "heroSubtitle": "Terhubung, mengobrol, bagikan momen Anda dengan dunia dan menangkan hadiah",
     "tabRandomChat": "Chat Acak",
     "tabLiveStream": "Siaran Langsung",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "PANEL ADMIN",
-      "mobileName": "Aplo Admin"
+      "mobileName": "Ablox Admin"
     },
     "role": {
       "superAdmin": "Super Admin",
       "moderator": "Moderator"
     },
     "login": {
-      "title": "Aplo Admin",
+      "title": "Ablox Admin",
       "subtitle": "Panel Administrasi Pusat",
       "usernameLabel": "Nama Pengguna",
       "passwordLabel": "Kata Sandi",
@@ -975,7 +975,7 @@
       "devNoteTitle": "Kredensial tes:",
       "devNoteEmail": "Email:",
       "devNotePass": "Kata Sandi:",
-      "footer": "Portal Agen — Aplo"
+      "footer": "Portal Agen — Ablox"
     },
     "dashboard": {
       "title": "Dasbor Agen",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "Lamaran Agen",
-    "subtitle": "Isi data Anda untuk melamar sebagai agen di Aplo",
+    "subtitle": "Isi data Anda untuk melamar sebagai agen di Ablox",
     "referredBy": "Direferensikan oleh",
     "sectionPersonal": "Informasi Pribadi",
     "fullName": "Nama Lengkap",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "Lamaran Akun Agen",
-    "subtitle": "Daftar untuk mendapatkan akun agen di Aplo",
+    "subtitle": "Daftar untuk mendapatkan akun agen di Ablox",
     "fullName": "Nama Lengkap",
     "fullNamePlaceholder": "Masukkan nama lengkap Anda",
     "email": "Alamat Email",

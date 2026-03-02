@@ -119,7 +119,7 @@ export function createRedisSessionStore(session: any) {
     const wrapped = wrapIoredisForConnectRedis(redis);
     return new RedisStore({
       client: wrapped as any,
-      prefix: "aplo:sess:",
+      prefix: "ablox:sess:",
       ttl: 86400, // 24 hours
     });
   }
@@ -137,7 +137,7 @@ export async function cacheGet(key: string): Promise<string | null> {
   const redis = getRedis();
   if (!redis) return null;
   try {
-    return await redis.get(`aplo:cache:${key}`);
+    return await redis.get(`ablox:cache:${key}`);
   } catch {
     return null;
   }
@@ -147,7 +147,7 @@ export async function cacheSet(key: string, value: string, ttlSeconds = 300): Pr
   const redis = getRedis();
   if (!redis) return;
   try {
-    await redis.setex(`aplo:cache:${key}`, ttlSeconds, value);
+    await redis.setex(`ablox:cache:${key}`, ttlSeconds, value);
   } catch { /* ignore */ }
 }
 
@@ -155,6 +155,6 @@ export async function cacheDel(key: string): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
   try {
-    await redis.del(`aplo:cache:${key}`);
+    await redis.del(`ablox:cache:${key}`);
   } catch { /* ignore */ }
 }

@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "Jeton",
     "live": "CANLI",
     "startNow": "Şimdi Başla",
@@ -41,7 +41,7 @@
     "social": "Sosyal"
   },
   "home": {
-    "heroTitle": "Aplo Dünyası",
+    "heroTitle": "Ablox Dünyası",
     "heroSubtitle": "Bağlan, sohbet et, anlarını dünyayla paylaş ve hediyeler kazan",
     "tabRandomChat": "Rastgele Sohbet",
     "tabLiveStream": "Canlı Yayın",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "YÖNETİM PANELİ",
-      "mobileName": "Aplo Admin"
+      "mobileName": "Ablox Admin"
     },
     "role": {
       "superAdmin": "Süper Yönetici",
       "moderator": "Moderatör"
     },
     "login": {
-      "title": "Aplo Admin",
+      "title": "Ablox Admin",
       "subtitle": "Merkezi Yönetim Paneli",
       "usernameLabel": "Kullanıcı Adı",
       "passwordLabel": "Şifre",
@@ -975,7 +975,7 @@
       "devNoteTitle": "Test bilgileri:",
       "devNoteEmail": "E-posta:",
       "devNotePass": "Şifre:",
-      "footer": "Acente Portalı — Aplo"
+      "footer": "Acente Portalı — Ablox"
     },
     "dashboard": {
       "title": "Acente Paneli",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "Acente Başvurusu",
-    "subtitle": "Aplo'da acente olmak için bilgilerinizi doldurun",
+    "subtitle": "Ablox'da acente olmak için bilgilerinizi doldurun",
     "referredBy": "Referans",
     "sectionPersonal": "Kişisel Bilgiler",
     "fullName": "Tam Ad",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "Ajan Hesabı Başvurusu",
-    "subtitle": "Aplo'da ajan hesabı almak için kaydolun",
+    "subtitle": "Ablox'da ajan hesabı almak için kaydolun",
     "fullName": "Tam Ad",
     "fullNamePlaceholder": "Tam adınızı girin",
     "email": "E-posta Adresi",

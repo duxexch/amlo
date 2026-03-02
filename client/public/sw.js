@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 /**
- * Aplo — Service Worker
+ * Ablox — Service Worker
  * Caching strategy:
  *   - App shell (HTML/CSS/JS): Cache-First with network update
  *   - API calls: Network-First with cache fallback
@@ -10,7 +10,7 @@
  *   - Socket.io: SKIP (real-time, never cache)
  */
 
-const CACHE_VERSION = "aplo-v1";
+const CACHE_VERSION = "ablox-v1";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
@@ -49,7 +49,7 @@ sw.addEventListener("activate", (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key.startsWith("aplo-") && key !== STATIC_CACHE && key !== DYNAMIC_CACHE && key !== IMAGE_CACHE)
+          .filter((key) => key.startsWith("ablox-") && key !== STATIC_CACHE && key !== DYNAMIC_CACHE && key !== IMAGE_CACHE)
           .map((key) => caches.delete(key))
       )
     )
@@ -113,15 +113,15 @@ sw.addEventListener("push", (event) => {
   try {
     data = event.data.json();
   } catch {
-    data = { title: "أبلو", body: event.data.text() };
+    data = { title: "Ablox", body: event.data.text() };
   }
 
   event.waitUntil(
-    sw.registration.showNotification(data.title || "أبلو — Aplo", {
+    sw.registration.showNotification(data.title || "Ablox", {
       body: data.body || "",
       icon: data.icon || "/icons/icon-192x192.png",
       badge: data.badge || "/icons/icon-72x72.png",
-      tag: data.tag || "aplo-notification",
+      tag: data.tag || "ablox-notification",
       dir: "rtl",
       lang: "ar",
       data: { url: data.url || "/" },

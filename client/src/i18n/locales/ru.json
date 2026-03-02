@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "Монеты",
     "live": "ПРЯМОЙ ЭФИР",
     "startNow": "Начать сейчас",
@@ -41,7 +41,7 @@
     "social": "Общение"
   },
   "home": {
-    "heroTitle": "Мир Aplo",
+    "heroTitle": "Мир Ablox",
     "heroSubtitle": "Общайтесь, делитесь моментами с миром и получайте подарки",
     "tabRandomChat": "Случайный чат",
     "tabLiveStream": "Прямой эфир",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "ПАНЕЛЬ УПРАВЛЕНИЯ",
-      "mobileName": "Aplo Админ"
+      "mobileName": "Ablox Админ"
     },
     "role": {
       "superAdmin": "Суперадминистратор",
       "moderator": "Модератор"
     },
     "login": {
-      "title": "Aplo Админ",
+      "title": "Ablox Админ",
       "subtitle": "Центральная панель управления",
       "usernameLabel": "Имя пользователя",
       "passwordLabel": "Пароль",
@@ -975,7 +975,7 @@
       "devNoteTitle": "Тестовые данные:",
       "devNoteEmail": "Email:",
       "devNotePass": "Пароль:",
-      "footer": "Портал агента — Aplo"
+      "footer": "Портал агента — Ablox"
     },
     "dashboard": {
       "title": "Панель агента",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "Заявка на агента",
-    "subtitle": "Заполните данные для подачи заявки на роль агента в Aplo",
+    "subtitle": "Заполните данные для подачи заявки на роль агента в Ablox",
     "referredBy": "Реферал",
     "sectionPersonal": "Личная информация",
     "fullName": "Полное имя",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "Заявка на Аккаунт Агента",
-    "subtitle": "Зарегистрируйтесь для получения аккаунта агента на Aplo",
+    "subtitle": "Зарегистрируйтесь для получения аккаунта агента на Ablox",
     "fullName": "Полное Имя",
     "fullNamePlaceholder": "Введите ваше полное имя",
     "email": "Электронная Почта",

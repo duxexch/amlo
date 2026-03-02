@@ -1,5 +1,5 @@
 /**
- * Aplo — Structured Logger (Pino)
+ * Ablox — Structured Logger (Pino)
  * Production: JSON logs (machine-parseable, Grafana/ELK-ready)
  * Development: Pretty-printed colored output
  */

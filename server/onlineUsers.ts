@@ -2,12 +2,12 @@
  * Online Users Management — Hybrid local-first + Redis for horizontal scaling.
  *
  * Strategy: Local Map is the primary source of truth for THIS node (O(1) lookups).
- * Redis HSET "aplo:online_users" is kept in sync for cross-node visibility.
+ * Redis HSET "ablox:online_users" is kept in sync for cross-node visibility.
  * This gives us fast local reads with multi-node consistency.
  */
 import { getRedis } from "./redis";
 
-const REDIS_KEY = "aplo:online_users";
+const REDIS_KEY = "ablox:online_users";
 
 // ── Primary in-memory store (always fast, always available) ──
 const localMap = new Map<string, string>();

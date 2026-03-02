@@ -147,7 +147,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           </div>
           <div>
             <span className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary" style={{ fontFamily: "Outfit" }}>
-              Aplo
+              Ablox
             </span>
             <span className="block text-[10px] font-bold text-white/30 -mt-1 tracking-wider">{t("admin.brand.subtitle")}</span>
           </div>

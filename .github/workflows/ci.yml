@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════
-# Aplo — CI/CD Pipeline
+# Ablox — CI/CD Pipeline
 # Runs on every push and PR to main
 # check → audit → build → deploy
 # ═══════════════════════════════════════════════════════════
@@ -56,9 +56,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Build Docker image
-        run: docker build -t aplo:${{ github.sha }} .
+        run: docker build -t ablox:${{ github.sha }} .
       - name: Verify Docker image
-        run: docker run --rm aplo:${{ github.sha }} node -e "console.log('Image OK')"
+        run: docker run --rm ablox:${{ github.sha }} node -e "console.log('Image OK')"
 
   # ── Deploy (only on push to main) ──
   deploy:

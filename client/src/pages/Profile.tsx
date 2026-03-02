@@ -41,7 +41,7 @@ const mockUser = {
   },
   referral: {
     code: "FARES2024",
-    link: "https://aplo.app/ref/FARES2024",
+    link: "https://ablox.app/ref/FARES2024",
     invited: 23,
     earnings: 450,
   },

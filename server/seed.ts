@@ -10,7 +10,7 @@ import bcryptjs from "bcryptjs";
 
 const { Pool } = pg;
 
-const DATABASE_URL = process.env.DATABASE_URL || "postgresql://aplo_admin:ApL0_S3cur3_2026!@localhost:5432/aplo";
+const DATABASE_URL = process.env.DATABASE_URL || "postgresql://ablox_admin:AbL0x_S3cur3_2026!@localhost:5432/ablox";
 
 async function seed() {
   console.log("🌱 Starting database seed...\n");
@@ -23,7 +23,7 @@ async function seed() {
   const adminHash = bcryptjs.hashSync(process.env.ADMIN_PASSWORD || "admin123", 12);
   await db.insert(schema.admins).values({
     username: "admin",
-    email: "admin@aplo.app",
+    email: "admin@ablox.app",
     passwordHash: adminHash,
     displayName: "مدير النظام",
     role: "super_admin",
@@ -111,8 +111,8 @@ async function seed() {
   // ── 4. Seed System Settings ──
   console.log("⚙️ Creating system settings...");
   const settings = [
-    { key: "app_name", value: "Aplo", category: "general", description: "اسم التطبيق" },
-    { key: "app_name_ar", value: "أبلو", category: "general", description: "اسم التطبيق بالعربي" },
+    { key: "app_name", value: "Ablox", category: "general", description: "اسم التطبيق" },
+    { key: "app_name_ar", value: "Ablox", category: "general", description: "اسم التطبيق بالعربي" },
     { key: "min_withdrawal", value: "50", category: "payments", description: "الحد الأدنى للسحب (بالدولار)" },
     { key: "platform_fee", value: "15", category: "payments", description: "عمولة المنصة %" },
     { key: "agent_default_commission", value: "10", category: "payments", description: "عمولة الوكيل الافتراضية %" },
@@ -149,7 +149,7 @@ async function seed() {
   const agentHash = bcryptjs.hashSync("agent123", 12);
   await db.insert(schema.agents).values({
     name: "شركة الأفق للتسويق",
-    email: "agent@aplo.app",
+    email: "agent@ablox.app",
     phone: "+966501234567",
     passwordHash: agentHash,
     referralCode: "AGENT-AFQ-001",
@@ -191,7 +191,7 @@ async function seed() {
 
   console.log("\n✅ Seed completed successfully!");
   console.log("   Admin: admin / admin123");
-  console.log("   Agent: agent@aplo.app / agent123");
+  console.log("   Agent: agent@ablox.app / agent123");
   console.log("   Users: sara_ahmed, ahmed_ali, etc. / user123");
 
   await pool.end();

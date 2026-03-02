@@ -76,7 +76,7 @@ export function Admin() {
               <label className="text-base font-bold text-white/80">رابط دعوة مستخدمين (عام)</label>
               <div className="flex bg-black/40 rounded-2xl border border-white/10 overflow-hidden group hover:border-primary/50 transition-colors">
                 <div className="px-5 py-4 flex-1 text-sm text-white/80 font-mono truncate">
-                  https://aplo.app/ref/global-promo
+                  https://ablox.app/ref/global-promo
                 </div>
                 <button 
                   onClick={() => handleCopy(0)}

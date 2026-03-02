@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "金币",
     "live": "直播",
     "startNow": "立即开始",
@@ -41,7 +41,7 @@
     "social": "社交"
   },
   "home": {
-    "heroTitle": "Aplo 世界",
+    "heroTitle": "Ablox 世界",
     "heroSubtitle": "连接、聊天、与世界分享你的时刻并赢得礼物",
     "tabRandomChat": "随机聊天",
     "tabLiveStream": "直播",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "管理面板",
-      "mobileName": "Aplo 管理"
+      "mobileName": "Ablox 管理"
     },
     "role": {
       "superAdmin": "超级管理员",
       "moderator": "版主"
     },
     "login": {
-      "title": "Aplo 管理",
+      "title": "Ablox 管理",
       "subtitle": "中央管理面板",
       "usernameLabel": "用户名",
       "passwordLabel": "密码",
@@ -975,7 +975,7 @@
       "devNoteTitle": "测试凭据：",
       "devNoteEmail": "邮箱：",
       "devNotePass": "密码：",
-      "footer": "代理门户 — Aplo"
+      "footer": "代理门户 — Ablox"
     },
     "dashboard": {
       "title": "代理面板",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "代理申请",
-    "subtitle": "填写您的信息以申请成为Aplo代理",
+    "subtitle": "填写您的信息以申请成为Ablox代理",
     "referredBy": "推荐人",
     "sectionPersonal": "个人信息",
     "fullName": "全名",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "代理账户申请",
-    "subtitle": "注册以获取Aplo代理账户",
+    "subtitle": "注册以获取Ablox代理账户",
     "fullName": "全名",
     "fullNamePlaceholder": "输入您的全名",
     "email": "电子邮件",

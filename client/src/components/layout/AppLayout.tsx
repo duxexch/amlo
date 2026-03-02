@@ -30,7 +30,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="hidden md:flex flex-col w-64 glass-panel border-e border-white/10 h-screen sticky top-0 z-40 p-4">
         <div className="flex items-center gap-3 mb-10 px-2">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white">A</div>
-          <span className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary" style={{fontFamily: 'Outfit'}}>Aplo</span>
+          <span className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary" style={{fontFamily: 'Outfit'}}>Ablox</span>
         </div>
         
         <nav className="flex-1 space-y-2">
@@ -64,7 +64,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 pb-4 pt-0 md:px-8 md:pb-8 md:pt-2 overflow-y-auto">
         <div className="md:hidden flex justify-between items-center mb-1">
-           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white" aria-label="Aplo">A</div>
+           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white" aria-label="Ablox">A</div>
            <div className="flex items-center gap-2">
              <LanguageSwitcher />
              <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20" aria-label={t("common.login")}>{t("common.login")}</button></Link>

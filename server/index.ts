@@ -30,7 +30,7 @@ if (process.env.NODE_ENV === "production") {
 
 // ── Socket.io (secured) ──
 const socketOrigin = process.env.NODE_ENV === "production"
-  ? process.env.CORS_ORIGIN || "https://aplo.app"
+  ? process.env.CORS_ORIGIN || "https://ablox.app"
   : "*";
 
 export const io = new SocketIOServer(httpServer, {
@@ -356,7 +356,7 @@ function persistRoomMessage(roomId: string, msg: object) {
   try {
     const redis = getRedis();
     if (!redis) return;
-    const key = `aplo:room:${roomId}:messages`;
+    const key = `ablox:room:${roomId}:messages`;
     redis.pipeline()
       .lpush(key, JSON.stringify(msg))
       .ltrim(key, 0, 199)
@@ -384,7 +384,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://aplo.app"],
+      connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://ablox.app"],
       mediaSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
@@ -402,7 +402,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
-    ? process.env.CORS_ORIGIN || "https://aplo.app"
+    ? process.env.CORS_ORIGIN || "https://ablox.app"
     : true,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
@@ -573,47 +573,47 @@ app.use((req, res, next) => {
     const onlineCount = await getOnlineUsersCount();
 
     const lines = [
-      `# HELP aplo_uptime_seconds Server uptime in seconds`,
-      `# TYPE aplo_uptime_seconds gauge`,
-      `aplo_uptime_seconds ${Math.floor(process.uptime())}`,
-      `# HELP aplo_memory_rss_bytes RSS memory usage`,
-      `# TYPE aplo_memory_rss_bytes gauge`,
-      `aplo_memory_rss_bytes ${mem.rss}`,
-      `# HELP aplo_memory_heap_used_bytes Heap memory used`,
-      `# TYPE aplo_memory_heap_used_bytes gauge`,
-      `aplo_memory_heap_used_bytes ${mem.heapUsed}`,
-      `# HELP aplo_memory_heap_total_bytes Total heap size`,
-      `# TYPE aplo_memory_heap_total_bytes gauge`,
-      `aplo_memory_heap_total_bytes ${mem.heapTotal}`,
-      `# HELP aplo_memory_external_bytes External memory`,
-      `# TYPE aplo_memory_external_bytes gauge`,
-      `aplo_memory_external_bytes ${mem.external}`,
-      `# HELP aplo_cpu_user_microseconds CPU user time`,
-      `# TYPE aplo_cpu_user_microseconds counter`,
-      `aplo_cpu_user_microseconds ${cpu.user}`,
-      `# HELP aplo_cpu_system_microseconds CPU system time`,
-      `# TYPE aplo_cpu_system_microseconds counter`,
-      `aplo_cpu_system_microseconds ${cpu.system}`,
-      `# HELP aplo_online_users Online user count`,
-      `# TYPE aplo_online_users gauge`,
-      `aplo_online_users ${onlineCount}`,
-      `# HELP aplo_socket_connections Active socket connections`,
-      `# TYPE aplo_socket_connections gauge`,
-      `aplo_socket_connections ${io.engine.clientsCount}`,
+      `# HELP ablox_uptime_seconds Server uptime in seconds`,
+      `# TYPE ablox_uptime_seconds gauge`,
+      `ablox_uptime_seconds ${Math.floor(process.uptime())}`,
+      `# HELP ablox_memory_rss_bytes RSS memory usage`,
+      `# TYPE ablox_memory_rss_bytes gauge`,
+      `ablox_memory_rss_bytes ${mem.rss}`,
+      `# HELP ablox_memory_heap_used_bytes Heap memory used`,
+      `# TYPE ablox_memory_heap_used_bytes gauge`,
+      `ablox_memory_heap_used_bytes ${mem.heapUsed}`,
+      `# HELP ablox_memory_heap_total_bytes Total heap size`,
+      `# TYPE ablox_memory_heap_total_bytes gauge`,
+      `ablox_memory_heap_total_bytes ${mem.heapTotal}`,
+      `# HELP ablox_memory_external_bytes External memory`,
+      `# TYPE ablox_memory_external_bytes gauge`,
+      `ablox_memory_external_bytes ${mem.external}`,
+      `# HELP ablox_cpu_user_microseconds CPU user time`,
+      `# TYPE ablox_cpu_user_microseconds counter`,
+      `ablox_cpu_user_microseconds ${cpu.user}`,
+      `# HELP ablox_cpu_system_microseconds CPU system time`,
+      `# TYPE ablox_cpu_system_microseconds counter`,
+      `ablox_cpu_system_microseconds ${cpu.system}`,
+      `# HELP ablox_online_users Online user count`,
+      `# TYPE ablox_online_users gauge`,
+      `ablox_online_users ${onlineCount}`,
+      `# HELP ablox_socket_connections Active socket connections`,
+      `# TYPE ablox_socket_connections gauge`,
+      `ablox_socket_connections ${io.engine.clientsCount}`,
     ];
 
     // DB pool metrics
     if (pool) {
       lines.push(
-        `# HELP aplo_db_pool_total Total DB pool connections`,
-        `# TYPE aplo_db_pool_total gauge`,
-        `aplo_db_pool_total ${pool.totalCount}`,
-        `# HELP aplo_db_pool_idle Idle DB pool connections`,
-        `# TYPE aplo_db_pool_idle gauge`,
-        `aplo_db_pool_idle ${pool.idleCount}`,
-        `# HELP aplo_db_pool_waiting Waiting DB pool requests`,
-        `# TYPE aplo_db_pool_waiting gauge`,
-        `aplo_db_pool_waiting ${pool.waitingCount}`,
+        `# HELP ablox_db_pool_total Total DB pool connections`,
+        `# TYPE ablox_db_pool_total gauge`,
+        `ablox_db_pool_total ${pool.totalCount}`,
+        `# HELP ablox_db_pool_idle Idle DB pool connections`,
+        `# TYPE ablox_db_pool_idle gauge`,
+        `ablox_db_pool_idle ${pool.idleCount}`,
+        `# HELP ablox_db_pool_waiting Waiting DB pool requests`,
+        `# TYPE ablox_db_pool_waiting gauge`,
+        `ablox_db_pool_waiting ${pool.waitingCount}`,
       );
     }
 

@@ -3,7 +3,7 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "app.aplo.twa",
+      "package_name": "app.ablox.twa",
       "sha256_cert_fingerprints": [
         "__SIGNING_KEY_SHA256_FINGERPRINT__"
       ]

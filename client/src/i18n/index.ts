@@ -82,7 +82,7 @@ i18n
     detection: {
       order: ["localStorage", "navigator"],
       caches: ["localStorage"],
-      lookupLocalStorage: "aplo_lang",
+      lookupLocalStorage: "ablox_lang",
     },
   });
 

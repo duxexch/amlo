@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "コイン",
     "live": "ライブ",
     "startNow": "今すぐ開始",
@@ -41,7 +41,7 @@
     "social": "ソーシャル"
   },
   "home": {
-    "heroTitle": "Aploの世界",
+    "heroTitle": "Abloxの世界",
     "heroSubtitle": "つながって、チャットして、あなたの瞬間を世界中と共有し、ギフトを獲得しよう",
     "tabRandomChat": "ランダムチャット",
     "tabLiveStream": "ライブ配信",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "管理パネル",
-      "mobileName": "Aplo管理"
+      "mobileName": "Ablox管理"
     },
     "role": {
       "superAdmin": "スーパー管理者",
       "moderator": "モデレーター"
     },
     "login": {
-      "title": "Aplo管理",
+      "title": "Ablox管理",
       "subtitle": "中央管理パネル",
       "usernameLabel": "ユーザー名",
       "passwordLabel": "パスワード",
@@ -975,7 +975,7 @@
       "devNoteTitle": "テスト認証情報：",
       "devNoteEmail": "メール：",
       "devNotePass": "パスワード：",
-      "footer": "エージェントポータル — Aplo"
+      "footer": "エージェントポータル — Ablox"
     },
     "dashboard": {
       "title": "エージェントダッシュボード",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "エージェント申請",
-    "subtitle": "Aploのエージェントになるために情報を入力してください",
+    "subtitle": "Abloxのエージェントになるために情報を入力してください",
     "referredBy": "紹介者",
     "sectionPersonal": "個人情報",
     "fullName": "氏名",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "エージェントアカウント申請",
-    "subtitle": "Aploでエージェントアカウントを取得するために登録",
+    "subtitle": "Abloxでエージェントアカウントを取得するために登録",
     "fullName": "氏名",
     "fullNamePlaceholder": "氏名を入力",
     "email": "メールアドレス",

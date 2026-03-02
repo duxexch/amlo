@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "코인",
     "live": "라이브",
     "startNow": "지금 시작",
@@ -41,7 +41,7 @@
     "social": "소셜"
   },
   "home": {
-    "heroTitle": "Aplo 세계",
+    "heroTitle": "Ablox 세계",
     "heroSubtitle": "연결하고, 채팅하고, 세상과 당신의 순간을 공유하고 선물을 받으세요",
     "tabRandomChat": "랜덤 채팅",
     "tabLiveStream": "라이브 스트림",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "관리자 패널",
-      "mobileName": "Aplo 관리자"
+      "mobileName": "Ablox 관리자"
     },
     "role": {
       "superAdmin": "슈퍼 관리자",
       "moderator": "중재자"
     },
     "login": {
-      "title": "Aplo 관리자",
+      "title": "Ablox 관리자",
       "subtitle": "중앙 관리 패널",
       "usernameLabel": "사용자명",
       "passwordLabel": "비밀번호",
@@ -975,7 +975,7 @@
       "devNoteTitle": "테스트 인증:",
       "devNoteEmail": "이메일:",
       "devNotePass": "비밀번호:",
-      "footer": "에이전트 포털 — Aplo"
+      "footer": "에이전트 포털 — Ablox"
     },
     "dashboard": {
       "title": "에이전트 대시보드",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "에이전트 신청",
-    "subtitle": "Aplo 에이전트가 되기 위해 정보를 입력하세요",
+    "subtitle": "Ablox 에이전트가 되기 위해 정보를 입력하세요",
     "referredBy": "추천인",
     "sectionPersonal": "개인 정보",
     "fullName": "이름",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "에이전트 계정 신청",
-    "subtitle": "Aplo에서 에이전트 계정을 얻기 위해 등록하세요",
+    "subtitle": "Ablox에서 에이전트 계정을 얻기 위해 등록하세요",
     "fullName": "성명",
     "fullNamePlaceholder": "성명을 입력하세요",
     "email": "이메일 주소",

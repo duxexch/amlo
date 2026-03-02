@@ -1,16 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="fbg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#7c3aed"/>
-      <stop offset="50%" stop-color="#a855f7"/>
-      <stop offset="100%" stop-color="#ec4899"/>
-    </linearGradient>
-    <linearGradient id="fp" x1="440" y1="320" x2="640" y2="560" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#8b5cf6"/>
-      <stop offset="100%" stop-color="#d946ef"/>
+      <stop offset="0%" stop-color="#4338CA"/>
+      <stop offset="45%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#DB2777"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="224" fill="url(#fbg)"/>
-  <path d="M 370 210 L 654 210 C 703 210, 744 251, 744 300 L 744 540 C 744 589, 703 630, 654 630 L 475 630 L 365 755 L 365 630 C 316 630, 280 589, 280 540 L 280 300 C 280 251, 316 210, 370 210 Z" fill="white" fill-opacity="0.95"/>
-  <path d="M 460 335 L 460 545 L 625 440 Z" fill="url(#fp)"/>
+  <rect x="130" y="320" width="480" height="340" rx="48" fill="white" fill-opacity="0.95"/>
+  <path d="M 630 365 L 810 268 Q 845 248, 845 288 L 845 668 Q 845 708, 810 688 L 630 590 Z" fill="white" fill-opacity="0.88"/>
+  <path d="M 310 410 L 310 580 L 475 495 Z" fill="url(#fbg)" fill-opacity="0.8"/>
+  <circle cx="880" cy="185" r="45" fill="#EF4444"/>
+  <circle cx="880" cy="185" r="58" fill="none" stroke="#EF4444" stroke-width="6" opacity="0.35"/>
+  <path d="M 235 232 Q 340 150 445 232" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" opacity="0.4"/>
+  <path d="M 195 180 Q 340 75 485 180" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
 </svg>

@@ -46,7 +46,7 @@ export function AdminLoginPage() {
               A
             </div>
             <h1 className="text-3xl font-black text-white mb-1" style={{ fontFamily: "Outfit" }}>
-              Aplo Admin
+              Ablox Admin
             </h1>
             <p className="text-white/40 font-medium text-sm">{t("admin.login.subtitle")}</p>
           </div>

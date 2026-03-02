@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════
-# Aplo — Multi-stage Docker Build
+# Ablox — Multi-stage Docker Build
 # ═══════════════════════════════════════════════════════
 
 # ── Stage 1: Install dependencies ──
@@ -20,11 +20,11 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 # Security: run as non-root
-RUN addgroup --system --gid 1001 aplo && \
-    adduser --system --uid 1001 --ingroup aplo aplo
+RUN addgroup --system --gid 1001 ablox && \
+    adduser --system --uid 1001 --ingroup ablox ablox
 
 # Create logs directory
-RUN mkdir -p /app/logs && chown aplo:aplo /app/logs
+RUN mkdir -p /app/logs && chown ablox:ablox /app/logs
 
 # Copy only production artifacts
 COPY --from=deps /app/node_modules ./node_modules
@@ -32,7 +32,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 
 # Switch to non-root user
-USER aplo
+USER ablox
 
 # Environment
 ENV NODE_ENV=production

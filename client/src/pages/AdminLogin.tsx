@@ -28,7 +28,7 @@ export function AdminLogin() {
       >
         <div className="flex flex-col items-center mb-10 text-center">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-3xl neon-border text-white mb-6">A</div>
-          <h1 className="text-3xl font-black text-white mb-2" style={{fontFamily: 'Outfit'}}>Aplo Admin</h1>
+          <h1 className="text-3xl font-black text-white mb-2" style={{fontFamily: 'Outfit'}}>Ablox Admin</h1>
           <p className="text-white/60 font-medium">لوحة تحكم الإدارة المركزية</p>
         </div>
 
@@ -41,7 +41,7 @@ export function AdminLogin() {
                 type="text" 
                 required
                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary focus:bg-white/10 transition-all"
-                placeholder="admin_aplo"
+                placeholder="admin_ablox"
               />
             </div>
           </div>

@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "Coins",
     "live": "LIVE",
     "startNow": "Start Now",
@@ -43,7 +43,7 @@
     "social": "Social"
   },
   "home": {
-    "heroTitle": "Aplo World",
+    "heroTitle": "Ablox World",
     "heroSubtitle": "Connect, chat, share your moments with the world and earn gifts",
     "tabRandomChat": "Random Chat",
     "tabLiveStream": "Live Stream",
@@ -314,14 +314,14 @@
     },
     "brand": {
       "subtitle": "ADMIN PANEL",
-      "mobileName": "Aplo Admin"
+      "mobileName": "Ablox Admin"
     },
     "role": {
       "superAdmin": "Super Admin",
       "moderator": "Moderator"
     },
     "login": {
-      "title": "Aplo Admin",
+      "title": "Ablox Admin",
       "subtitle": "Central Administration Panel",
       "usernameLabel": "Username",
       "passwordLabel": "Password",
@@ -1232,7 +1232,7 @@
       "devNoteTitle": "Test credentials:",
       "devNoteEmail": "Email:",
       "devNotePass": "Password:",
-      "footer": "Agent Portal — Aplo"
+      "footer": "Agent Portal — Ablox"
     },
     "dashboard": {
       "title": "Agent Dashboard",
@@ -1257,7 +1257,7 @@
   },
   "agentApply": {
     "title": "Agent Application",
-    "subtitle": "Fill in your details to apply as an agent on Aplo",
+    "subtitle": "Fill in your details to apply as an agent on Ablox",
     "referredBy": "Referred by",
     "sectionPersonal": "Personal Information",
     "fullName": "Full Name",
@@ -1282,7 +1282,7 @@
   },
   "accountApply": {
     "title": "Agent Account Application",
-    "subtitle": "Register to get an agent account on Aplo",
+    "subtitle": "Register to get an agent account on Ablox",
     "fullName": "Full Name",
     "fullNamePlaceholder": "Enter your full name",
     "email": "Email Address",

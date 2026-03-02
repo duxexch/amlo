@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════
-# Aplo — VPS Deployment Script
+# Ablox — VPS Deployment Script
 # Usage: chmod +x deploy.sh && ./deploy.sh
 # ═══════════════════════════════════════════════════════════
 
@@ -19,7 +19,7 @@ info() { echo -e "${CYAN}[i]${NC} $1"; }
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
-echo "  أبلو — Aplo VPS Deployment"
+echo "  Ablox — VPS Deployment"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
@@ -53,7 +53,7 @@ if [ ! -f .env ]; then
   sed -i "s|ENCRYPTION_SECRET=CHANGE_ME_64_HEX_CHARS|ENCRYPTION_SECRET=${ENCRYPTION_SECRET}|g" .env
   sed -i "s|ADMIN_PASSWORD=CHANGE_ME_STRONG_PASSWORD|ADMIN_PASSWORD=${ADMIN_PASSWORD}|g" .env
   sed -i "s|NODE_ENV=development|NODE_ENV=production|g" .env
-  sed -i "s|DATABASE_URL=postgresql://aplo_admin:CHANGE_ME@localhost:5432/aplo|DATABASE_URL=postgresql://aplo_admin:${POSTGRES_PASSWORD}@pgbouncer:6432/aplo|g" .env
+  sed -i "s|DATABASE_URL=postgresql://ablox_admin:CHANGE_ME@localhost:5432/ablox|DATABASE_URL=postgresql://ablox_admin:${POSTGRES_PASSWORD}@pgbouncer:6432/ablox|g" .env
   sed -i "s|REDIS_URL=redis://:CHANGE_ME@localhost:6379|REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379|g" .env
 
   log ".env created with auto-generated secrets"
@@ -111,7 +111,7 @@ docker compose exec app npx tsx server/seed.ts 2>/dev/null || warn "Seed skipped
 echo ""
 echo "═══════════════════════════════════════════════════════"
 echo ""
-log "Aplo is running! 🚀"
+log "Ablox is running! 🚀"
 echo ""
 docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 echo ""
@@ -124,8 +124,8 @@ echo ""
 info "Next steps:"
 echo "  1. Point your domain DNS to this server's IP"
 echo "  2. Install Nginx:  sudo apt install nginx"
-echo "  3. Copy config:    sudo cp nginx.conf /etc/nginx/sites-available/aplo.conf"
-echo "  4. Enable:         sudo ln -s /etc/nginx/sites-available/aplo.conf /etc/nginx/sites-enabled/"
+echo "  3. Copy config:    sudo cp nginx.conf /etc/nginx/sites-available/ablox.conf"
+echo "  4. Enable:         sudo ln -s /etc/nginx/sites-available/ablox.conf /etc/nginx/sites-enabled/"
 echo "  5. Get SSL:        sudo certbot --nginx -d yourdomain.com"
 echo "  6. Restart Nginx:  sudo systemctl restart nginx"
 echo ""

@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌐 Aplo — عالم أبلو
+# 🌐 Ablox — منصة البث المباشر
 
 ### منصة دردشة فيديو وصوت عشوائية + بث مباشر + محفظة رقمية
 
@@ -22,7 +22,7 @@
 
 ## 📖 نظرة عامة
 
-**Aplo** (أبلو) هو تطبيق دردشة فيديو وصوت عشوائي مع بث مباشر ومحفظة رقمية (كوينز). التطبيق مصمم بالعربية أولاً (RTL) مع دعم كامل للتعددية اللغوية، ويتميز بتصميم Dark Theme مع تأثيرات Neon/Glass Morphism.
+**Ablox** هو تطبيق دردشة فيديو وصوت عشوائي مع بث مباشر ومحفظة رقمية (كوينز). التطبيق مصمم بالعربية أولاً (RTL) مع دعم كامل للتعددية اللغوية، ويتميز بتصميم Dark Theme مع تأثيرات Neon/Glass Morphism.
 
 ### ✨ المميزات الرئيسية
 
@@ -39,7 +39,7 @@
 
 ## 📖 Overview
 
-**Aplo** is a random video/audio chat application with live streaming and a digital wallet (coins) system. Designed Arabic-first (RTL) with full i18n support, featuring a Dark Theme with Neon/Glass Morphism aesthetics.
+**Ablox** is a random video/audio chat application with live streaming and a digital wallet (coins) system. Designed Arabic-first (RTL) with full i18n support, featuring a Dark Theme with Neon/Glass Morphism aesthetics.
 
 ### ✨ Key Features
 
@@ -72,7 +72,7 @@
 ## 📁 Project Structure
 
 ```
-aplo/
+ablox/
 ├── client/                  # Frontend (React + Vite)
 │   ├── src/
 │   │   ├── components/      # UI components (shadcn/ui)
@@ -131,7 +131,7 @@ cp .env.example .env
 ### Environment Variables
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/aplo
+DATABASE_URL=postgresql://user:password@localhost:5432/ablox
 REDIS_URL=redis://localhost:6379
 SESSION_SECRET=your-session-secret
 NODE_ENV=development

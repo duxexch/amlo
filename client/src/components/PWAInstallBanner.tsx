@@ -61,7 +61,7 @@ export function PWAInstallBanner() {
             {/* Text */}
             <div className="flex-1 min-w-0">
               <h4 className="text-white text-sm font-bold mb-0.5">
-                {t("pwa.installTitle", "ثبّت تطبيق أبلو")}
+                {t("pwa.installTitle", "ثبّت تطبيق Ablox")}
               </h4>
               <p className="text-white/50 text-xs leading-tight">
                 {platform === "ios"

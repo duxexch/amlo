@@ -1,8 +1,8 @@
-// PM2 Ecosystem Configuration – Aplo Production
+// PM2 Ecosystem Configuration – Ablox Production
 module.exports = {
   apps: [
     {
-      name: "aplo",
+      name: "ablox",
       script: "dist/index.cjs",
       cwd: __dirname,
       instances: "max", // cluster mode – one per CPU core
@@ -16,8 +16,8 @@ module.exports = {
       },
       // Logging
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-      error_file: "./logs/aplo-error.log",
-      out_file: "./logs/aplo-out.log",
+      error_file: "./logs/ablox-error.log",
+      out_file: "./logs/ablox-out.log",
       merge_logs: true,
       // Graceful shutdown
       kill_timeout: 5000,

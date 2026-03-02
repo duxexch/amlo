@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════
-# Aplo — Development Only (DB + Redis)
+# Ablox — Development Only (DB + Redis)
 # Usage: docker compose -f docker-compose.dev.yml up -d
 # Then run: npm run dev
 # ═══════════════════════════════════════════════════════
@@ -8,35 +8,35 @@ version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: aplo_postgres
+    container_name: ablox_postgres
     restart: unless-stopped
     env_file: .env
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aplo}
-      POSTGRES_USER: ${POSTGRES_USER:-aplo_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ApL0_S3cur3_2026!}
+      POSTGRES_DB: ${POSTGRES_DB:-ablox}
+      POSTGRES_USER: ${POSTGRES_USER:-ablox_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-AbL0x_S3cur3_2026!}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aplo_admin} -d ${POSTGRES_DB:-aplo}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ablox_admin} -d ${POSTGRES_DB:-ablox}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: aplo_redis
+    container_name: ablox_redis
     restart: unless-stopped
     env_file: .env
-    command: redis-server --requirepass ${REDIS_PASSWORD:-ApL0_R3d1s_2026!} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:-AbL0x_R3d1s_2026!} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-ApL0_R3d1s_2026!}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-AbL0x_R3d1s_2026!}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5

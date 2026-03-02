@@ -1,5 +1,5 @@
 /**
- * Aplo — Production Environment Validation
+ * Ablox — Production Environment Validation
  * Validates all required environment variables at startup using Zod.
  * Prevents the server from starting with missing/invalid configuration.
  */

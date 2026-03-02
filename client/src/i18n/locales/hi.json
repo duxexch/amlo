@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "सिक्के",
     "live": "लाइव",
     "startNow": "अभी शुरू करें",
@@ -41,7 +41,7 @@
     "social": "सोशल"
   },
   "home": {
-    "heroTitle": "Aplo की दुनिया",
+    "heroTitle": "Ablox की दुनिया",
     "heroSubtitle": "जुड़ें, चैट करें, अपने पल दुनिया के साथ साझा करें और उपहार जीतें",
     "tabRandomChat": "रैंडम चैट",
     "tabLiveStream": "लाइव स्ट्रीम",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "एडमिन पैनल",
-      "mobileName": "Aplo एडमिन"
+      "mobileName": "Ablox एडमिन"
     },
     "role": {
       "superAdmin": "सुपर एडमिन",
       "moderator": "मॉडरेटर"
     },
     "login": {
-      "title": "Aplo एडमिन",
+      "title": "Ablox एडमिन",
       "subtitle": "केंद्रीय प्रशासन पैनल",
       "usernameLabel": "उपयोगकर्ता नाम",
       "passwordLabel": "पासवर्ड",
@@ -975,7 +975,7 @@
       "devNoteTitle": "टेस्ट क्रेडेंशियल:",
       "devNoteEmail": "ईमेल:",
       "devNotePass": "पासवर्ड:",
-      "footer": "एजेंट पोर्टल — Aplo"
+      "footer": "एजेंट पोर्टल — Ablox"
     },
     "dashboard": {
       "title": "एजेंट डैशबोर्ड",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "एजेंट आवेदन",
-    "subtitle": "Aplo पर एजेंट बनने के लिए अपनी जानकारी भरें",
+    "subtitle": "Ablox पर एजेंट बनने के लिए अपनी जानकारी भरें",
     "referredBy": "रेफरल",
     "sectionPersonal": "व्यक्तिगत जानकारी",
     "fullName": "पूरा नाम",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "एजेंट खाता आवेदन",
-    "subtitle": "Aplo पर एजेंट खाता प्राप्त करने के लिए रजिस्टर करें",
+    "subtitle": "Ablox पर एजेंट खाता प्राप्त करने के लिए रजिस्टर करें",
     "fullName": "पूरा नाम",
     "fullNamePlaceholder": "अपना पूरा नाम दर्ज करें",
     "email": "ईमेल पता",

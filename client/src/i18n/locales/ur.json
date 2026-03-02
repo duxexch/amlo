@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Aplo",
+    "appName": "Ablox",
     "coins": "سکے",
     "live": "لائیو",
     "startNow": "ابھی شروع کریں",
@@ -41,7 +41,7 @@
     "social": "سوشل"
   },
   "home": {
-    "heroTitle": "Aplo کی دنیا",
+    "heroTitle": "Ablox کی دنیا",
     "heroSubtitle": "جڑیں، بات کریں، اپنے لمحات دنیا کے ساتھ شیئر کریں اور تحائف جیتیں",
     "tabRandomChat": "بے ترتیب چیٹ",
     "tabLiveStream": "لائیو سٹریم",
@@ -291,14 +291,14 @@
     },
     "brand": {
       "subtitle": "ایڈمن پینل",
-      "mobileName": "Aplo ایڈمن"
+      "mobileName": "Ablox ایڈمن"
     },
     "role": {
       "superAdmin": "سپر ایڈمن",
       "moderator": "ماڈریٹر"
     },
     "login": {
-      "title": "Aplo ایڈمن",
+      "title": "Ablox ایڈمن",
       "subtitle": "مرکزی انتظامی پینل",
       "usernameLabel": "صارف نام",
       "passwordLabel": "پاس ورڈ",
@@ -975,7 +975,7 @@
       "devNoteTitle": "ٹیسٹ معلومات:",
       "devNoteEmail": "ای میل:",
       "devNotePass": "پاسورڈ:",
-      "footer": "ایجنٹ پورٹل — Aplo"
+      "footer": "ایجنٹ پورٹل — Ablox"
     },
     "dashboard": {
       "title": "ایجنٹ ڈیش بورڈ",
@@ -1000,7 +1000,7 @@
   },
   "agentApply": {
     "title": "ایجنٹ کی درخواست",
-    "subtitle": "Aplo پر ایجنٹ بننے کے لیے اپنی معلومات درج کریں",
+    "subtitle": "Ablox پر ایجنٹ بننے کے لیے اپنی معلومات درج کریں",
     "referredBy": "ریفرل",
     "sectionPersonal": "ذاتی معلومات",
     "fullName": "پورا نام",
@@ -1025,7 +1025,7 @@
   },
   "accountApply": {
     "title": "ایجنٹ اکاؤنٹ کی درخواست",
-    "subtitle": "Aplo پر ایجنٹ اکاؤنٹ حاصل کرنے کے لیے رجسٹر کریں",
+    "subtitle": "Ablox پر ایجنٹ اکاؤنٹ حاصل کرنے کے لیے رجسٹر کریں",
     "fullName": "پورا نام",
     "fullNamePlaceholder": "اپنا پورا نام درج کریں",
     "email": "ای میل پتہ",
