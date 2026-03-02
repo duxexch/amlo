@@ -83,11 +83,32 @@ export const profileApi = {
   verifyPin: (pin: string) =>
     request<{ success: boolean; data: any }>("/pin/verify", { method: "POST", body: JSON.stringify({ pin }) }),
 
+  changePin: (profileIndex: number, currentPin: string, newPin: string) =>
+    request<{ success: boolean; message: string }>("/pin/change", {
+      method: "PUT",
+      body: JSON.stringify({ profileIndex, currentPin, newPin }),
+    }),
+
+  deleteProfile: (index: number) =>
+    request<{ success: boolean; message: string }>(`/pin/profile/${index}`, { method: "DELETE" }),
+
   getProfiles: () =>
     request<{ success: boolean; data: any[] }>("/profiles"),
 
   updateProfile: (index: number, data: { displayName?: string; avatar?: string; bio?: string; gender?: string; country?: string; birthDate?: string }) =>
     request<{ success: boolean; data: any }>(`/profiles/${index}`, { method: "PUT", body: JSON.stringify(data) }),
+};
+
+// ── Login OTP (alternative to PIN) ──
+export const loginOtpApi = {
+  sendOtp: () =>
+    request<{ success: boolean; message: string; email?: string }>("/login/otp", { method: "POST" }),
+
+  verifyOtp: (code: string) =>
+    request<{ success: boolean; data?: any }>("/login/otp-verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 };
 
 // ── Friend Visibility ──

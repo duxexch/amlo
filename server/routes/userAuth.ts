@@ -96,6 +96,12 @@ router.post("/register", async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة حالياً" });
     }
 
+    // Verify OTP was completed for this email
+    const otpVerifiedFlag = await cacheGet(`otp:verified:${email.toLowerCase()}`);
+    if (!otpVerifiedFlag) {
+      return res.status(403).json({ success: false, message: "يرجى تأكيد بريدك الإلكتروني أولاً عبر رمز التحقق", code: "OTP_REQUIRED" });
+    }
+
     // Check if username or email already exists
     const existingUser = await storage.getUserByUsername(username);
     if (existingUser) {
@@ -131,9 +137,12 @@ router.post("/register", async (req: Request, res: Response) => {
     }
     await storage.updateUser(user.id, updateData);
 
-    // Set session
+    // Clean up OTP verified flag (one-time use)
+    await cacheDel(`otp:verified:${email.toLowerCase()}`);
+
+    // Set session — user is logged in immediately, no forced PIN
     req.session.userId = user.id;
-    req.session.pinVerified = false;
+    req.session.pinVerified = true; // No profiles yet, no PIN needed
 
     log(`User registered: ${username} (${email})`);
 
@@ -144,7 +153,7 @@ router.post("/register", async (req: Request, res: Response) => {
         username: user.username,
         email: user.email,
         displayName: user.displayName,
-        needsPinSetup: true,
+        needsPinSetup: false, // No forced PIN setup — user sets up from Profile
       },
     });
   } catch (err: any) {
@@ -418,6 +427,11 @@ router.post("/pin/setup", async (req: Request, res: Response) => {
     // Check if this profileIndex already exists
     if (existing.find(p => p.profileIndex === profileIndex)) {
       return res.status(409).json({ success: false, message: `الملف الشخصي رقم ${profileIndex} موجود بالفعل` });
+    }
+
+    // Validate PIN is exactly 4 digits
+    if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+      return res.status(400).json({ success: false, message: "رمز PIN يجب أن يكون 4 أرقام بالضبط" });
     }
 
     // Hash PIN
@@ -767,6 +781,9 @@ router.post("/otp/verify", async (req: Request, res: Response) => {
       return res.status(400).json(result);
     }
 
+    // Store verified flag in Redis for 15 minutes (used by /register to enforce OTP)
+    await cacheSet(`otp:verified:${email.trim().toLowerCase()}`, "1", 900);
+
     // If user exists, set email verified flag
     const user = await storage.getUserByEmail(email.trim());
     if (user) {
@@ -811,5 +828,194 @@ router.post("/otp/send-register", async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, message: "حدث خطأ في إرسال رمز التحقق" });
   }
 });
+
+// ════════════════════════════════════════════════════════════
+// PIN MANAGEMENT — تغيير وحذف رمز PIN
+// ════════════════════════════════════════════════════════════
+
+/**
+ * PUT /auth/pin/change — Change PIN for a specific profile
+ */
+router.put("/pin/change", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const { profileIndex, currentPin, newPin } = req.body;
+    if (!profileIndex || !currentPin || !newPin) {
+      return res.status(400).json({ success: false, message: "بيانات ناقصة" });
+    }
+
+    if (!/^\d{4}$/.test(newPin)) {
+      return res.status(400).json({ success: false, message: "رمز PIN الجديد يجب أن يكون 4 أرقام بالضبط" });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    // Find the profile
+    const [profile] = await db.select().from(schema.userProfiles)
+      .where(and(eq(schema.userProfiles.userId, userId), eq(schema.userProfiles.profileIndex, profileIndex)))
+      .limit(1);
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: "الملف الشخصي غير موجود" });
+    }
+
+    // Verify current PIN
+    const valid = await verifyPasswordAsync(currentPin, profile.pinHash);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: "رمز PIN الحالي غير صحيح" });
+    }
+
+    // Check new PIN is different from other profile's PIN
+    const allProfiles = await db.select().from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId));
+    for (const p of allProfiles) {
+      if (p.profileIndex !== profileIndex) {
+        const sameAsOther = await verifyPasswordAsync(newPin, p.pinHash);
+        if (sameAsOther) {
+          return res.status(400).json({ success: false, message: "رمز PIN يجب أن يكون مختلف عن الملف الآخر" });
+        }
+      }
+    }
+
+    // Hash and update
+    const newPinHash = await hashPasswordAsync(newPin);
+    await db.update(schema.userProfiles)
+      .set({ pinHash: newPinHash, updatedAt: new Date() })
+      .where(eq(schema.userProfiles.id, profile.id));
+
+    log(`PIN changed for user ${userId}, profile ${profileIndex}`);
+    return res.json({ success: true, message: "تم تغيير رمز PIN بنجاح" });
+  } catch (err: any) {
+    authLog.error({ err }, "PIN change error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في تغيير رمز PIN" });
+  }
+});
+
+/**
+ * DELETE /auth/pin/profile/:index — Delete a profile (profile 2 only, or profile 1 if it's the only one)
+ */
+router.delete("/pin/profile/:index", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const profileIndex = parseInt(paramStr(req.params.index));
+    if (profileIndex !== 1 && profileIndex !== 2) {
+      return res.status(400).json({ success: false, message: "رقم الملف الشخصي غير صالح" });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const allProfiles = await db.select().from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId));
+    const target = allProfiles.find(p => p.profileIndex === profileIndex);
+    if (!target) {
+      return res.status(404).json({ success: false, message: "الملف الشخصي غير موجود" });
+    }
+
+    // Cannot delete profile 1 if profile 2 exists
+    if (profileIndex === 1 && allProfiles.length > 1) {
+      return res.status(400).json({ success: false, message: "لا يمكن حذف الملف الأول أثناء وجود ملف ثاني. احذف الملف الثاني أولاً" });
+    }
+
+    await db.delete(schema.userProfiles).where(eq(schema.userProfiles.id, target.id));
+
+    // Reset session PIN verification
+    req.session.pinVerified = allProfiles.length <= 1; // If deleting the only profile, no PIN needed
+    req.session.activeProfileIndex = undefined;
+
+    log(`Profile ${profileIndex} deleted for user ${userId}`);
+    return res.json({ success: true, message: "تم حذف الملف الشخصي" });
+  } catch (err: any) {
+    authLog.error({ err }, "Delete profile error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في حذف الملف الشخصي" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// LOGIN OTP — تسجيل الدخول عبر OTP بدلاً من PIN
+// ════════════════════════════════════════════════════════════
+
+/**
+ * POST /auth/login/otp — Send OTP to user's email for login (alternative to PIN)
+ * Requires user to be authenticated (password already verified) but PIN not yet verified
+ */
+router.post("/login/otp", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const user = await storage.getUser(userId);
+    if (!user || !user.email) {
+      return res.status(400).json({ success: false, message: "لا يوجد بريد إلكتروني مرتبط بالحساب" });
+    }
+
+    const result = await sendOtp(user.email);
+    if (!result.success) {
+      return res.status(429).json(result);
+    }
+
+    return res.json({ success: true, message: "تم إرسال رمز التحقق إلى بريدك الإلكتروني", email: maskEmail(user.email) });
+  } catch (err: any) {
+    authLog.error({ err }, "Login OTP send error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في إرسال رمز التحقق" });
+  }
+});
+
+/**
+ * POST /auth/login/otp-verify — Verify OTP for login (bypass PIN, use default profile)
+ */
+router.post("/login/otp-verify", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال رمز التحقق" });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user || !user.email) {
+      return res.status(400).json({ success: false, message: "لا يوجد بريد إلكتروني مرتبط بالحساب" });
+    }
+
+    const result = await verifyOtp(user.email, String(code).trim());
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // OTP verified — set default profile as active
+    const db = getDb();
+    if (db) {
+      const profiles = await db.select().from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId));
+      const defaultProfile = profiles.find(p => p.isDefault) || profiles[0];
+      if (defaultProfile) {
+        req.session.pinVerified = true;
+        req.session.activeProfileIndex = defaultProfile.profileIndex;
+        return res.json({
+          success: true,
+          message: "تم التحقق بنجاح",
+          data: { profileIndex: defaultProfile.profileIndex, profile: stripSensitive(defaultProfile) },
+        });
+      }
+    }
+
+    req.session.pinVerified = true;
+    return res.json({ success: true, message: "تم التحقق بنجاح" });
+  } catch (err: any) {
+    authLog.error({ err }, "Login OTP verify error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في التحقق" });
+  }
+});
+
+/** Helper: mask email for display (e.g., f***@gmail.com) */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (local.length <= 2) return `${local[0]}***@${domain}`;
+  return `${local[0]}${local[1]}***@${domain}`;
+}
 
 export default router;

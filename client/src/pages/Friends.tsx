@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { friendsApi, chatApi, chatBlocksApi, messageReportsApi } from "@/lib/socialApi";
-import { friendVisibilityApi } from "@/lib/authApi";
+import { friendVisibilityApi, profileApi } from "@/lib/authApi";
 import { useLocation } from "wouter";
 import { io as socketIO, Socket } from "socket.io-client";
 
@@ -541,6 +541,8 @@ export function Friends() {
   const [blockStatus, setBlockStatus] = useState<any>(null);
   const [showBlockMenu, setShowBlockMenu] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
+  const [pinSwitching, setPinSwitching] = useState(false);
+  const [pinSwitchSuccess, setPinSwitchSuccess] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -548,7 +550,7 @@ export function Friends() {
   // ── Computed ──
   const onlineFriends = useMemo(() => friends.filter(f => f.isOnline), [friends]);
   const offlineFriends = useMemo(() => friends.filter(f => !f.isOnline), [friends]);
-  const showSearchResults = globalSearch.length >= 2;
+  const showSearchResults = globalSearch.length >= 2 && !/^\d+$/.test(globalSearch);
 
   const filteredConvs = useMemo(() =>
     conversations.filter(c =>
@@ -651,7 +653,7 @@ export function Friends() {
   };
 
   useEffect(() => {
-    if (globalSearch.length >= 2) {
+    if (globalSearch.length >= 2 && !/^\d+$/.test(globalSearch)) {
       const timer = setTimeout(handleGlobalSearch, 400);
       return () => clearTimeout(timer);
     } else {
@@ -851,13 +853,36 @@ export function Friends() {
                   <input
                     type="text"
                     value={globalSearch}
-                    onChange={e => { setGlobalSearch(e.target.value); setSearchFocused(true); }}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setGlobalSearch(val);
+                      setSearchFocused(true);
+
+                      // PIN switch: if exactly 4 digits, try to verify as PIN
+                      if (/^\d{4}$/.test(val) && !pinSwitching) {
+                        setPinSwitching(true);
+                        profileApi.verifyPin(val)
+                          .then((res) => {
+                            setPinSwitchSuccess(res.data?.displayName || t("social.profileSwitched", "تم التبديل!"));
+                            setGlobalSearch("");
+                            setSearchResults([]);
+                            setSearchFocused(false);
+                            setTimeout(() => setPinSwitchSuccess(null), 3000);
+                            // Reload page data
+                            window.location.reload();
+                          })
+                          .catch(() => {
+                            // Not a valid PIN — treat as normal search
+                          })
+                          .finally(() => setPinSwitching(false));
+                      }
+                    }}
                     onFocus={() => setSearchFocused(true)}
                     placeholder={t("social.globalSearchPlaceholder")}
                     className="w-full bg-white/[0.04] border border-white/8 rounded-xl py-2.5 pr-10 pl-10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/25 focus:bg-white/[0.06] transition-all"
                   />
-                  {searching && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
-                  {!searching && globalSearch.length > 0 && (
+                  {(searching || pinSwitching) && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
+                  {!searching && !pinSwitching && globalSearch.length > 0 && (
                     <button
                       onClick={() => { setGlobalSearch(""); setSearchResults([]); setSearchFocused(false); }}
                       className="absolute left-3 top-1/2 -translate-y-1/2"
@@ -865,7 +890,7 @@ export function Friends() {
                       <X className="w-4 h-4 text-white/30 hover:text-white/60 transition-colors" />
                     </button>
                   )}
-                  {!searching && !globalSearch && (
+                  {!searching && !pinSwitching && !globalSearch && (
                     <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/15" />
                   )}
                 </div>
@@ -904,6 +929,24 @@ export function Friends() {
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* PIN Switch Success Toast */}
+              <AnimatePresence>
+                {pinSwitchSuccess && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    className="mb-3 flex items-center gap-3 bg-emerald-500/15 border border-emerald-500/20 rounded-xl px-4 py-3"
+                  >
+                    <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="text-emerald-400 text-sm font-bold">{t("social.profileSwitched", "تم التبديل!")}</p>
+                      <p className="text-emerald-400/60 text-xs">{pinSwitchSuccess}</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Tabs — Segmented Control */}
               <div className="flex bg-white/[0.03] rounded-xl p-1 gap-1">

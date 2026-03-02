@@ -9,7 +9,7 @@ export function PinEntry() {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [, setLocation] = useLocation();
-  const [pin, setPin] = useState(["", "", "", "", "", ""]);
+  const [pin, setPin] = useState(["", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
@@ -27,9 +27,9 @@ export function PinEntry() {
       next?.focus();
     }
 
-    // Auto-submit when all digits entered (4-6 digits)
+    // Auto-submit when all 4 digits entered
     const fullPin = newPin.join("");
-    if (fullPin.length >= 4 && newPin.every(d => d !== "")) {
+    if (fullPin.length === 4 && newPin.every(d => d !== "")) {
       handleVerifyPin(fullPin);
     }
   };
@@ -51,7 +51,7 @@ export function PinEntry() {
       setError(err?.message || t("pin.error", "رمز PIN غير صحيح"));
       setShake(true);
       setTimeout(() => setShake(false), 500);
-      setPin(["", "", "", "", "", ""]);
+      setPin(["", "", "", ""]);
       // Focus first input
       setTimeout(() => document.getElementById("pin-0")?.focus(), 100);
     } finally {
@@ -61,7 +61,7 @@ export function PinEntry() {
 
   const handleManualSubmit = () => {
     const pinStr = pin.join("");
-    if (pinStr.length >= 4) {
+    if (pinStr.length === 4) {
       handleVerifyPin(pinStr);
     }
   };
@@ -94,7 +94,7 @@ export function PinEntry() {
 
         <h2 className="text-2xl font-black text-white mb-2">{t("pin.title", "أدخل رمز PIN")}</h2>
         <p className="text-white/60 text-sm mb-8">
-          {t("pin.subtitle", "أدخل رمز PIN الخاص بك لفتح ملفك الشخصي")}
+          {t("pin.subtitle", "أدخل رمز PIN المكون من 4 أرقام لفتح ملفك الشخصي")}
         </p>
 
         {/* PIN Input */}
@@ -130,7 +130,7 @@ export function PinEntry() {
         {/* Submit Button */}
         <button
           onClick={handleManualSubmit}
-          disabled={loading || pin.join("").length < 4}
+          disabled={loading || pin.join("").length !== 4}
           className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-all flex items-center justify-center gap-2 mb-4"
         >
           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
@@ -139,7 +139,7 @@ export function PinEntry() {
 
         {/* Info text */}
         <p className="text-white/30 text-xs mb-4">
-          {t("pin.hint", "كل رمز PIN يفتح ملف شخصي مختلف")}
+          {t("pin.hint", "كل رمز PIN من 4 أرقام يفتح ملف شخصي مختلف")}
         </p>
 
         {/* Logout */}

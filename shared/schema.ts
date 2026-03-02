@@ -790,7 +790,7 @@ export const userProfiles = pgTable(
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     userId: varchar("user_id").notNull(),
     profileIndex: integer("profile_index").notNull(), // 1 or 2
-    pinHash: text("pin_hash").notNull(), // bcrypt hash of 4-6 digit PIN
+    pinHash: text("pin_hash").notNull(), // bcrypt hash of 4-digit PIN
     displayName: text("display_name"),
     avatar: text("avatar"),
     bio: text("bio"),
@@ -833,7 +833,7 @@ export type FriendProfileVisibility = typeof friendProfileVisibility.$inferSelec
 
 // ── PIN & Profile Schemas ──
 export const setupPinSchema = z.object({
-  pin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+  pin: z.string().length(4).regex(/^\d{4}$/, "PIN must be exactly 4 digits"),
   profileIndex: z.number().int().min(1).max(2),
   displayName: z.string().min(1).max(100).trim(),
   bio: z.string().max(500).optional(),
@@ -842,7 +842,7 @@ export const setupPinSchema = z.object({
 });
 
 export const verifyPinSchema = z.object({
-  pin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+  pin: z.string().length(4).regex(/^\d{4}$/, "PIN must be exactly 4 digits"),
 });
 
 export const updateProfileSchema = z.object({

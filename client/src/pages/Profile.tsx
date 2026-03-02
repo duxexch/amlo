@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, User, Bell, Shield, LogOut, Camera, ShieldCheck, ChevronDown,
   Copy, Share2, Users, Gift, Clock, Heart, Star, Check, X, Eye, EyeOff,
   Smartphone, Mail, Globe, Calendar, MapPin, Link2, Key,
   Monitor, Trash2, Download, Palette, MessageSquare, Phone,
-  Crown, Award, Zap, Pencil
+  Crown, Award, Zap, Pencil, Lock, Plus, RefreshCw
 } from "lucide-react";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
 import { Link } from "wouter";
+import { profileApi } from "@/lib/authApi";
+import { PinSetup } from "@/pages/PinSetup";
 
 // Mock user data
 const mockUser = {
@@ -176,6 +178,73 @@ export function Profile() {
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [notifications, setNotifications] = useState(user.notifications);
   const [saving, setSaving] = useState(false);
+
+  // PIN management state
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(true);
+  const [showPinSetup, setShowPinSetup] = useState<number | null>(null); // profileIndex to create
+  const [changingPin, setChangingPin] = useState<number | null>(null);
+  const [changePinForm, setChangePinForm] = useState({ current: "", newPin: "", confirm: "" });
+  const [changePinError, setChangePinError] = useState<string | null>(null);
+  const [changePinLoading, setChangePinLoading] = useState(false);
+  const [deletingProfile, setDeletingProfile] = useState<number | null>(null);
+
+  // Load profiles on mount
+  useEffect(() => {
+    (async () => {
+      setLoadingProfiles(true);
+      try {
+        const res = await profileApi.getProfiles();
+        setProfiles(res.data || []);
+      } catch {
+        setProfiles([]);
+      } finally {
+        setLoadingProfiles(false);
+      }
+    })();
+  }, []);
+
+  const handleChangePin = async (profileIndex: number) => {
+    if (!/^\d{4}$/.test(changePinForm.newPin)) {
+      setChangePinError(t("pinSetup.pinExact4", "رمز PIN يجب أن يكون 4 أرقام بالضبط"));
+      return;
+    }
+    if (changePinForm.newPin !== changePinForm.confirm) {
+      setChangePinError(t("pinSetup.pinMismatch", "رمز PIN غير متطابق"));
+      return;
+    }
+    setChangePinLoading(true);
+    setChangePinError(null);
+    try {
+      await profileApi.changePin(profileIndex, changePinForm.current, changePinForm.newPin);
+      setChangingPin(null);
+      setChangePinForm({ current: "", newPin: "", confirm: "" });
+    } catch (err: any) {
+      setChangePinError(err?.message || t("pinSetup.error", "حدث خطأ"));
+    } finally {
+      setChangePinLoading(false);
+    }
+  };
+
+  const handleDeleteProfile = async (index: number) => {
+    setDeletingProfile(index);
+    try {
+      await profileApi.deleteProfile(index);
+      setProfiles(prev => prev.filter(p => p.profileIndex !== index));
+    } catch (err: any) {
+      alert(err?.message || t("pinSetup.error", "حدث خطأ"));
+    } finally {
+      setDeletingProfile(null);
+    }
+  };
+
+  const handlePinSetupSuccess = async () => {
+    setShowPinSetup(null);
+    try {
+      const res = await profileApi.getProfiles();
+      setProfiles(res.data || []);
+    } catch {}
+  };
 
   const startEdit = (field: string, value: string) => {
     setEditing(field);
@@ -515,6 +584,162 @@ export function Profile() {
                 ))}
               </div>
             </div>
+          </div>
+        </ExpandableSection>
+
+        {/* PIN & Profiles Management */}
+        <ExpandableSection icon={Lock} title={t("profile.pinProfiles", "رمز PIN والحسابات")} desc={t("profile.pinProfilesDesc", "إدارة رمز PIN والملفات الشخصية")}>
+          <div className="space-y-4">
+            {loadingProfiles ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : showPinSetup !== null ? (
+              /* Embedded PinSetup form */
+              <div className="border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                <PinSetup
+                  profileIndex={showPinSetup}
+                  isSecondProfile={showPinSetup === 2}
+                  onSuccess={handlePinSetupSuccess}
+                  onBack={() => setShowPinSetup(null)}
+                />
+              </div>
+            ) : (
+              <>
+                {/* Existing profiles */}
+                {profiles.map((profile) => (
+                  <div key={profile.profileIndex} className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold ${
+                          profile.profileIndex === 1 ? "bg-blue-500/20 text-blue-400" : "bg-purple-500/20 text-purple-400"
+                        }`}>
+                          {profile.profileIndex}
+                        </span>
+                        <div>
+                          <p className="text-white font-bold text-sm">{profile.displayName || t("profile.unnamed", "بدون اسم")}</p>
+                          <p className="text-white/40 text-xs">{t("pinSetup.profileNum", "ملف شخصي")} #{profile.profileIndex}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setChangingPin(profile.profileIndex); setChangePinForm({ current: "", newPin: "", confirm: "" }); setChangePinError(null); }}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-all flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          {t("profile.changePin", "تغيير PIN")}
+                        </button>
+                        {/* Only allow deleting profile 2, or profile 1 if no profile 2 */}
+                        {(profile.profileIndex === 2 || (profile.profileIndex === 1 && profiles.length === 1)) && (
+                          <button
+                            onClick={() => handleDeleteProfile(profile.profileIndex)}
+                            disabled={deletingProfile === profile.profileIndex}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-all flex items-center gap-1 disabled:opacity-50"
+                          >
+                            {deletingProfile === profile.profileIndex ? (
+                              <div className="w-3 h-3 border-2 border-destructive border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3 h-3" />
+                            )}
+                            {t("common.delete", "حذف")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Change PIN form */}
+                    <AnimatePresence>
+                      {changingPin === profile.profileIndex && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="border-t border-white/10 pt-3 space-y-3">
+                            {changePinError && (
+                              <p className="text-destructive text-xs font-medium bg-destructive/10 px-3 py-2 rounded-lg">{changePinError}</p>
+                            )}
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={changePinForm.current}
+                              onChange={e => setChangePinForm({ ...changePinForm, current: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary text-center tracking-[0.3em]"
+                              placeholder={t("profile.currentPin", "رمز PIN الحالي")}
+                              dir="ltr"
+                            />
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={changePinForm.newPin}
+                              onChange={e => setChangePinForm({ ...changePinForm, newPin: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary text-center tracking-[0.3em]"
+                              placeholder={t("profile.newPin", "رمز PIN الجديد (4 أرقام)")}
+                              dir="ltr"
+                            />
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={changePinForm.confirm}
+                              onChange={e => setChangePinForm({ ...changePinForm, confirm: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary text-center tracking-[0.3em]"
+                              placeholder={t("profile.confirmNewPin", "تأكيد رمز PIN الجديد")}
+                              dir="ltr"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleChangePin(profile.profileIndex)}
+                                disabled={changePinLoading || changePinForm.current.length !== 4 || changePinForm.newPin.length !== 4 || changePinForm.confirm.length !== 4}
+                                className="flex-1 py-2.5 rounded-xl bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
+                              >
+                                {changePinLoading ? t("common.saving", "جاري الحفظ...") : t("common.save", "حفظ")}
+                              </button>
+                              <button
+                                onClick={() => { setChangingPin(null); setChangePinError(null); }}
+                                className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/50 font-bold text-sm hover:bg-white/10 transition-all"
+                              >
+                                {t("common.cancel", "إلغاء")}
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))}
+
+                {/* Create profile buttons */}
+                {profiles.length === 0 && (
+                  <button
+                    onClick={() => setShowPinSetup(1)}
+                    className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl bg-primary/10 border-2 border-dashed border-primary/30 text-primary font-bold hover:bg-primary/20 transition-all"
+                  >
+                    <Plus className="w-5 h-5" />
+                    {t("profile.createPin", "إنشاء رمز PIN")}
+                  </button>
+                )}
+
+                {profiles.length === 1 && (
+                  <button
+                    onClick={() => setShowPinSetup(2)}
+                    className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl bg-purple-500/10 border-2 border-dashed border-purple-500/30 text-purple-400 font-bold hover:bg-purple-500/20 transition-all"
+                  >
+                    <Plus className="w-5 h-5" />
+                    {t("profile.createSecondProfile", "إضافة حساب ثاني")}
+                  </button>
+                )}
+
+                {profiles.length >= 1 && (
+                  <p className="text-white/30 text-xs text-center">
+                    {t("profile.pinHint", "يمكنك التبديل بين الحسابات بكتابة رمز PIN في مربع البحث في الأصدقاء")}
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </ExpandableSection>
 
