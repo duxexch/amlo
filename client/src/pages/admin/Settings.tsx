@@ -6,7 +6,7 @@ import {
   Smartphone, Mail, MessageSquare, ImageIcon, Link2, ChevronDown,
   ChevronUp, ExternalLink, Copy, Plus, Trash2, AlertCircle, Radio,
   GripVertical, X, UserCheck, Video, Bell, MousePointerClick, Coins,
-  Phone, Navigation, MapPin
+  Phone, Navigation, MapPin, Download, Link as LinkIcon, Info
 } from "lucide-react";
 import { adminSettings, adminFeatured, adminAnnouncementPopup } from "@/lib/adminApi";
 import { worldAdminApi } from "@/lib/worldApi";
@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next";
 // TYPES
 // ══════════════════════════════════════════════════════════
 
-type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing";
+type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload";
 
 interface TabConfig {
   id: TabId;
@@ -1616,6 +1616,186 @@ function WorldPricingTab() {
 }
 
 // ══════════════════════════════════════════════════════════
+// TAB: APP DOWNLOAD (تحميل التطبيق)
+// ══════════════════════════════════════════════════════════
+
+interface AppDownloadForm {
+  enabled: boolean;
+  domain: string;
+  pwa: { enabled: boolean; url: string; extension: string; description: string };
+  apk: { enabled: boolean; url: string; extension: string; description: string };
+  aab: { enabled: boolean; url: string; extension: string; description: string };
+}
+
+const defaultAppDownload: AppDownloadForm = {
+  enabled: false,
+  domain: "https://aplo.app",
+  pwa: { enabled: true, url: "", extension: "/", description: "" },
+  apk: { enabled: false, url: "", extension: "/download/aplo.apk", description: "" },
+  aab: { enabled: false, url: "", extension: "/download/aplo.aab", description: "" },
+};
+
+function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+  const { t } = useTranslation();
+  const [form, setForm] = useState<AppDownloadForm>(defaultAppDownload);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { if (data) setForm({ ...defaultAppDownload, ...data }); }, [data]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try { await onSave(form); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  const updateVersion = (key: "pwa" | "apk" | "aab", field: string, val: any) => {
+    setForm(prev => ({
+      ...prev,
+      [key]: { ...prev[key], [field]: val },
+    }));
+  };
+
+  const versionConfigs: { key: "pwa" | "apk" | "aab"; icon: React.ElementType; color: string; bg: string }[] = [
+    { key: "pwa", icon: Globe, color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/20" },
+    { key: "apk", icon: Smartphone, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20" },
+    { key: "aab", icon: Store, color: "text-orange-400", bg: "bg-orange-400/10 border-orange-400/20" },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* Master Toggle */}
+      <SectionCard title={t("admin.settings.appDownload.sectionTitle")} icon={Download}>
+        <ToggleField
+          label={t("admin.settings.appDownload.enableSection")}
+          description={t("admin.settings.appDownload.enableSectionDesc")}
+          checked={form.enabled}
+          onChange={(v) => setForm(prev => ({ ...prev, enabled: v }))}
+        />
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-white/50">{t("admin.settings.appDownload.domain")}</label>
+          <input
+            type="url"
+            className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors font-mono"
+            value={form.domain}
+            onChange={(e) => setForm(prev => ({ ...prev, domain: e.target.value }))}
+            placeholder="https://aplo.app"
+            dir="ltr"
+          />
+          <p className="text-[11px] text-white/30 flex items-center gap-1.5 mt-1">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            {t("admin.settings.appDownload.domainHint")}
+          </p>
+        </div>
+      </SectionCard>
+
+      {/* Version Cards */}
+      {versionConfigs.map(({ key, icon: Icon, color, bg }) => (
+        <SectionCard
+          key={key}
+          title={t(`admin.settings.appDownload.${key}.title`)}
+          icon={Icon}
+          collapsible
+          defaultOpen={form[key].enabled}
+        >
+          <ToggleField
+            label={t(`admin.settings.appDownload.${key}.enable`)}
+            description={t(`admin.settings.appDownload.${key}.enableDesc`)}
+            checked={form[key].enabled}
+            onChange={(v) => updateVersion(key, "enabled", v)}
+          />
+
+          {form[key].enabled && (
+            <div className="space-y-4 pt-2">
+              {/* Extension / Path */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-white/50">{t("admin.settings.appDownload.extension")}</label>
+                <div className="flex items-center gap-0 bg-white/5 border border-white/10 rounded-xl overflow-hidden" dir="ltr">
+                  <span className="px-3 py-2.5 text-xs text-white/30 bg-white/5 border-e border-white/10 shrink-0 font-mono">
+                    {form.domain}
+                  </span>
+                  <input
+                    type="text"
+                    className="flex-1 bg-transparent h-10 px-3 text-sm text-white font-mono focus:outline-none"
+                    value={form[key].extension}
+                    onChange={(e) => updateVersion(key, "extension", e.target.value)}
+                    placeholder="/"
+                    dir="ltr"
+                  />
+                </div>
+                <p className="text-[11px] text-white/30">
+                  {t("admin.settings.appDownload.fullUrl")}: <code className="text-primary/60 font-mono">{form.domain}{form[key].extension}</code>
+                </p>
+              </div>
+
+              {/* Direct Download URL */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-white/50">{t("admin.settings.appDownload.directUrl")}</label>
+                <div className="flex bg-white/5 border border-white/10 rounded-xl overflow-hidden group hover:border-primary/30 transition-colors" dir="ltr">
+                  <div className="px-3 flex items-center justify-center bg-white/5 border-e border-white/10">
+                    <LinkIcon className="w-4 h-4 text-white/30" />
+                  </div>
+                  <input
+                    type="url"
+                    className="flex-1 bg-transparent h-10 px-3 text-sm text-white font-mono focus:outline-none placeholder:text-white/15"
+                    value={form[key].url}
+                    onChange={(e) => updateVersion(key, "url", e.target.value)}
+                    placeholder={`https://aplo.app${form[key].extension}`}
+                    dir="ltr"
+                  />
+                </div>
+                <p className="text-[11px] text-white/30">
+                  {t("admin.settings.appDownload.directUrlHint")}
+                </p>
+              </div>
+
+              {/* Description */}
+              <InputField
+                label={t("admin.settings.appDownload.description")}
+                value={form[key].description}
+                onChange={(v) => updateVersion(key, "description", v)}
+                placeholder={t(`admin.settings.appDownload.${key}.descPlaceholder`)}
+                dir="rtl"
+              />
+
+              {/* Preview Badge */}
+              <div className="mt-3 p-4 bg-black/40 rounded-xl border border-white/5">
+                <p className="text-[11px] text-white/30 mb-3">{t("admin.settings.appDownload.preview")}</p>
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center border ${bg}`}>
+                    <Icon className={`w-5 h-5 ${color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-white">{t(`admin.settings.appDownload.${key}.title`)}</p>
+                    <p className="text-xs text-white/40 truncate mt-0.5">
+                      {form[key].description || t(`admin.settings.appDownload.${key}.descPlaceholder`)}
+                    </p>
+                  </div>
+                  <a
+                    href={form[key].url || `${form.domain}${form[key].extension}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${bg} ${color} hover:opacity-80`}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {t("admin.settings.appDownload.downloadBtn")}
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      ))}
+
+      {/* Save */}
+      <SaveButton saving={saving} saved={saved} onClick={handleSave} label={t("admin.settings.save")} />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
 // MAIN SETTINGS PAGE
 // ══════════════════════════════════════════════════════════
 
@@ -1632,6 +1812,7 @@ const TABS: TabConfig[] = [
   { id: "pricing", icon: Coins, labelKey: "admin.settings.tabs.pricing" },
   { id: "milesPricing", icon: Navigation, labelKey: "admin.settings.tabs.milesPricing" },
   { id: "worldPricing", icon: Globe, labelKey: "admin.settings.tabs.worldPricing" },
+  { id: "appDownload", icon: Download, labelKey: "admin.settings.tabs.appDownload" },
 ];
 
 export function SettingsPage() {
@@ -1658,6 +1839,7 @@ export function SettingsPage() {
   const handleSaveBranding = async (d: any) => { const res = await adminSettings.updateBranding(d); if (res.success) setData((prev: any) => ({ ...prev, branding: res.data })); };
   const handleSaveSeoTexts = async (d: any) => { const res = await adminSettings.updateSeoTexts(d); if (res.success) setData((prev: any) => ({ ...prev, seoTexts: res.data })); };
   const handleSavePolicies = async (docKey: string, d: any) => { const res = await adminSettings.updatePolicies(docKey, d); if (res.success) setData((prev: any) => ({ ...prev, policies: res.data })); };
+  const handleSaveAppDownload = async (d: any) => { const res = await adminSettings.updateAppDownload(d); if (res.success) setData((prev: any) => ({ ...prev, appDownload: res.data })); };
 
   return (
     <div className="space-y-6">
@@ -1724,6 +1906,7 @@ export function SettingsPage() {
             {activeTab === "pricing" && <PricingTab />}
             {activeTab === "milesPricing" && <MilesPricingTab />}
             {activeTab === "worldPricing" && <WorldPricingTab />}
+            {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} />}
           </motion.div>
         </AnimatePresence>
       )}

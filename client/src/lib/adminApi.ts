@@ -433,6 +433,9 @@ export const adminSettings = {
 
   updatePolicies: (documentKey: string, data: Record<string, any>) =>
     request("/settings/policies", { method: "PUT", body: JSON.stringify({ documentKey, ...data }) }),
+
+  updateAppDownload: (data: Record<string, any>) =>
+    request("/settings/app-download", { method: "PUT", body: JSON.stringify(data) }),
 };
 
 // ── Payment Methods ──────────────────────────────────────

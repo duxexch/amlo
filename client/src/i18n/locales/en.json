@@ -380,7 +380,40 @@
         "popup": "Announcement Popup",
         "pricing": "Call Pricing",
         "milesPricing": "Miles Pricing",
-        "worldPricing": "World Pricing"
+        "worldPricing": "World Pricing",
+        "appDownload": "App Download"
+      },
+      "appDownload": {
+        "sectionTitle": "App Download Settings",
+        "enableSection": "Enable Download Section",
+        "enableSectionDesc": "When enabled, the app download section will be visible to users",
+        "domain": "Primary Domain",
+        "domainHint": "Enter the primary domain. The extension path will be appended to form the full download URL",
+        "extension": "Extension (Path)",
+        "fullUrl": "Full URL",
+        "directUrl": "Direct Download URL (optional)",
+        "directUrlHint": "If you have an external download link different from the domain, enter it here",
+        "description": "Version Description",
+        "preview": "Preview — how it will appear to users",
+        "downloadBtn": "Download",
+        "pwa": {
+          "title": "PWA (Web App)",
+          "enable": "Enable PWA version",
+          "enableDesc": "Progressive Web App — works directly from the browser without download",
+          "descPlaceholder": "Web version — works directly from the browser"
+        },
+        "apk": {
+          "title": "APK (Android)",
+          "enable": "Enable APK version",
+          "enableDesc": "APK file for direct installation on Android devices",
+          "descPlaceholder": "APK file — for direct install on Android devices"
+        },
+        "aab": {
+          "title": "AAB (Google Store)",
+          "enable": "Enable AAB version",
+          "enableDesc": "AAB file for uploading to Google Play Store",
+          "descPlaceholder": "AAB file — for uploading to Google Play Store"
+        }
       },
       "seo": {
         "metaTags": "Meta Tags",

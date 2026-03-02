@@ -1611,6 +1611,28 @@ const advancedSettings: Record<string, any> = {
       lastUpdated: new Date().toISOString(),
     },
   },
+  appDownload: {
+    enabled: false,
+    domain: "https://aplo.app",
+    pwa: {
+      enabled: true,
+      url: "",
+      extension: "/",
+      description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل",
+    },
+    apk: {
+      enabled: false,
+      url: "",
+      extension: "/download/aplo.apk",
+      description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد",
+    },
+    aab: {
+      enabled: false,
+      url: "",
+      extension: "/download/aplo.aab",
+      description: "ملف AAB — لرفعه على متجر جوجل بلاي",
+    },
+  },
 };
 
 router.get("/settings", requireAdmin, async (_req, res) => {
@@ -1717,6 +1739,24 @@ router.put("/settings/policies", requireAdmin, async (req, res) => {
   }
   await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "policies", `Document: ${documentKey}`);
   return res.json({ success: true, data: advancedSettings.policies });
+});
+
+router.put("/settings/app-download", requireAdmin, async (req, res) => {
+  const { enabled, domain, pwa, apk, aab } = req.body;
+  if (typeof enabled === "boolean") advancedSettings.appDownload.enabled = enabled;
+  if (typeof domain === "string") advancedSettings.appDownload.domain = domain;
+  for (const key of ["pwa", "apk", "aab"] as const) {
+    const incoming = req.body[key];
+    if (incoming && typeof incoming === "object") {
+      const target = advancedSettings.appDownload[key];
+      if (typeof incoming.enabled === "boolean") target.enabled = incoming.enabled;
+      if (typeof incoming.url === "string") target.url = incoming.url;
+      if (typeof incoming.extension === "string") target.extension = incoming.extension;
+      if (typeof incoming.description === "string") target.description = incoming.description;
+    }
+  }
+  await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "app-download", "App download settings updated");
+  return res.json({ success: true, data: advancedSettings.appDownload });
 });
 
 // ══════════════════════════════════════════════════════════
