@@ -1526,7 +1526,7 @@ router.patch("/reports/:id", requireAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════
 
 // In-memory advanced settings (grouped by category)
-const advancedSettings: Record<string, any> = {
+export const advancedSettings: Record<string, any> = {
   seo: {
     metaTitle: "Ablox — بث مباشر وهدايا",
     metaDescription: "Ablox — منصة البث المباشر العربية الأولى. شارك لحظاتك مع أصدقائك.",

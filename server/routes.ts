@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import adminRoutes, { mockAgentApplications, mockAgentAccounts, mockFeaturedStreams, mockAnnouncementPopup } from "./routes/admin";
+import adminRoutes, { mockAgentApplications, mockAgentAccounts, mockFeaturedStreams, mockAnnouncementPopup, advancedSettings } from "./routes/admin";
 import agentRoutes from "./routes/agent";
 import socialRoutes from "./routes/social";
 import adminChatRoutes from "./routes/adminChat";
@@ -159,6 +159,25 @@ export async function registerRoutes(
       return res.json({ success: true, data: null });
     }
     return res.json({ success: true, data: mockAnnouncementPopup });
+  });
+
+  // Public: Get app download settings (for user-facing download page)
+  app.get("/api/app-download", (_req, res) => {
+    const dl = advancedSettings.appDownload;
+    if (!dl || !dl.enabled) {
+      return res.json({ success: true, data: { enabled: false } });
+    }
+    // Return only public-safe data (no admin secrets)
+    return res.json({
+      success: true,
+      data: {
+        enabled: dl.enabled,
+        domain: dl.domain,
+        pwa: { enabled: dl.pwa.enabled, url: dl.pwa.url, extension: dl.pwa.extension, description: dl.pwa.description },
+        apk: { enabled: dl.apk.enabled, url: dl.apk.url, extension: dl.apk.extension, description: dl.apk.description },
+        aab: { enabled: dl.aab.enabled, url: dl.aab.url, extension: dl.aab.extension, description: dl.aab.description },
+      },
+    });
   });
 
   return httpServer;

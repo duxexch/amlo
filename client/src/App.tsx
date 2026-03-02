@@ -13,6 +13,8 @@ import { PinEntry } from "@/pages/PinEntry";
 import { PinSetup } from "@/pages/PinSetup";
 import { Profile } from "@/pages/Profile";
 import { Policy } from "@/pages/Policy";
+import { ResetPassword } from "@/pages/ResetPassword";
+import { DownloadPage } from "@/pages/Download";
 import { AgentApply } from "@/pages/AgentApply";
 import { AccountApply } from "@/pages/AccountApply";
 import { Friends } from "@/pages/Friends";
@@ -127,13 +129,15 @@ function Router() {
   if (location === "/auth") return <UserAuth />;
   if (location === "/pin") return <PinEntry />;
   if (location === "/pin-setup") return <PinSetup />;
+  if (location.startsWith("/reset-password")) return <ResetPassword />;
+  if (location === "/download") return <DownloadPage />;
   return isAdmin ? <AdminRouter /> : isAgent ? <AgentRouter /> : <UserRouter />;
 }
 
 function App() {
   const [incomingCall, setIncomingCall] = useState(false);
   const [location] = useLocation();
-  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup';
+  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
 
   return (
     <QueryClientProvider client={queryClient}>
