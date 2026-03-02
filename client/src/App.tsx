@@ -21,6 +21,7 @@ import { WorldExplore } from "@/pages/WorldExplore";
 import { LiveBroadcast } from "@/pages/LiveBroadcast";
 import { CallPopup } from "@/components/ui/CallPopup";
 import { AnnouncementPopup } from "@/components/ui/AnnouncementPopup";
+import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { useState, useEffect } from "react";
 
 // Admin Pages (separated module)
@@ -145,6 +146,7 @@ function App() {
           onDecline={() => setIncomingCall(false)} 
         />
         {isAppPage && <AnnouncementPopup />}
+        {isAppPage && <PWAInstallBanner />}
       </TooltipProvider>
     </QueryClientProvider>
   );

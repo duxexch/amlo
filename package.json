@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx server/seed.ts",
     "db:migrate": "drizzle-kit push && tsx server/seed.ts",
+    "pwa:icons": "node script/generate-icons.cjs",
     "test": "echo \"No tests configured\""
   },
   "dependencies": {
@@ -120,6 +121,7 @@
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
