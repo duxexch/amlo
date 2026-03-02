@@ -32,12 +32,12 @@ interface OtpConfig {
 
 // Default config from env
 let smtpConfig: SmtpConfig = {
-  host: process.env.SMTP_HOST || "smtp.titan.email",
+  host: process.env.SMTP_HOST || "smtp.hostinger.com",
   port: parseInt(process.env.SMTP_PORT || "465"),
   secure: (process.env.SMTP_SECURE ?? "true") === "true",
   user: process.env.SMTP_USER || "",
   pass: process.env.SMTP_PASS || "",
-  senderName: process.env.SMTP_SENDER_NAME || "Ablox",
+  senderName: process.env.SMTP_SENDER_NAME || "MRCO",
   senderEmail: process.env.SMTP_SENDER_EMAIL || process.env.SMTP_USER || "",
 };
 

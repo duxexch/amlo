@@ -19,6 +19,13 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-ablox_admin}:${POSTGRES_PASSWORD:-AbL0x_S3cur3_2026!}@postgres:5432/${POSTGRES_DB:-ablox}
       REDIS_URL: redis://:${REDIS_PASSWORD:-AbL0x_R3d1s_2026!}@redis:6379
+      SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-info@mrco.live}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-MRCO}
+      SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@mrco.live}
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:
