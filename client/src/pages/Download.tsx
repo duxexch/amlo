@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { Download as DownloadIcon, Smartphone, Globe, Package, ArrowRight, Shield, Zap, Star, ChevronLeft, Loader2 } from "lucide-react";
+import { Download as DownloadIcon, Smartphone, Globe, Package, ArrowRight, Shield, Zap, Star, ChevronLeft, Loader2, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface DownloadType {
@@ -26,6 +26,24 @@ export function DownloadPage() {
   const [settings, setSettings] = useState<DownloadSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [pwaInstalled, setPwaInstalled] = useState(false);
+  const deferredPromptRef = useRef<any>(null);
+
+  // Capture the beforeinstallprompt event for PWA install
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      deferredPromptRef.current = e;
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+
+    // Check if already installed as PWA
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setPwaInstalled(true);
+    }
+
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
 
   useEffect(() => {
     fetch("/api/app-download")
@@ -99,13 +117,40 @@ export function DownloadPage() {
     },
   ].filter((opt) => opt.data.enabled);
 
-  const handleDownload = (opt: DownloadType) => {
-    const url = opt.url || `${settings.domain}${opt.extension}`;
-    if (opt.extension === "/" && !opt.url) {
-      // PWA — go to home page
-      setLocation("/");
+  const handleDownload = async (opt: DownloadType, key: string) => {
+    if (key === "pwa") {
+      // Try native PWA install prompt first
+      if (deferredPromptRef.current) {
+        try {
+          await deferredPromptRef.current.prompt();
+          const result = await deferredPromptRef.current.userChoice;
+          if (result.outcome === "accepted") {
+            setPwaInstalled(true);
+          }
+          deferredPromptRef.current = null;
+        } catch {
+          // Fallback: open app in new tab
+          window.open(opt.url || `${settings!.domain}${opt.extension}`, "_blank", "noopener,noreferrer");
+        }
+      } else if (pwaInstalled) {
+        // Already installed
+        return;
+      } else {
+        // No install prompt available — open the app URL
+        const url = opt.url || `${settings!.domain}${opt.extension}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     } else {
-      window.open(url, "_blank", "noopener,noreferrer");
+      // APK / AAB — direct download
+      const url = opt.url || `${settings!.domain}${opt.extension}`;
+      // Use anchor download for direct file downloads
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = url.split("/").pop() || `ablox.${key}`;
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
   };
 
@@ -188,11 +233,21 @@ export function DownloadPage() {
                     {opt.data.description || t(`download.${opt.key}Desc`)}
                   </p>
                   <button
-                    onClick={() => handleDownload(opt.data)}
-                    className={`w-full py-2.5 rounded-xl bg-gradient-to-r ${opt.gradient} text-white font-bold text-sm flex items-center justify-center gap-2 hover:shadow-lg transition-all`}
+                    onClick={() => handleDownload(opt.data, opt.key)}
+                    disabled={opt.key === "pwa" && pwaInstalled}
+                    className={`w-full py-2.5 rounded-xl bg-gradient-to-r ${opt.gradient} text-white font-bold text-sm flex items-center justify-center gap-2 hover:shadow-lg transition-all ${opt.key === "pwa" && pwaInstalled ? "opacity-60 cursor-default" : ""}`}
                   >
-                    {opt.buttonText}
-                    <ArrowRight className="w-4 h-4" />
+                    {opt.key === "pwa" && pwaInstalled ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        {t("download.pwaInstalled")}
+                      </>
+                    ) : (
+                      <>
+                        {opt.buttonText}
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

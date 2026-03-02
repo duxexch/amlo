@@ -1628,7 +1628,7 @@ export const advancedSettings: Record<string, any> = {
     },
   },
   appDownload: {
-    enabled: false,
+    enabled: true,
     domain: "https://mrco.live",
     pwa: {
       enabled: true,

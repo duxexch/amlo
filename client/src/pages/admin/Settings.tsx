@@ -1628,7 +1628,7 @@ interface AppDownloadForm {
 }
 
 const defaultAppDownload: AppDownloadForm = {
-  enabled: false,
+  enabled: true,
   domain: "https://mrco.live",
   pwa: { enabled: true, url: "", extension: "/", description: "" },
   apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "" },
