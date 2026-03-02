@@ -6,6 +6,7 @@ import agentRoutes from "./routes/agent";
 import socialRoutes from "./routes/social";
 import adminChatRoutes from "./routes/adminChat";
 import worldRoutes from "./routes/world";
+import userAuthRoutes from "./routes/userAuth";
 import { createLogger } from "./logger";
 const log = (msg: string, _src?: string) => routesLog.info(msg);
 const routesLog = createLogger("routes");
@@ -31,6 +32,10 @@ export async function registerRoutes(
   // ── Social API (Friends, Chat, Calls) ──
   app.use("/api/social", socialRoutes);
   log("Social API routes registered at /api/social", "routes");
+
+  // ── User Auth & Profile API ──
+  app.use("/api/auth", userAuthRoutes);
+  log("User Auth routes registered at /api/auth", "routes");
 
   // ── World API (Around the World — حول العالم) ──
   app.use("/api/social/world", worldRoutes);

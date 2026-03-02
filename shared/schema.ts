@@ -780,3 +780,104 @@ export const worldMessageSchema = z.object({
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
 });
+
+// ════════════════════════════════════════════════════════════
+// 23. USER_PROFILES — الملفات الشخصية المزدوجة (2 بروفايل لكل مستخدم)
+// ════════════════════════════════════════════════════════════
+export const userProfiles = pgTable(
+  "user_profiles",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(),
+    profileIndex: integer("profile_index").notNull(), // 1 or 2
+    pinHash: text("pin_hash").notNull(), // bcrypt hash of 4-6 digit PIN
+    displayName: text("display_name"),
+    avatar: text("avatar"),
+    bio: text("bio"),
+    gender: text("gender"), // male | female | other
+    country: text("country"),
+    birthDate: date("birth_date"),
+    isDefault: boolean("is_default").notNull().default(false), // first profile is default
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("user_profiles_user_idx").on(table.userId),
+    index("user_profiles_user_index_idx").on(table.userId, table.profileIndex),
+  ],
+);
+
+export type UserProfile = typeof userProfiles.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 24. FRIEND_PROFILE_VISIBILITY — إعداد ظهور البروفايل لكل صديق
+// ════════════════════════════════════════════════════════════
+export const friendProfileVisibility = pgTable(
+  "friend_profile_visibility",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(), // owner
+    friendId: varchar("friend_id").notNull(), // friend who sees this profile
+    visibleProfileIndex: integer("visible_profile_index").notNull().default(1), // 1 or 2
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("fpv_user_idx").on(table.userId),
+    index("fpv_friend_idx").on(table.friendId),
+    index("fpv_user_friend_idx").on(table.userId, table.friendId),
+  ],
+);
+
+export type FriendProfileVisibility = typeof friendProfileVisibility.$inferSelect;
+
+// ── PIN & Profile Schemas ──
+export const setupPinSchema = z.object({
+  pin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+  profileIndex: z.number().int().min(1).max(2),
+  displayName: z.string().min(1).max(100).trim(),
+  bio: z.string().max(500).optional(),
+  gender: z.enum(["male", "female", "other"]).optional(),
+  country: z.string().max(100).optional(),
+});
+
+export const verifyPinSchema = z.object({
+  pin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+});
+
+export const updateProfileSchema = z.object({
+  displayName: z.string().min(1).max(100).trim().optional(),
+  avatar: z.string().max(2048).optional(),
+  bio: z.string().max(500).optional(),
+  gender: z.enum(["male", "female", "other"]).optional(),
+  country: z.string().max(100).optional(),
+  birthDate: z.string().max(20).optional(),
+});
+
+export const setFriendVisibilitySchema = z.object({
+  friendId: z.string().min(1).max(100),
+  visibleProfileIndex: z.number().int().min(1).max(2),
+});
+
+// ── User Auth Schemas ──
+export const userRegisterSchema = z.object({
+  username: z.string().min(3).max(50).trim().regex(/^[a-zA-Z0-9_]+$/, "Username: letters, numbers, underscore only"),
+  email: z.string().email().max(200),
+  password: z.string().min(6).max(200),
+  displayName: z.string().min(1).max(100).trim().optional(),
+  referralCode: z.string().max(50).optional(),
+});
+
+export const userLoginSchema = z.object({
+  login: z.string().min(2).max(200).trim(), // username or email
+  password: z.string().min(1).max(200),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email().max(200),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(10).max(200),
+  password: z.string().min(6).max(200),
+});

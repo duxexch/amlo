@@ -1,43 +1,89 @@
 /**
  * Redis connection & session store helper.
+ * Falls back gracefully when Redis is unavailable (local dev).
  */
 import { Redis } from "ioredis";
 import { RedisStore } from "connect-redis";
+import { createRequire } from "module";
 import { createLogger } from "./logger";
-const log = (msg: string, _src?: string) => redisLog.info(msg);
+
+const require = createRequire(import.meta.url);
 const redisLog = createLogger("redis");
 
 let redisClient: Redis | null = null;
 
 /**
- * Get or create Redis client.
- * Falls back gracefully if REDIS_URL is not set.
+ * Attach standard error/status handlers to any Redis client.
  */
-export function getRedis(): Redis | null {
+function attachHandlers(client: Redis, label = "redis") {
+  client.on("connect", () => redisLog.info(`[${label}] connected`));
+  client.on("ready", () => redisLog.info(`[${label}] ready`));
+  client.on("end", () => redisLog.info(`[${label}] connection closed`));
+  client.on("error", (err) => redisLog.warn(`[${label}] ${err.message}`));
+}
+
+/**
+ * Initialize Redis — tests real connectivity before returning.
+ * Returns the client if connected, null otherwise.
+ */
+export async function initRedis(): Promise<Redis | null> {
   if (redisClient) return redisClient;
 
   const url = process.env.REDIS_URL;
   if (!url) {
-    log("REDIS_URL not set — using MemoryStore fallback", "redis");
+    redisLog.info("REDIS_URL not set — running without Redis");
     return null;
   }
 
   try {
-    redisClient = new Redis(url, {
+    const client = new Redis(url, {
       maxRetriesPerRequest: 3,
       retryStrategy(times) {
-        if (times > 10) return null; // stop retrying
-        return Math.min(times * 200, 3000);
+        if (times > 5) {
+          redisLog.error("Redis retry limit reached — giving up");
+          return null;
+        }
+        return Math.min(times * 200, 2000);
       },
-      lazyConnect: false,
+      lazyConnect: true,
+      connectTimeout: 5000,
     });
 
-    redisClient.on("connect", () => log("Redis connected", "redis"));
-    redisClient.on("error", (err) => log(`Redis error: ${err.message}`, "redis"));
+    attachHandlers(client, "main");
 
+    // Test real connectivity with a timeout
+    await client.connect();
+    await client.ping();
+
+    redisClient = client;
+    redisLog.info("Redis connection verified (PING OK)");
     return redisClient;
   } catch (err: any) {
-    log(`Failed to create Redis client: ${err.message}`, "redis");
+    redisLog.warn(`Redis unavailable: ${err.message} — running without Redis`);
+    return null;
+  }
+}
+
+/**
+ * Get the existing Redis client (synchronous).
+ * Must call initRedis() first during startup.
+ */
+export function getRedis(): Redis | null {
+  return redisClient;
+}
+
+/**
+ * Create a duplicate Redis client with error handlers attached.
+ * Used for pub/sub in Socket.io adapter.
+ */
+export function createRedisDuplicate(label: string): Redis | null {
+  if (!redisClient) return null;
+  try {
+    const dup = redisClient.duplicate();
+    attachHandlers(dup, label);
+    return dup;
+  } catch (err: any) {
+    redisLog.warn(`Failed to duplicate Redis client [${label}]: ${err.message}`);
     return null;
   }
 }
@@ -71,7 +117,7 @@ export function createRedisSessionStore(session: any) {
   const redis = getRedis();
 
   if (redis) {
-    log("Using Redis session store", "redis");
+    redisLog.info("Using Redis session store");
     const wrapped = wrapIoredisForConnectRedis(redis);
     return new RedisStore({
       client: wrapped as any,
@@ -81,7 +127,7 @@ export function createRedisSessionStore(session: any) {
   }
 
   // Fallback to MemoryStore
-  log("Falling back to MemoryStore for sessions", "redis");
+  redisLog.info("Falling back to MemoryStore for sessions");
   const MemoryStore = require("memorystore")(session);
   return new MemoryStore({ checkPeriod: 86400000 });
 }
@@ -92,17 +138,25 @@ export function createRedisSessionStore(session: any) {
 export async function cacheGet(key: string): Promise<string | null> {
   const redis = getRedis();
   if (!redis) return null;
-  return redis.get(`aplo:cache:${key}`);
+  try {
+    return await redis.get(`aplo:cache:${key}`);
+  } catch {
+    return null;
+  }
 }
 
 export async function cacheSet(key: string, value: string, ttlSeconds = 300): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
-  await redis.setex(`aplo:cache:${key}`, ttlSeconds, value);
+  try {
+    await redis.setex(`aplo:cache:${key}`, ttlSeconds, value);
+  } catch { /* ignore */ }
 }
 
 export async function cacheDel(key: string): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
-  await redis.del(`aplo:cache:${key}`);
+  try {
+    await redis.del(`aplo:cache:${key}`);
+  } catch { /* ignore */ }
 }

@@ -15,7 +15,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
-import { createRedisSessionStore, getRedis } from "./redis";
+import { initRedis, createRedisSessionStore, getRedis, createRedisDuplicate } from "./redis";
 import { logger, createLogger } from "./logger";
 
 const serverLog = createLogger("server");
@@ -51,22 +51,7 @@ export const io = new SocketIOServer(httpServer, {
   },
 });
 
-// ── Attach Redis Adapter for horizontal scaling ──
-(async () => {
-  try {
-    const redis = getRedis();
-    if (redis) {
-      const pubClient = redis.duplicate();
-      const subClient = redis.duplicate();
-      io.adapter(createAdapter(pubClient, subClient));
-      console.log("[socket.io] Redis adapter attached — horizontal scaling enabled");
-    } else {
-      console.log("[socket.io] No Redis — using in-memory adapter (single node only)");
-    }
-  } catch (err) {
-    console.error("[socket.io] Redis adapter setup failed, using in-memory:", err);
-  }
-})();
+// Redis adapter is set up inside the main async startup below
 
 // ── Socket.io authentication middleware ──
 io.use((socket, next) => {
@@ -507,6 +492,28 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // ── Initialize Redis (test connectivity before using it) ──
+  await initRedis();
+
+  // ── Attach Redis Adapter for horizontal scaling ──
+  try {
+    const redis = getRedis();
+    if (redis) {
+      const pubClient = createRedisDuplicate("pub");
+      const subClient = createRedisDuplicate("sub");
+      if (pubClient && subClient) {
+        io.adapter(createAdapter(pubClient, subClient));
+        console.log("[socket.io] Redis adapter attached — horizontal scaling enabled");
+      } else {
+        console.log("[socket.io] Redis duplicate failed — using in-memory adapter");
+      }
+    } else {
+      console.log("[socket.io] No Redis — using in-memory adapter (single node only)");
+    }
+  } catch (err) {
+    console.error("[socket.io] Redis adapter setup failed, using in-memory:", err);
+  }
+
   // ── Health check endpoint (before route registration) ──
   app.get("/api/health", async (_req, res) => {
     const { isDatabaseConnected } = await import("./db");

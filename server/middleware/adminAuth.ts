@@ -11,6 +11,8 @@ declare module "express-session" {
     adminRole?: string;
     adminDisplayName?: string;
     userId?: string; // For regular user sessions (social/world)
+    activeProfileIndex?: number; // 1 or 2 — which dual profile is active
+    pinVerified?: boolean; // Whether PIN was verified after login
   }
 }
 

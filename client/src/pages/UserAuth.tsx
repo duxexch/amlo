@@ -3,6 +3,7 @@ import { Link, useLocation, useSearch } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { User, Mail, Lock, ArrowRight, AlertCircle, Gift, Phone, Eye, EyeOff, Check, ChevronLeft, X, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { authApi } from "../lib/authApi";
 
 // Social providers with brand colors
 const socialProviders = [
@@ -33,7 +34,14 @@ export function UserAuth() {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [, setLocation] = useLocation();
+
+  // Form state
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
 
   useEffect(() => {
     if (otpTimer > 0) {
@@ -45,22 +53,71 @@ export function UserAuth() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
+
     if (authMethod === "phone") {
       setShowOtp(true);
       setOtpTimer(60);
       return;
     }
-    // TODO: Wire up user auth API when backend endpoint is ready
+
     setAuthLoading(true);
     try {
-      // Simulate API call delay
-      await new Promise(r => setTimeout(r, 800));
-      setLocation("/");
+      if (isLogin) {
+        // Login
+        const result = await authApi.login({ login: email, password });
+        if (result.data.needsPinSetup) {
+          setLocation("/pin-setup");
+        } else if (result.data.needsPinVerify) {
+          setLocation("/pin");
+        } else {
+          setLocation("/");
+        }
+      } else {
+        // Register
+        if (!username.trim()) {
+          setAuthError(t("auth.usernameRequired", "يرجى إدخال اسم المستخدم"));
+          return;
+        }
+        const result = await authApi.register({
+          username: username.trim(),
+          email: email.trim(),
+          password,
+          displayName: username.trim(),
+          referralCode: refCode || undefined,
+        });
+        if (result.data.needsPinSetup) {
+          setLocation("/pin-setup");
+        } else {
+          setLocation("/");
+        }
+      }
     } catch (err: any) {
       setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthLoading(true);
+    try {
+      const result = await authApi.forgotPassword(forgotEmail.trim());
+      setAuthSuccess(result.message);
+    } catch (err: any) {
+      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSocialLogin = (provider: string) => {
+    // Social login — redirect to OAuth provider
+    // TODO: Implement OAuth flows for each provider in production
+    setAuthError(t("auth.socialComingSoon", `تسجيل الدخول عبر ${provider} قريباً`));
   };
 
   const handleOtpSubmit = () => {
@@ -170,16 +227,31 @@ export function UserAuth() {
             >
               <h2 className="text-2xl font-black text-white mb-2 text-center">{t("auth.forgotTitle")}</h2>
               <p className="text-white/60 text-center mb-8">{t("auth.forgotSubtitle")}</p>
-              <form className="space-y-6">
+              {authSuccess && (
+                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5 mb-4">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <p className="text-xs text-emerald-400 font-medium">{authSuccess}</p>
+                </motion.div>
+              )}
+              {authError && (
+                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5 mb-4">
+                  <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+                  <p className="text-xs text-destructive font-medium">{authError}</p>
+                </motion.div>
+              )}
+              <form onSubmit={handleForgotPassword} className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-bold text-white/80 mr-2">{t("auth.email")}</label>
                   <div className="relative group">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                    <input type="email" required className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder="name@example.com" />
+                    <input type="email" required value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder="name@example.com" />
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg">{t("auth.sendLink")}</button>
-                <button onClick={() => setShowForgot(false)} className="w-full text-white/40 text-sm hover:text-white transition-colors">{t("auth.backToLogin")}</button>
+                <button type="submit" disabled={authLoading} className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
+                  {authLoading && <Loader2 className="w-5 h-5 animate-spin" />}
+                  {t("auth.sendLink")}
+                </button>
+                <button type="button" onClick={() => { setShowForgot(false); setAuthError(null); setAuthSuccess(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors">{t("auth.backToLogin")}</button>
               </form>
             </motion.div>
           ) : (
@@ -229,7 +301,7 @@ export function UserAuth() {
                 {!isLogin && (
                   <div className="relative group">
                     <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                    <input type="text" required aria-label={t("auth.username")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.username")} />
+                    <input type="text" required value={username} onChange={e => setUsername(e.target.value)} aria-label={t("auth.username")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.username")} />
                   </div>
                 )}
 
@@ -238,11 +310,11 @@ export function UserAuth() {
                     <motion.div key="email-fields" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                       <div className="relative group">
                         <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type="email" required aria-label={t("auth.email")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.email")} />
+                        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} aria-label={t("auth.email")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.email")} />
                       </div>
                       <div className="relative group">
                         <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type={showPassword ? "text" : "password"} required aria-label={t("auth.password")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.password")} />
+                        <input type={showPassword ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)} aria-label={t("auth.password")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.password")} />
                         <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2">
                           {showPassword ? <EyeOff className="w-5 h-5 text-white/30" /> : <Eye className="w-5 h-5 text-white/30" />}
                         </button>
@@ -324,6 +396,7 @@ export function UserAuth() {
                 {socialProviders.map((provider) => (
                   <button
                     key={provider.key}
+                    onClick={() => handleSocialLogin(provider.name)}
                     className="flex items-center justify-center py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all group relative"
                     title={provider.name}
                   >

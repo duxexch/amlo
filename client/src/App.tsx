@@ -9,6 +9,8 @@ import { Home } from "@/pages/Home";
 import { Room } from "@/pages/Room";
 import { Wallet } from "@/pages/Wallet";
 import { UserAuth } from "@/pages/UserAuth";
+import { PinEntry } from "@/pages/PinEntry";
+import { PinSetup } from "@/pages/PinSetup";
 import { Profile } from "@/pages/Profile";
 import { Policy } from "@/pages/Policy";
 import { AgentApply } from "@/pages/AgentApply";
@@ -99,7 +101,6 @@ function UserRouter() {
         <Route path="/room" component={Room} />
         <Route path="/room/:id" component={Room} />
         <Route path="/wallet" component={Wallet} />
-        <Route path="/auth" component={UserAuth} />
         <Route path="/profile" component={Profile} />
         <Route path="/profile/:id" component={Profile} />
         <Route path="/friends" component={Friends} />
@@ -122,13 +123,16 @@ function Router() {
   if (isAgentApply) return <Route path="/agent-apply" component={AgentApply} />;
   if (isAccountApply) return <Route path="/account-apply" component={AccountApply} />;
   if (location === "/call") return <CallScreen />;
+  if (location === "/auth") return <UserAuth />;
+  if (location === "/pin") return <PinEntry />;
+  if (location === "/pin-setup") return <PinSetup />;
   return isAdmin ? <AdminRouter /> : isAgent ? <AgentRouter /> : <UserRouter />;
 }
 
 function App() {
   const [incomingCall, setIncomingCall] = useState(false);
   const [location] = useLocation();
-  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth';
+  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup';
 
   return (
     <QueryClientProvider client={queryClient}>
