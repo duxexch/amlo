@@ -31,6 +31,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 
+# Copy migration/schema files (needed for drizzle-kit push)
+COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+
 # Switch to non-root user
 USER ablox
 

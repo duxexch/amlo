@@ -62,7 +62,7 @@ if [ ! -f .env ]; then
   sed -i "s|ENCRYPTION_SECRET=CHANGE_ME_64_HEX_CHARS|ENCRYPTION_SECRET=${ENCRYPTION_SECRET}|g" .env
   sed -i "s|ADMIN_PASSWORD=CHANGE_ME_STRONG_PASSWORD|ADMIN_PASSWORD=${ADMIN_PASSWORD}|g" .env
   sed -i "s|NODE_ENV=development|NODE_ENV=production|g" .env
-  sed -i "s|DATABASE_URL=postgresql://ablox_admin:CHANGE_ME@localhost:5432/ablox|DATABASE_URL=postgresql://ablox_admin:${POSTGRES_PASSWORD}@pgbouncer:6432/ablox|g" .env
+  sed -i "s|DATABASE_URL=postgresql://ablox_admin:CHANGE_ME@localhost:5432/ablox|DATABASE_URL=postgresql://ablox_admin:${POSTGRES_PASSWORD}@postgres:5432/ablox|g" .env
   sed -i "s|REDIS_URL=redis://:CHANGE_ME@localhost:6379|REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379|g" .env
 
   log ".env created with auto-generated secrets"
