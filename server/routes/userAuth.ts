@@ -38,6 +38,7 @@ import {
   setFriendVisibilitySchema,
 } from "../../shared/schema";
 import { randomUUID, randomBytes } from "crypto";
+import { sendOtp, verifyOtp, sendPasswordResetEmail } from "../services/email";
 
 const router = Router();
 const authLog = createLogger("userAuth");
@@ -321,9 +322,15 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
       authLog.warn({ userId: user.id, token }, "Could not store reset token in Redis — token logged for manual recovery");
     }
 
-    // TODO: Send email with reset link in production
-    // For now, log the token (in production, integrate with email service like SendGrid/SES)
-    log(`Password reset requested for: ${email}, token: ${token.substring(0, 8)}...`);
+    // Send email with reset link
+    const domain = process.env.DOMAIN || "mrco.live";
+    const resetUrl = `https://${domain}/reset-password?token=${token}`;
+    const emailSent = await sendPasswordResetEmail(email, token, resetUrl);
+    if (!emailSent) {
+      log(`Password reset requested for: ${email}, token: ${token.substring(0, 8)}... (email not sent — SMTP not configured)`);
+    } else {
+      log(`Password reset email sent to: ${email}`);
+    }
 
     return res.json({
       success: true,
@@ -716,6 +723,92 @@ router.get("/friend-visibility", async (req: Request, res: Response) => {
   } catch (err: any) {
     authLog.error({ err }, "Get friend visibility error");
     return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// OTP — Email Verification (رمز التحقق بالبريد)
+// ════════════════════════════════════════════════════════════
+
+/**
+ * POST /auth/otp/send — Send OTP to email
+ */
+router.post("/otp/send", async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال بريد إلكتروني صالح" });
+    }
+
+    const result = await sendOtp(email.trim());
+    if (!result.success) {
+      return res.status(429).json(result);
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    authLog.error({ err }, "Send OTP error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في إرسال رمز التحقق" });
+  }
+});
+
+/**
+ * POST /auth/otp/verify — Verify OTP code
+ */
+router.post("/otp/verify", async (req: Request, res: Response) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال البريد والرمز" });
+    }
+
+    const result = await verifyOtp(email.trim(), String(code).trim());
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // If user exists, set email verified flag
+    const user = await storage.getUserByEmail(email.trim());
+    if (user) {
+      await storage.updateUser(user.id, { emailVerified: true } as any);
+      // If user is logged in, mark in session
+      if (req.session?.userId === user.id) {
+        (req.session as any).emailVerified = true;
+      }
+    }
+
+    return res.json({ success: true, message: "تم التحقق بنجاح", verified: true });
+  } catch (err: any) {
+    authLog.error({ err }, "Verify OTP error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في التحقق" });
+  }
+});
+
+/**
+ * POST /auth/otp/send-register — Send OTP for registration (no account required)
+ */
+router.post("/otp/send-register", async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال بريد إلكتروني صالح" });
+    }
+
+    // Check if email already registered
+    const existing = await storage.getUserByEmail(email.trim());
+    if (existing) {
+      return res.status(409).json({ success: false, message: "البريد الإلكتروني مستخدم بالفعل" });
+    }
+
+    const result = await sendOtp(email.trim());
+    if (!result.success) {
+      return res.status(429).json(result);
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    authLog.error({ err }, "Send register OTP error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في إرسال رمز التحقق" });
   }
 });
 

@@ -629,6 +629,10 @@ app.use((req, res, next) => {
   const { initMockAccountHashes } = await import("./routes/admin");
   await initMockAccountHashes();
 
+  // Initialize email/OTP service
+  const { initEmailService } = await import("./services/email");
+  initEmailService();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

@@ -54,6 +54,25 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ token, password }),
     }),
+
+  // OTP
+  sendOtp: (email: string) =>
+    request<{ success: boolean; message: string; cooldownSeconds?: number }>("/otp/send", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  sendRegisterOtp: (email: string) =>
+    request<{ success: boolean; message: string; cooldownSeconds?: number }>("/otp/send-register", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  verifyOtp: (email: string, code: string) =>
+    request<{ success: boolean; message: string; verified?: boolean }>("/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    }),
 };
 
 // ── PIN & Profiles ──

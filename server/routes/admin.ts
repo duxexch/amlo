@@ -17,6 +17,7 @@ import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => adminLog.info(msg);
 const adminLog = createLogger("admin");
 import { randomUUID } from "crypto";
+import { updateSmtpConfig, updateOtpConfig } from "../services/email";
 import {
   adminLoginSchema,
   createAgentSchema,
@@ -1560,16 +1561,31 @@ const advancedSettings: Record<string, any> = {
     huawei: { enabled: false, appId: "", appSecret: "" },
   },
   otp: {
-    provider: "twilio",
+    provider: "email",
     enabled: true,
-    twilioAccountSid: "",
-    twilioAuthToken: "",
-    twilioPhoneNumber: "",
-    firebaseEnabled: false,
-    codeLength: 6,
-    expiryMinutes: 5,
-    maxAttempts: 3,
-    cooldownMinutes: 1,
+    gmail: {
+      enabled: true,
+      host: process.env.SMTP_HOST || "smtp.titan.email",
+      port: parseInt(process.env.SMTP_PORT || "465"),
+      username: process.env.SMTP_USER || "",
+      password: process.env.SMTP_PASS || "",
+      senderName: process.env.SMTP_SENDER_NAME || "Ablox",
+      senderEmail: process.env.SMTP_SENDER_EMAIL || process.env.SMTP_USER || "",
+    },
+    sms: {
+      enabled: false,
+      provider: "twilio",
+      phoneNumber: "",
+      apiKey: "",
+      apiSecret: "",
+      senderId: "",
+    },
+    otpConfig: {
+      codeLength: 6,
+      expiryMinutes: 5,
+      maxAttempts: 5,
+      cooldownMinutes: 1,
+    },
   },
   branding: {
     appNameEn: "Ablox",
@@ -1677,10 +1693,13 @@ router.get("/settings/advanced", requireAdmin, (_req, res) => {
       }
     }
   }
-  // Mask OTP secrets
-  if (safe.otp) {
-    if (safe.otp.twilioAuthToken) safe.otp.twilioAuthToken = safe.otp.twilioAuthToken.slice(0, 4) + "••••••••";
-    if (safe.otp.twilioAccountSid && safe.otp.twilioAccountSid.length > 4) safe.otp.twilioAccountSid = safe.otp.twilioAccountSid.slice(0, 6) + "••••••••";
+  // Mask OTP/SMTP secrets
+  if (safe.otp?.gmail) {
+    if (safe.otp.gmail.password && safe.otp.gmail.password.length > 0) safe.otp.gmail.password = safe.otp.gmail.password.slice(0, 2) + "••••••••";
+  }
+  if (safe.otp?.sms) {
+    if (safe.otp.sms.apiKey && safe.otp.sms.apiKey.length > 0) safe.otp.sms.apiKey = safe.otp.sms.apiKey.slice(0, 4) + "••••••••";
+    if (safe.otp.sms.apiSecret && safe.otp.sms.apiSecret.length > 0) safe.otp.sms.apiSecret = safe.otp.sms.apiSecret.slice(0, 4) + "••••••••";
   }
   return res.json({ success: true, data: safe });
 });
@@ -1710,8 +1729,46 @@ router.put("/settings/social-login", requireAdmin, async (req, res) => {
 });
 
 router.put("/settings/otp", requireAdmin, async (req, res) => {
-  const allowed = ["provider", "enabled", "twilioAccountSid", "twilioAuthToken", "twilioPhoneNumber", "firebaseEnabled", "codeLength", "expiryMinutes", "maxAttempts", "cooldownMinutes"];
-  for (const k of allowed) { if (req.body[k] !== undefined) (advancedSettings.otp as any)[k] = req.body[k]; }
+  const { gmail, sms, otpConfig: otpCfg } = req.body;
+
+  // Update gmail/SMTP settings
+  if (gmail && typeof gmail === "object") {
+    const gmailAllowed = ["enabled", "host", "port", "username", "password", "senderName", "senderEmail"];
+    for (const k of gmailAllowed) {
+      if (gmail[k] !== undefined) (advancedSettings.otp as any).gmail[k] = gmail[k];
+    }
+    // Wire to email service
+    if (advancedSettings.otp.gmail.enabled) {
+      updateSmtpConfig({
+        host: advancedSettings.otp.gmail.host,
+        port: advancedSettings.otp.gmail.port,
+        user: advancedSettings.otp.gmail.username,
+        pass: advancedSettings.otp.gmail.password,
+        senderName: advancedSettings.otp.gmail.senderName,
+        senderEmail: advancedSettings.otp.gmail.senderEmail,
+        secure: advancedSettings.otp.gmail.port === 465,
+      });
+    }
+  }
+
+  // Update SMS settings
+  if (sms && typeof sms === "object") {
+    const smsAllowed = ["enabled", "provider", "phoneNumber", "apiKey", "apiSecret", "senderId"];
+    for (const k of smsAllowed) {
+      if (sms[k] !== undefined) (advancedSettings.otp as any).sms[k] = sms[k];
+    }
+  }
+
+  // Update OTP config
+  if (otpCfg && typeof otpCfg === "object") {
+    const cfgAllowed = ["codeLength", "expiryMinutes", "maxAttempts", "cooldownMinutes"];
+    for (const k of cfgAllowed) {
+      if (otpCfg[k] !== undefined) (advancedSettings.otp as any).otpConfig[k] = otpCfg[k];
+    }
+    // Wire to email service
+    updateOtpConfig(advancedSettings.otp.otpConfig);
+  }
+
   await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "otp", "OTP settings updated");
   return res.json({ success: true, data: advancedSettings.otp });
 });

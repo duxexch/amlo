@@ -29,6 +29,8 @@ export function UserAuth() {
   const [showOtp, setShowOtp] = useState(false);
   const [otpValues, setOtpValues] = useState(["", "", "", "", "", ""]);
   const [otpTimer, setOtpTimer] = useState(0);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpPurpose, setOtpPurpose] = useState<"register" | "login">("register");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -74,22 +76,26 @@ export function UserAuth() {
           setLocation("/");
         }
       } else {
-        // Register
+        // Register — send OTP first
         if (!username.trim()) {
           setAuthError(t("auth.usernameRequired", "يرجى إدخال اسم المستخدم"));
           return;
         }
-        const result = await authApi.register({
-          username: username.trim(),
-          email: email.trim(),
-          password,
-          displayName: username.trim(),
-          referralCode: refCode || undefined,
-        });
-        if (result.data.needsPinSetup) {
-          setLocation("/pin-setup");
+        if (!email.trim()) {
+          setAuthError(t("auth.emailRequired", "يرجى إدخال البريد الإلكتروني"));
+          return;
+        }
+        // Send OTP to email for verification
+        const otpResult = await authApi.sendRegisterOtp(email.trim());
+        if (otpResult.success) {
+          setOtpEmail(email.trim());
+          setOtpPurpose("register");
+          setShowOtp(true);
+          setOtpTimer(60);
+          setOtpValues(["", "", "", "", "", ""]);
+          setAuthSuccess(otpResult.message);
         } else {
-          setLocation("/");
+          setAuthError(otpResult.message);
         }
       }
     } catch (err: any) {
@@ -120,8 +126,43 @@ export function UserAuth() {
     setAuthError(t("auth.socialComingSoon", `تسجيل الدخول عبر ${provider} قريباً`));
   };
 
-  const handleOtpSubmit = () => {
-    setLocation("/");
+  const handleOtpSubmit = async () => {
+    const code = otpValues.join("");
+    if (code.length !== 6) return;
+
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      // Verify OTP
+      const verifyResult = await authApi.verifyOtp(otpEmail, code);
+      if (!verifyResult.success) {
+        setAuthError(verifyResult.message);
+        return;
+      }
+
+      if (otpPurpose === "register") {
+        // OTP verified — now register
+        const result = await authApi.register({
+          username: username.trim(),
+          email: email.trim(),
+          password,
+          displayName: username.trim(),
+          referralCode: refCode || undefined,
+        });
+        if (result.data.needsPinSetup) {
+          setLocation("/pin-setup");
+        } else {
+          setLocation("/");
+        }
+      } else {
+        // Login OTP verified
+        setLocation("/");
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -172,10 +213,18 @@ export function UserAuth() {
               className="text-center"
             >
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center mx-auto mb-6">
-                <Phone className="w-8 h-8 text-white" />
+                <Mail className="w-8 h-8 text-white" />
               </div>
               <h2 className="text-2xl font-black text-white mb-2">{t("auth.otpTitle")}</h2>
-              <p className="text-white/60 text-sm mb-8">{t("auth.otpSubtitle")}</p>
+              <p className="text-white/60 text-sm mb-4">{t("auth.otpSubtitle")}</p>
+              <p className="text-white/40 text-xs mb-6 font-mono" dir="ltr">{otpEmail}</p>
+
+              {authError && (
+                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5 mb-4">
+                  <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+                  <p className="text-xs text-destructive font-medium">{authError}</p>
+                </motion.div>
+              )}
 
               <div className="flex justify-center gap-3 mb-6" dir="ltr">
                 {otpValues.map((val, i) => (
@@ -195,9 +244,10 @@ export function UserAuth() {
 
               <button
                 onClick={handleOtpSubmit}
-                disabled={otpValues.some(v => !v)}
-                className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mb-4"
+                disabled={otpValues.some(v => !v) || authLoading}
+                className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mb-4 flex items-center justify-center gap-2"
               >
+                {authLoading && <Loader2 className="w-5 h-5 animate-spin" />}
                 {t("auth.verifyOtp")}
               </button>
 
@@ -205,12 +255,24 @@ export function UserAuth() {
                 {otpTimer > 0 ? (
                   <span className="text-white/40">{t("auth.resendIn")} <span className="text-primary font-bold">{otpTimer}s</span></span>
                 ) : (
-                  <button className="text-primary font-bold hover:underline" onClick={() => setOtpTimer(60)}>{t("auth.resendOtp")}</button>
+                  <button className="text-primary font-bold hover:underline" onClick={async () => {
+                    try {
+                      const result = otpPurpose === "register"
+                        ? await authApi.sendRegisterOtp(otpEmail)
+                        : await authApi.sendOtp(otpEmail);
+                      if (result.success) {
+                        setOtpTimer(60);
+                        setOtpValues(["", "", "", "", "", ""]);
+                      }
+                    } catch (err: any) {
+                      setAuthError(err?.message || "فشل إعادة الإرسال");
+                    }
+                  }}>{t("auth.resendOtp")}</button>
                 )}
               </div>
 
               <button
-                onClick={() => { setShowOtp(false); setOtpValues(["", "", "", "", "", ""]); }}
+                onClick={() => { setShowOtp(false); setOtpValues(["", "", "", "", "", ""]); setAuthError(null); setAuthSuccess(null); }}
                 className="w-full text-white/40 text-sm hover:text-white transition-colors mt-4 flex items-center justify-center gap-1"
               >
                 <ChevronLeft className="w-4 h-4" />
