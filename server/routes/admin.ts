@@ -1531,8 +1531,8 @@ const advancedSettings: Record<string, any> = {
     metaDescription: "Ablox — منصة البث المباشر العربية الأولى. شارك لحظاتك مع أصدقائك.",
     metaKeywords: "بث مباشر, هدايا افتراضية, دردشة, ترفيه, عرب",
     ogImage: "",
-    canonicalUrl: "https://ablox.app",
-    robotsTxt: "User-agent: *\nAllow: /\nSitemap: https://ablox.app/sitemap.xml",
+    canonicalUrl: "https://mrco.live",
+    robotsTxt: "User-agent: *\nAllow: /\nSitemap: https://mrco.live/sitemap.xml",
     sitemapEnabled: true,
     googleAnalyticsId: "",
     googleSearchConsoleId: "",
@@ -1546,8 +1546,8 @@ const advancedSettings: Record<string, any> = {
     contentRating: "Teen",
     screenshots: [],
     promoVideo: "",
-    supportUrl: "https://ablox.app/support",
-    privacyUrl: "https://ablox.app/privacy",
+    supportUrl: "https://mrco.live/support",
+    privacyUrl: "https://mrco.live/privacy",
   },
   socialLogin: {
     google: { enabled: true, clientId: "", clientSecret: "" },
@@ -1613,7 +1613,7 @@ const advancedSettings: Record<string, any> = {
   },
   appDownload: {
     enabled: false,
-    domain: "https://ablox.app",
+    domain: "https://mrco.live",
     pwa: {
       enabled: true,
       url: "",

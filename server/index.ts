@@ -30,7 +30,7 @@ if (process.env.NODE_ENV === "production") {
 
 // ── Socket.io (secured) ──
 const socketOrigin = process.env.NODE_ENV === "production"
-  ? process.env.CORS_ORIGIN || "https://ablox.app"
+  ? process.env.CORS_ORIGIN || "https://mrco.live"
   : "*";
 
 export const io = new SocketIOServer(httpServer, {
@@ -384,7 +384,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://ablox.app"],
+      connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://mrco.live"],
       mediaSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
@@ -402,7 +402,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
-    ? process.env.CORS_ORIGIN || "https://ablox.app"
+    ? process.env.CORS_ORIGIN || "https://mrco.live"
     : true,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
