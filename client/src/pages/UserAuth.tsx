@@ -196,7 +196,7 @@ export function UserAuth() {
         {/* Close Button */}
         <button
           onClick={() => setLocation('/')}
-          className="absolute top-5 right-5 w-9 h-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center hover:bg-white/20 transition-all z-20 group"
+          className="absolute top-5 end-5 w-9 h-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center hover:bg-white/20 transition-all z-20 group"
           aria-label="Close"
         >
           <X className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
@@ -305,7 +305,7 @@ export function UserAuth() {
                   <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
                     <Lock className="w-6 h-6 text-primary" />
                   </div>
-                  <div className="flex-1 text-right">
+                  <div className="flex-1 text-end">
                     <p className="text-white font-bold text-sm">{t("auth.loginWithPin", "الدخول برمز PIN")}</p>
                     <p className="text-white/40 text-xs">{t("auth.loginWithPinDesc", "أدخل رمز PIN الخاص بملفك الشخصي")}</p>
                   </div>
@@ -333,7 +333,7 @@ export function UserAuth() {
                   <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                     <Mail className="w-6 h-6 text-emerald-400" />
                   </div>
-                  <div className="flex-1 text-right">
+                  <div className="flex-1 text-end">
                     <p className="text-white font-bold text-sm">{t("auth.loginWithOtp", "الدخول برمز تحقق")}</p>
                     <p className="text-white/40 text-xs">{t("auth.loginWithOtpDesc", "إرسال رمز تحقق إلى بريدك الإلكتروني")}</p>
                   </div>
@@ -446,10 +446,10 @@ export function UserAuth() {
               )}
               <form onSubmit={handleForgotPassword} className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-white/80 mr-2">{t("auth.email")}</label>
+                  <label className="text-sm font-bold text-white/80 me-2">{t("auth.email")}</label>
                   <div className="relative group">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                    <input type="email" required value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder="name@example.com" />
+                    <Mail className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
+                    <input type="email" required value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder="name@example.com" />
                   </div>
                 </div>
                 <button type="submit" disabled={authLoading} className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
@@ -505,8 +505,8 @@ export function UserAuth() {
 
                 {!isLogin && (
                   <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                    <input type="text" required value={username} onChange={e => setUsername(e.target.value)} aria-label={t("auth.username")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.username")} />
+                    <User className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
+                    <input type="text" required value={username} onChange={e => setUsername(e.target.value)} aria-label={t("auth.username")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.username")} />
                   </div>
                 )}
 
@@ -514,13 +514,13 @@ export function UserAuth() {
                   {authMethod === "email" ? (
                     <motion.div key="email-fields" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                       <div className="relative group">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} aria-label={t("auth.email")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.email")} />
+                        <Mail className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
+                        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} aria-label={t("auth.email")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.email")} />
                       </div>
                       <div className="relative group">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type={showPassword ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)} aria-label={t("auth.password")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.password")} />
-                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2">
+                        <Lock className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
+                        <input type={showPassword ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)} aria-label={t("auth.password")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.password")} />
+                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute end-4 top-1/2 -translate-y-1/2">
                           {showPassword ? <EyeOff className="w-5 h-5 text-white/30" /> : <Eye className="w-5 h-5 text-white/30" />}
                         </button>
                       </div>
@@ -528,8 +528,8 @@ export function UserAuth() {
                   ) : (
                     <motion.div key="phone-fields" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                       <div className="relative group">
-                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type="tel" required aria-label={t("auth.phone")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.phonePlaceholder")} dir="ltr" />
+                        <Phone className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
+                        <input type="tel" required aria-label={t("auth.phone")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.phonePlaceholder")} dir="ltr" />
                       </div>
                     </motion.div>
                   )}
@@ -617,7 +617,7 @@ export function UserAuth() {
 
               <p className="mt-6 text-center text-white/60 text-sm">
                 {isLogin ? t("auth.noAccount") : t("auth.hasAccount")}
-                <button onClick={() => { setIsLogin(!isLogin); setAgreeTerms(false); }} className="text-primary font-bold mr-2 hover:underline">
+                <button onClick={() => { setIsLogin(!isLogin); setAgreeTerms(false); }} className="text-primary font-bold me-2 hover:underline">
                   {isLogin ? t("auth.registerNow") : t("auth.loginNow")}
                 </button>
               </p>
