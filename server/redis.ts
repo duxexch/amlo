@@ -4,10 +4,8 @@
  */
 import { Redis } from "ioredis";
 import { RedisStore } from "connect-redis";
-import { createRequire } from "module";
 import { createLogger } from "./logger";
-
-const require = createRequire(import.meta.url);
+import memoryStoreFactory from "memorystore";
 const redisLog = createLogger("redis");
 
 let redisClient: Redis | null = null;
@@ -128,7 +126,7 @@ export function createRedisSessionStore(session: any) {
 
   // Fallback to MemoryStore
   redisLog.info("Falling back to MemoryStore for sessions");
-  const MemoryStore = require("memorystore")(session);
+  const MemoryStore = memoryStoreFactory(session);
   return new MemoryStore({ checkPeriod: 86400000 });
 }
 

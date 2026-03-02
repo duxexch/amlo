@@ -8,8 +8,10 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
-    "check": "tsc",
+    "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
+    "db:seed": "tsx server/seed.ts",
+    "db:migrate": "drizzle-kit push && tsx server/seed.ts",
     "test": "echo \"No tests configured\""
   },
   "dependencies": {
