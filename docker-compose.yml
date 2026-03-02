@@ -36,11 +36,11 @@ services:
       - ablox_logs:/app/logs
     networks:
       - ablox_network
-      - proxy
+      - traefik_net
     labels:
       # ── Traefik reverse proxy ──
       - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
+      - "traefik.docker.network=classitest_classify-network"
       # HTTP router (port 80) — ACME challenge + redirect to HTTPS
       - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox-http.entrypoints=web"
@@ -116,9 +116,9 @@ networks:
   ablox_network:
     name: ablox_network
     driver: bridge
-  proxy:
+  traefik_net:
     external: true
-    name: proxy
+    name: classitest_classify-network
 
 volumes:
   ablox_pgdata:
