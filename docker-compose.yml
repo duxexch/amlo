@@ -40,7 +40,8 @@ services:
     labels:
       # ── Traefik reverse proxy ──
       - "traefik.enable=true"
-      # HTTP router (port 80) — needed for Let's Encrypt ACME challenge + redirect
+      - "traefik.docker.network=proxy"
+      # HTTP router (port 80) — ACME challenge + redirect to HTTPS
       - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox-http.entrypoints=web"
       - "traefik.http.routers.ablox-http.middlewares=ablox-redirect"
