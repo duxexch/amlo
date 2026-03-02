@@ -10,6 +10,15 @@ vite.config.ts.*
 .replit
 replit.nix
 
+# ── IDE / Editor ──
+.vscode/
+.idea/
+
+# ── Dev artifacts ──
+MEMORY.md
+lt_*.txt
+معلومات
+
 # ── Secrets ──
 .env
 .env.local
