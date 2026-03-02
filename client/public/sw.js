@@ -10,7 +10,7 @@
  *   - Socket.io: SKIP (real-time, never cache)
  */
 
-const CACHE_VERSION = "ablox-v1";
+const CACHE_VERSION = "ablox-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
