@@ -13,6 +13,8 @@
     "db:seed": "tsx server/seed.ts",
     "db:migrate": "drizzle-kit push && tsx server/seed.ts",
     "pwa:icons": "node script/generate-icons.cjs",
+    "brand:generate": "node script/generate-brand.cjs",
+    "signing:setup": "bash script/setup-signing.sh",
     "test": "echo \"No tests configured\""
   },
   "dependencies": {

@@ -23,3 +23,8 @@ lt_*.txt
 .env
 .env.local
 .env.production
+
+# ── Signing keys (NEVER commit) ──
+signing/
+*.keystore
+*.jks

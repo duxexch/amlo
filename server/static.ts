@@ -10,7 +10,20 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    dotfiles: "allow",           // serve .well-known/assetlinks.json
+    maxAge: "1h",
+    setHeaders(res, filePath) {
+      // No-cache for service worker
+      if (filePath.endsWith("sw.js")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      }
+      // Correct MIME for manifest
+      if (filePath.endsWith("manifest.json")) {
+        res.setHeader("Content-Type", "application/manifest+json");
+      }
+    },
+  }));
 
   // fall through to index.html if the file doesn't exist
   app.use("/{*path}", (_req, res) => {
