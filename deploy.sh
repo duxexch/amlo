@@ -33,6 +33,15 @@ command -v git >/dev/null 2>&1 || err "Git not installed."
 log "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+')"
 log "Docker Compose available"
 
+# ── Check 'proxy' network (Traefik) exists ──
+if ! docker network inspect proxy >/dev/null 2>&1; then
+  info "Creating 'proxy' network for Traefik..."
+  docker network create proxy
+  log "'proxy' network created"
+else
+  log "'proxy' network exists (Traefik)"
+fi
+
 # ── 2. Check .env file ──
 if [ ! -f .env ]; then
   warn ".env file not found — creating from template..."
@@ -122,12 +131,12 @@ echo "Health: ${HEALTH}"
 echo ""
 
 info "Next steps:"
-echo "  1. Point your domain DNS to this server's IP"
-echo "  2. Install Nginx:  sudo apt install nginx"
-echo "  3. Copy config:    sudo cp nginx.conf /etc/nginx/sites-available/ablox.conf"
-echo "  4. Enable:         sudo ln -s /etc/nginx/sites-available/ablox.conf /etc/nginx/sites-enabled/"
-echo "  5. Get SSL:        sudo certbot --nginx -d yourdomain.com"
-echo "  6. Restart Nginx:  sudo systemctl restart nginx"
+echo "  1. Set DOMAIN in .env to your domain (or use srv1118737.hstgr.cloud)"
+echo "  2. If using a custom domain, point DNS A record to your server IP"
+echo "  3. Traefik handles SSL automatically via Let's Encrypt"
+echo ""
+echo "  Note: Traefik (port 80/443) is managed by Hostinger Docker Manager."
+echo "  Ablox connects via the 'proxy' network — no nginx needed."
 echo ""
 echo "Useful commands:"
 echo "  docker compose logs -f app     # View app logs"
