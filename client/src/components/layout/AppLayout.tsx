@@ -1,14 +1,24 @@
 import { Link, useLocation } from "wouter";
-import { Home, Wallet, Radio, User, MessageCircle } from "lucide-react";
+import { Home, Wallet, Radio, User, MessageCircle, LogIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useState, useEffect } from "react";
+import { authApi } from "@/lib/authApi";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+
+  // Check auth state once on mount
+  useEffect(() => {
+    authApi.me()
+      .then(() => setIsLoggedIn(true))
+      .catch(() => setIsLoggedIn(false));
+  }, []);
 
   // Pages without navigation (full-screen experiences)
   const noNavPages = ["/admin", "/auth", "/room"];
@@ -67,7 +77,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white" aria-label="Ablox">A</div>
            <div className="flex items-center gap-2">
              <LanguageSwitcher />
-             <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20" aria-label={t("common.login")}>{t("common.login")}</button></Link>
+             {isLoggedIn === false && (
+               <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20 flex items-center gap-1.5" aria-label={t("common.login")}><LogIn className="w-4 h-4" />{t("common.login")}</button></Link>
+             )}
+             {isLoggedIn === true && (
+               <Link href="/profile"><button className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center hover:bg-primary/20 transition-all" aria-label={t("nav.profile")}><User className="w-5 h-5 text-primary" /></button></Link>
+             )}
            </div>
         </div>
         {children}

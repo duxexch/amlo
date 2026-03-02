@@ -10,7 +10,6 @@ import {
 import avatarImg from "@/assets/images/avatar-3d.png";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
-import { Link } from "wouter";
 import { profileApi } from "@/lib/authApi";
 import { PinSetup } from "@/pages/PinSetup";
 
@@ -318,11 +317,9 @@ export function Profile() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl md:text-4xl font-black text-white" style={{ fontFamily: 'Outfit' }}>{t("profile.title")}</h1>
-        <Link href="/auth">
-          <button className="p-3 bg-white/5 rounded-full hover:bg-white/10 transition-colors border border-white/10">
-            <Settings className="w-5 h-5 text-white" />
-          </button>
-        </Link>
+        <button className="p-3 bg-white/5 rounded-full hover:bg-white/10 transition-colors border border-white/10">
+          <Settings className="w-5 h-5 text-white" />
+        </button>
       </div>
 
       {/* Profile Card */}
@@ -606,19 +603,17 @@ export function Profile() {
               </div>
             ) : (
               <>
-                {/* Existing profiles */}
-                {profiles.map((profile) => (
+                {/* Only show profile 1 for PIN management — profile 2 is always hidden */}
+                {profiles.filter(p => p.profileIndex === 1).map((profile) => (
                   <div key={profile.profileIndex} className="bg-white/5 border border-white/10 rounded-2xl p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold ${
-                          profile.profileIndex === 1 ? "bg-blue-500/20 text-blue-400" : "bg-purple-500/20 text-purple-400"
-                        }`}>
-                          {profile.profileIndex}
+                        <span className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold bg-blue-500/20 text-blue-400">
+                          <Lock className="w-4 h-4" />
                         </span>
                         <div>
-                          <p className="text-white font-bold text-sm">{profile.displayName || t("profile.unnamed", "بدون اسم")}</p>
-                          <p className="text-white/40 text-xs">{t("pinSetup.profileNum", "ملف شخصي")} #{profile.profileIndex}</p>
+                          <p className="text-white font-bold text-sm">{t("profile.pinCode", "رمز PIN")}</p>
+                          <p className="text-white/40 text-xs">{t("profile.pinActive", "نشط ومفعّل")}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -629,21 +624,6 @@ export function Profile() {
                           <RefreshCw className="w-3 h-3" />
                           {t("profile.changePin", "تغيير PIN")}
                         </button>
-                        {/* Only allow deleting profile 2, or profile 1 if no profile 2 */}
-                        {(profile.profileIndex === 2 || (profile.profileIndex === 1 && profiles.length === 1)) && (
-                          <button
-                            onClick={() => handleDeleteProfile(profile.profileIndex)}
-                            disabled={deletingProfile === profile.profileIndex}
-                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-all flex items-center gap-1 disabled:opacity-50"
-                          >
-                            {deletingProfile === profile.profileIndex ? (
-                              <div className="w-3 h-3 border-2 border-destructive border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <Trash2 className="w-3 h-3" />
-                            )}
-                            {t("common.delete", "حذف")}
-                          </button>
-                        )}
                       </div>
                     </div>
 
@@ -712,7 +692,7 @@ export function Profile() {
                   </div>
                 ))}
 
-                {/* Create profile buttons */}
+                {/* Create first profile PIN if none exist */}
                 {profiles.length === 0 && (
                   <button
                     onClick={() => setShowPinSetup(1)}
@@ -723,7 +703,8 @@ export function Profile() {
                   </button>
                 )}
 
-                {profiles.length === 1 && (
+                {/* Create second secret profile — only show button if profile 1 exists but 2 doesn't */}
+                {profiles.length === 1 && !profiles.find(p => p.profileIndex === 2) && (
                   <button
                     onClick={() => setShowPinSetup(2)}
                     className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl bg-purple-500/10 border-2 border-dashed border-purple-500/30 text-purple-400 font-bold hover:bg-purple-500/20 transition-all"
@@ -731,6 +712,19 @@ export function Profile() {
                     <Plus className="w-5 h-5" />
                     {t("profile.createSecondProfile", "إضافة حساب ثاني")}
                   </button>
+                )}
+
+                {/* Status indicator for second profile — no details revealed */}
+                {profiles.find(p => p.profileIndex === 2) && (
+                  <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex items-center gap-3">
+                    <span className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold bg-purple-500/10 text-purple-400/60">
+                      <Lock className="w-4 h-4" />
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-white/40 font-medium text-sm">{t("profile.secondProfileActive", "الحساب الثاني مفعّل")}</p>
+                      <p className="text-white/20 text-xs">{t("profile.secondProfileHint", "استخدم رمز PIN في بحث الأصدقاء للتبديل")}</p>
+                    </div>
+                  </div>
                 )}
 
                 {profiles.length >= 1 && (
