@@ -1,7 +1,5 @@
-# Development override — exposes DB & Redis ports to host, disables Traefik
+# Development override — exposes app/DB/Redis ports to host
 services:
-  traefik:
-    profiles: ["production"]  # Don't start Traefik in dev
   app:
     ports:
       - "3000:3000"

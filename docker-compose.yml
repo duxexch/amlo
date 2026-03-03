@@ -1,47 +1,11 @@
 # ═══════════════════════════════════════════════════════
 # Ablox — Production Docker Compose
-# 4 services: traefik (reverse proxy) + app + postgres + redis
-# Traefik handles SSL automatically via Let's Encrypt
+# Uses classitest's Traefik for reverse proxy + SSL
+# ablox_app joins classitest_classify-network for Traefik discovery
+# DB/Redis stay internal on ablox_network
 # ═══════════════════════════════════════════════════════
 
 services:
-  # ── Traefik Reverse Proxy + SSL ──
-  traefik:
-    image: traefik:v3.3
-    container_name: ablox_traefik
-    restart: unless-stopped
-    command:
-      # ── API / Dashboard ──
-      - "--api.dashboard=false"
-      - "--log.level=WARN"
-      # ── Docker provider ──
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=ablox_network"
-      # ── Entrypoints ──
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # ── HTTP → HTTPS global redirect ──
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
-      # ── Let's Encrypt ──
-      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-info@mrco.live}"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ablox_letsencrypt:/letsencrypt
-    networks:
-      - ablox_network
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-
   # ── Ablox Application ──
   app:
     build:
@@ -88,16 +52,24 @@ services:
       - ablox_logs:/app/logs
     networks:
       - ablox_network
+      - traefik_net
     labels:
-      # ── Traefik routing ──
+      # ── Traefik routing (discovered by classitest's Traefik) ──
       - "traefik.enable=true"
+      - "traefik.docker.network=classitest_classify-network"
+      # HTTP → HTTPS redirect
+      - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`)"
+      - "traefik.http.routers.ablox-http.entrypoints=web"
+      - "traefik.http.routers.ablox-http.middlewares=ablox-redirect"
+      - "traefik.http.middlewares.ablox-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.ablox-redirect.redirectscheme.permanent=true"
       # HTTPS router — main entry
       - "traefik.http.routers.ablox.rule=Host(`${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox.entrypoints=websecure"
       - "traefik.http.routers.ablox.tls=true"
       - "traefik.http.routers.ablox.tls.certresolver=letsencrypt"
       - "traefik.http.services.ablox.loadbalancer.server.port=3000"
-      # WebSocket + headers
+      # WebSocket + forwarded headers
       - "traefik.http.middlewares.ablox-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
       - "traefik.http.routers.ablox.middlewares=ablox-headers"
     deploy:
@@ -160,6 +132,9 @@ networks:
   ablox_network:
     name: ablox_network
     driver: bridge
+  traefik_net:
+    external: true
+    name: classitest_classify-network
 
 volumes:
   ablox_pgdata:
@@ -170,7 +145,4 @@ volumes:
     driver: local
   ablox_logs:
     name: ablox_logs
-    driver: local
-  ablox_letsencrypt:
-    name: ablox_letsencrypt
     driver: local

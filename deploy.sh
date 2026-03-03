@@ -33,11 +33,19 @@ command -v git >/dev/null 2>&1 || err "Git not installed."
 log "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+')"
 log "Docker Compose available"
 
-# ── Stop conflicting Traefik (classitest) if running on 80/443 ──
+# ── Verify classitest Traefik is running (required for routing) ──
 if docker ps --format '{{.Names}}' | grep -q 'classitest-traefik'; then
-  warn "classitest Traefik detected on ports 80/443 — stopping it..."
-  docker stop classitest-traefik-1 2>/dev/null || true
-  log "classitest Traefik stopped (ablox Traefik will handle routing)"
+  log "classitest Traefik detected — ablox will use it for routing"
+else
+  warn "classitest Traefik not found! Make sure classitest project is running."
+  warn "Ablox needs classitest's Traefik for HTTPS/SSL routing."
+fi
+
+# ── Verify external network exists ──
+if docker network inspect classitest_classify-network >/dev/null 2>&1; then
+  log "Traefik network (classitest_classify-network) exists"
+else
+  err "Network 'classitest_classify-network' not found. Start classitest first."
 fi
 
 # ── 2. Check .env file ──
@@ -132,9 +140,9 @@ echo ""
 info "Next steps:"
 echo "  1. Set SMTP_PASS in .env for email/OTP support"
 echo "  2. DNS A record for mrco.live should point to this server"
-echo "  3. Traefik handles SSL automatically via Let's Encrypt"
+echo "  3. classitest's Traefik handles SSL automatically"
 echo ""
-echo "  Ablox includes its own Traefik — no external proxy needed."
+echo "  ablox uses classitest's Traefik — no separate proxy needed."
 echo ""
 echo "Useful commands:"
 echo "  docker compose logs -f app     # View app logs"
