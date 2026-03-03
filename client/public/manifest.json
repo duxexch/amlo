@@ -1,16 +1,26 @@
 {
-  "name": "Ablox",
+  "id": "/",
+  "name": "Ablox — دردشة فيديو وصوت عشوائية وبث مباشر",
   "short_name": "Ablox",
   "description": "دردشة فيديو وصوت عشوائية وبث مباشر — تعرّف على أشخاص جدد من حول العالم",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#06060f",
   "theme_color": "#0c0c1d",
   "dir": "rtl",
   "lang": "ar",
-  "categories": ["social", "entertainment"],
-  "scope": "/",
+  "categories": ["social", "entertainment", "communication"],
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
   "icons": [
     {
       "src": "/icons/icon-72x72.png",
@@ -69,31 +79,84 @@
   ],
   "screenshots": [
     {
-      "src": "/screenshots/home.png",
+      "src": "/screenshots/narrow-home.png",
       "sizes": "390x844",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "الصفحة الرئيسية — دردشة عشوائية"
+      "label": "الصفحة الرئيسية — دردشة عشوائية بالفيديو والصوت"
+    },
+    {
+      "src": "/screenshots/narrow-chat.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "غرف الدردشة والبث المباشر"
+    },
+    {
+      "src": "/screenshots/wide-home.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Ablox — واجهة الويب الكاملة"
+    },
+    {
+      "src": "/screenshots/wide-chat.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Ablox — الدردشة والبث المباشر"
     }
   ],
   "shortcuts": [
     {
       "name": "دردشة عشوائية",
       "short_name": "دردشة",
-      "url": "/",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "بث مباشر",
-      "short_name": "بث",
-      "url": "/live",
+      "description": "ابدأ دردشة عشوائية بالفيديو أو الصوت",
+      "url": "/home",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
     },
     {
       "name": "المحفظة",
       "short_name": "محفظة",
+      "description": "إدارة عملاتك وهداياك",
       "url": "/wallet",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "الأصدقاء",
+      "short_name": "أصدقاء",
+      "description": "قائمة الأصدقاء والمحادثات",
+      "url": "/friends",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "الملف الشخصي",
+      "short_name": "بروفايل",
+      "description": "عرض وتعديل ملفك الشخصي",
+      "url": "/profile",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": ["image/*", "video/*"]
+        }
+      ]
+    }
+  },
+  "protocol_handlers": [
+    {
+      "protocol": "web+ablox",
+      "url": "/%s"
     }
   ],
   "related_applications": [],
