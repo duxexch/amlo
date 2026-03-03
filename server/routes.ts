@@ -103,6 +103,7 @@ export async function registerRoutes(
   app.get("/api/featured-streams", async (_req, res) => {
     try {
       const streams = await storage.getFeaturedStreams();
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
       return res.json({ success: true, data: streams });
     } catch (err: any) {
       log(`Featured streams error: ${err.message}`, "routes");
@@ -127,6 +128,7 @@ export async function registerRoutes(
   app.get("/api/announcement-popup", async (_req, res) => {
     try {
       const popup = await storage.getAnnouncementPopup();
+      res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=300");
       if (!popup || !popup.enabled) {
         return res.json({ success: true, data: null });
       }
@@ -138,24 +140,22 @@ export async function registerRoutes(
   });
 
   // Public: Get app download settings (for user-facing download page)
+  // Pre-computed default to avoid runtime object construction
+  const APP_DOWNLOAD_DEFAULT = {
+    enabled: true,
+    domain: "https://mrco.live",
+    pwa: { enabled: true, url: "", extension: "/", description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل" },
+    apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد" },
+    aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "ملف AAB — لرفعه على متجر جوجل بلاي" },
+  };
+
   app.get("/api/app-download", async (_req, res) => {
     try {
       const cfg = await storage.getSystemConfig("appDownload");
-      let dl: any = null;
-      if (cfg && cfg.configData) {
-        dl = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
-      }
-      // Fallback to defaults if nothing in DB
-      if (!dl) {
-        dl = {
-          enabled: true,
-          domain: "https://mrco.live",
-          pwa: { enabled: true, url: "", extension: "/", description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل" },
-          apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد" },
-          aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "ملف AAB — لرفعه على متجر جوجل بلاي" },
-        };
-      }
-      if (!dl.enabled) {
+      let dl: any = cfg?.configData
+        ? (typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData)
+        : APP_DOWNLOAD_DEFAULT;
+      if (!dl?.enabled) {
         return res.json({ success: true, data: { enabled: false } });
       }
       return res.json({
@@ -163,9 +163,9 @@ export async function registerRoutes(
         data: {
           enabled: dl.enabled,
           domain: dl.domain,
-          pwa: { enabled: dl.pwa?.enabled, url: dl.pwa?.url, extension: dl.pwa?.extension, description: dl.pwa?.description },
-          apk: { enabled: dl.apk?.enabled, url: dl.apk?.url, extension: dl.apk?.extension, description: dl.apk?.description },
-          aab: { enabled: dl.aab?.enabled, url: dl.aab?.url, extension: dl.aab?.extension, description: dl.aab?.description },
+          pwa: dl.pwa ? { enabled: dl.pwa.enabled, url: dl.pwa.url, extension: dl.pwa.extension, description: dl.pwa.description } : APP_DOWNLOAD_DEFAULT.pwa,
+          apk: dl.apk ? { enabled: dl.apk.enabled, url: dl.apk.url, extension: dl.apk.extension, description: dl.apk.description } : APP_DOWNLOAD_DEFAULT.apk,
+          aab: dl.aab ? { enabled: dl.aab.enabled, url: dl.aab.url, extension: dl.aab.extension, description: dl.aab.description } : APP_DOWNLOAD_DEFAULT.aab,
         },
       });
     } catch (err: any) {

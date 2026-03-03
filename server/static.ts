@@ -12,7 +12,10 @@ export function serveStatic(app: Express) {
 
   app.use(express.static(distPath, {
     dotfiles: "allow",           // serve .well-known/assetlinks.json
-    maxAge: "1h",
+    maxAge: "1d",                // 24h for most files (was 1h)
+    immutable: false,            // only hashed files get immutable below
+    etag: true,
+    lastModified: true,
     setHeaders(res, filePath) {
       // No-cache for service worker
       if (filePath.endsWith("sw.js")) {
@@ -21,6 +24,10 @@ export function serveStatic(app: Express) {
       // Correct MIME for manifest
       if (filePath.endsWith("manifest.json")) {
         res.setHeader("Content-Type", "application/manifest+json");
+      }
+      // Step 28: Immutable caching for hashed assets (Vite output)
+      if (/\/assets\/.*\.[a-f0-9]{8}\./i.test(filePath)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       }
     },
   }));

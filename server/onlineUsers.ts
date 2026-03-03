@@ -139,7 +139,7 @@ export function startOnlineUsersCleanup(io: { sockets: { sockets: Map<string, un
     } catch (err) {
       console.error("[onlineUsers] Cleanup error:", err);
     }
-  }, 3 * 60 * 1000); // Every 3 minutes
+  }, 5 * 60 * 1000); // Every 5 minutes (reduced frequency for less overhead)
   _cleanupTimer.unref();
 }
 

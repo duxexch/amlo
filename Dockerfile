@@ -49,4 +49,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-CMD ["node", "dist/index.cjs"]
+# Use cluster mode for multi-core utilization
+# CLUSTER_WORKERS env controls worker count (defaults to CPU count)
+CMD ["node", "dist/cluster.cjs"]

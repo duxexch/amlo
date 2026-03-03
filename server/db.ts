@@ -27,9 +27,13 @@ export function getPool(): pg.Pool | null {
   try {
     pool = new Pool({
       connectionString: url,
-      max: parseInt(process.env.DB_POOL_MAX || "20", 10),
-      idleTimeoutMillis: 30000,
+      max: parseInt(process.env.DB_POOL_MAX || "50", 10),  // 50 is enough with 3-tier caching
+      min: parseInt(process.env.DB_POOL_MIN || "5", 10),
+      idleTimeoutMillis: 20000,
       connectionTimeoutMillis: 5000,
+      allowExitOnIdle: false,
+      statement_timeout: 10000, // 10s query timeout — prevents DB locks
+      query_timeout: 15000,
     });
 
     pool.on("error", (err) => {
@@ -61,17 +65,26 @@ export function getDb() {
 
 /**
  * Check if database is connected and reachable.
+ * Caches result for 10 seconds to avoid pool exhaustion under load.
  */
+let _dbConnectedCache: { ok: boolean; ts: number } = { ok: false, ts: 0 };
+const DB_HEALTH_CACHE_MS = 10_000; // 10 seconds
+
 export async function isDatabaseConnected(): Promise<boolean> {
+  const now = Date.now();
+  if (now - _dbConnectedCache.ts < DB_HEALTH_CACHE_MS) return _dbConnectedCache.ok;
+
   const p = getPool();
-  if (!p) return false;
+  if (!p) { _dbConnectedCache = { ok: false, ts: now }; return false; }
 
   try {
     const client = await p.connect();
     await client.query("SELECT 1");
     client.release();
+    _dbConnectedCache = { ok: true, ts: now };
     return true;
   } catch {
+    _dbConnectedCache = { ok: false, ts: now };
     return false;
   }
 }

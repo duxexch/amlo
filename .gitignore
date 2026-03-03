@@ -16,7 +16,13 @@ replit.nix
 
 # ── Dev artifacts ──
 MEMORY.md
+WORK_MEMORY.md
 lt_*.txt
+load-test-results.txt
+OPTIMIZATION-PLAN.md
+OPTIMIZATION-REPORT.md
+OPTIMIZATION-REPORT-V2.md
+LOAD-TEST-REPORT.md
 معلومات
 
 # ── Secrets ──

@@ -35,16 +35,20 @@ export async function initRedis(): Promise<Redis | null> {
 
   try {
     const client = new Redis(url, {
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: null, // never give up on pending commands
       retryStrategy(times) {
-        if (times > 5) {
+        if (times > 10) {
           redisLog.error("Redis retry limit reached — giving up");
           return null;
         }
-        return Math.min(times * 200, 2000);
+        return Math.min(times * 200, 3000);
       },
       lazyConnect: true,
       connectTimeout: 5000,
+      enableReadyCheck: true,
+      enableOfflineQueue: true,
+      keepAlive: 30000,
+      noDelay: true,
     });
 
     attachHandlers(client, "main");

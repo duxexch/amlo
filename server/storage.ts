@@ -1,7 +1,36 @@
 import { eq, desc, asc, sql, and, or, like, ilike, count } from "drizzle-orm";
 import { getDb } from "./db";
+import { cacheGet, cacheSet, cacheDel } from "./redis";
 import * as schema from "@shared/schema";
 import type { User, InsertUser, Admin, InsertAdmin, UpgradeRequest, WalletTransaction, GiftTransaction, FraudAlert, UserReport } from "@shared/schema";
+
+// ── In-memory cache layer (Process-level, avoids Redis round-trip) ──
+const _memCache = new Map<string, { data: any; expiresAt: number }>();
+
+function memGet<T = any>(key: string): T | undefined {
+  const entry = _memCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    _memCache.delete(key);
+    return undefined;
+  }
+  return entry.data;
+}
+
+function memSet(key: string, data: any, ttlMs: number) {
+  _memCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  // Prevent unbounded growth
+  if (_memCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of _memCache) {
+      if (now > v.expiresAt) _memCache.delete(k);
+    }
+  }
+}
+
+function memDel(key: string) {
+  _memCache.delete(key);
+}
 
 /**
  * DatabaseStorage — backed by PostgreSQL through Drizzle ORM.
@@ -95,7 +124,19 @@ export class DatabaseStorage {
   // ── Gifts ──
   async getGifts() {
     if (!this.db) return [];
-    return this.db.select().from(schema.gifts).orderBy(asc(schema.gifts.sortOrder));
+    // 3-tier cache: Memory (60s) → Redis (5min) → DB
+    const mem = memGet("gifts:all");
+    if (mem) return mem;
+    const cached = await cacheGet("gifts:all");
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      memSet("gifts:all", parsed, 60_000);
+      return parsed;
+    }
+    const gifts = await this.db.select().from(schema.gifts).orderBy(asc(schema.gifts.sortOrder));
+    await cacheSet("gifts:all", JSON.stringify(gifts), 300);
+    memSet("gifts:all", gifts, 60_000);
+    return gifts;
   }
 
   async getGift(id: string) {
@@ -107,18 +148,24 @@ export class DatabaseStorage {
   async createGift(data: any) {
     if (!this.db) throw new Error("Database not available");
     const [gift] = await this.db.insert(schema.gifts).values(data).returning();
+    await cacheDel("gifts:all");
+    memDel("gifts:all");
     return gift;
   }
 
   async updateGift(id: string, data: any) {
     if (!this.db) return undefined;
     const [gift] = await this.db.update(schema.gifts).set(data).where(eq(schema.gifts.id, id)).returning();
+    await cacheDel("gifts:all");
+    memDel("gifts:all");
     return gift;
   }
 
   async deleteGift(id: string) {
     if (!this.db) return false;
     await this.db.delete(schema.gifts).where(eq(schema.gifts.id, id));
+    await cacheDel("gifts:all");
+    memDel("gifts:all");
     return true;
   }
 
@@ -296,9 +343,24 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async getSystemConfig(category: string) {
     if (!this.db) return null;
+    // 3-tier cache: Memory (2min) → Redis (5min) → DB
+    const memKey = `sysconfig:${category}`;
+    const mem = memGet(memKey);
+    if (mem) return mem;
+    const cached = await cacheGet(memKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      memSet(memKey, parsed, 120_000);
+      return parsed;
+    }
     const [cfg] = await this.db.select().from(schema.systemConfig)
       .where(eq(schema.systemConfig.category, category)).limit(1);
-    return cfg || null;
+    const result = cfg || null;
+    if (result) {
+      await cacheSet(memKey, JSON.stringify(result), 300);
+      memSet(memKey, result, 120_000);
+    }
+    return result;
   }
 
   async upsertSystemConfig(category: string, configData: object, updatedBy?: string) {
@@ -326,9 +388,21 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async getFeaturedStreams() {
     if (!this.db) return [];
-    return this.db.select().from(schema.featuredStreamsConfig)
+    // 3-tier cache: Memory (30s) → Redis (2min) → DB
+    const mem = memGet("featured:streams");
+    if (mem) return mem;
+    const cached = await cacheGet("featured:streams");
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      memSet("featured:streams", parsed, 30_000);
+      return parsed;
+    }
+    const streams = await this.db.select().from(schema.featuredStreamsConfig)
       .where(eq(schema.featuredStreamsConfig.isActive, true))
       .orderBy(asc(schema.featuredStreamsConfig.sortOrder));
+    await cacheSet("featured:streams", JSON.stringify(streams), 120);
+    memSet("featured:streams", streams, 30_000);
+    return streams;
   }
 
   async getAllFeaturedStreams() {
@@ -371,21 +445,38 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async getAnnouncementPopup() {
     if (!this.db) return null;
+    // 3-tier cache: Memory (60s) → Redis (2min) → DB
+    const mem = memGet("announcement:popup");
+    if (mem !== undefined) return mem;
+    const cached = await cacheGet("announcement:popup");
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      memSet("announcement:popup", parsed, 60_000);
+      return parsed;
+    }
     const [popup] = await this.db.select().from(schema.announcementPopups).limit(1);
-    return popup || null;
+    const result = popup || null;
+    await cacheSet("announcement:popup", JSON.stringify(result), 120);
+    memSet("announcement:popup", result, 60_000);
+    return result;
   }
 
   async upsertAnnouncementPopup(data: Partial<typeof schema.announcementPopups.$inferInsert>) {
     if (!this.db) return null;
     const existing = await this.getAnnouncementPopup();
+    let result;
     if (existing) {
       const [updated] = await this.db.update(schema.announcementPopups)
         .set({ ...data, updatedAt: new Date() } as any)
         .where(eq(schema.announcementPopups.id, existing.id)).returning();
-      return updated;
+      result = updated;
+    } else {
+      const [created] = await this.db.insert(schema.announcementPopups).values(data as any).returning();
+      result = created;
     }
-    const [created] = await this.db.insert(schema.announcementPopups).values(data as any).returning();
-    return created;
+    await cacheDel("announcement:popup"); // invalidate cache
+    memDel("announcement:popup");
+    return result;
   }
 
   // ════════════════════════════════════════════════════════════
@@ -684,12 +775,25 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async getActiveStreams(page = 1, limit = 20) {
     if (!this.db) return { data: [], total: 0 };
+    // 3-tier cache: Memory (15s) → Redis (30s) → DB
+    const cacheKey = `streams:active:${page}:${limit}`;
+    const mem = memGet(cacheKey);
+    if (mem) return mem;
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      memSet(cacheKey, parsed, 15_000);
+      return parsed;
+    }
     const offset = (page - 1) * limit;
     const where = eq(schema.streams.status, "active");
     const [countResult] = await this.db.select({ count: count() }).from(schema.streams).where(where);
     const data = await this.db.select().from(schema.streams).where(where)
       .orderBy(desc(schema.streams.viewerCount)).limit(limit).offset(offset);
-    return { data, total: countResult?.count || 0 };
+    const result = { data, total: countResult?.count || 0 };
+    await cacheSet(cacheKey, JSON.stringify(result), 30);
+    memSet(cacheKey, result, 15_000);
+    return result;
   }
 
   async getStream(id: string) {
@@ -702,6 +806,8 @@ export class DatabaseStorage {
   async createStream(data: Partial<typeof schema.streams.$inferInsert>) {
     if (!this.db) return null;
     const [created] = await this.db.insert(schema.streams).values(data as any).returning();
+    await cacheDel("streams:active:1:20"); // invalidate most common cache key
+    await cacheDel("streams:active:1:50");
     return created;
   }
 
@@ -718,6 +824,8 @@ export class DatabaseStorage {
     const [updated] = await this.db.update(schema.streams)
       .set({ status: "ended", endedAt: new Date() })
       .where(eq(schema.streams.id, id)).returning();
+    await cacheDel("streams:active:1:20");
+    await cacheDel("streams:active:1:50");
     return updated;
   }
 

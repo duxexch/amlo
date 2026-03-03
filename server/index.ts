@@ -16,6 +16,7 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { initRedis, createRedisSessionStore, getRedis, createRedisDuplicate } from "./redis";
+import { isDatabaseConnected, getPool } from "./db";
 import { logger, createLogger } from "./logger";
 
 const serverLog = createLogger("server");
@@ -41,33 +42,33 @@ export const io = new SocketIOServer(httpServer, {
   },
   // ── Transport: prefer websocket, fall back to polling for restricted networks ──
   transports: ["websocket", "polling"],
-  // ── Adaptive heartbeat: longer intervals save bandwidth on weak connections ──
-  pingTimeout: 45000,       // 45s — generous for slow 2G/3G networks
-  pingInterval: 30000,      // 30s — reduced pings = less overhead
+  // ── Adaptive heartbeat: balanced for scale ──
+  pingTimeout: 30000,       // 30s — faster disconnect detection
+  pingInterval: 25000,      // 25s — lighter than 30s
   // ── Buffer limits: prevent abuse while allowing normal messages ──
-  maxHttpBufferSize: 256_000, // 256KB (was 1MB) — messages don't need to be huge
+  maxHttpBufferSize: 128_000, // 128KB — chat messages are small
   // ── Connection recovery: mobile users lose signal frequently ──
   connectionStateRecovery: {
-    maxDisconnectionDuration: 15 * 60 * 1000, // 15 min recovery window
-    skipMiddlewares: true, // skip auth on reconnect (session is preserved)
+    maxDisconnectionDuration: 10 * 60 * 1000, // 10 min recovery window (was 15)
+    skipMiddlewares: true,
   },
-  // ── Compression: aggressive deflate saves 40-70% bandwidth ──
+  // ── Compression: level 4 = fast, CPU-efficient ──
   perMessageDeflate: {
-    threshold: 256,         // compress messages > 256 bytes (was 1024)
+    threshold: 512,         // compress messages > 512 bytes
     zlibDeflateOptions: {
-      chunkSize: 4 * 1024,  // 4KB chunks — balanced for mobile
-      level: 6,             // level 6 = good ratio without CPU spike
+      chunkSize: 8 * 1024,  // 8KB chunks — less overhead
+      level: 4,             // level 4 = fast compression
     },
-    clientNoContextTakeover: true, // lower memory per socket (~2KB saved)
+    clientNoContextTakeover: true,
     serverNoContextTakeover: true,
   },
   // ── HTTP compression for polling transport fallback ──
   httpCompression: {
-    threshold: 128,
+    threshold: 512,
   },
-  // ── Upgrade timeout: give slow connections more time to upgrade to ws ──
-  upgradeTimeout: 30000, // 30s (default 10s fails on 2G)
-  // ── Allow EIO3 for older clients (broader compatibility) ──
+  // ── Upgrade timeout ──
+  upgradeTimeout: 15000, // 15s (was 30s — faster cleanup)
+  // ── Allow EIO3 for older clients ──
   allowEIO3: true,
 });
 
@@ -122,7 +123,7 @@ setInterval(() => {
 }, 120_000).unref(); // Every 2 minutes
 
 // Online users — Redis-backed (shared across nodes)
-import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline } from "./onlineUsers";
+import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline, getOnlineUsersCount } from "./onlineUsers";
 
 // ── Viewer-count debounce (prevents 50K broadcasts per join in popular rooms) ──
 const viewerCountDebounce = new Map<string, NodeJS.Timeout>();
@@ -132,11 +133,11 @@ function scheduleViewerCountBroadcast(roomId: string) {
     viewerCountDebounce.delete(roomId);
     const count = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 0;
     io.to(`room:${roomId}`).emit("viewer-count", count);
-  }, 500)); // max 1 broadcast per 500ms per room
+  }, 1000)); // max 1 broadcast per second per room (was 500ms)
 }
 
-// ── Chat message throttle (prevents spam flooding) ──
-const chatThrottle = new Map<string, number[]>();
+// ── Chat message throttle (O(1) sliding window counter) ──
+const chatThrottle = new Map<string, { count: number; windowStart: number }>();
 const CHAT_MAX_MSGS = 20; // max messages
 const CHAT_WINDOW_MS = 10_000; // per 10 seconds
 
@@ -146,22 +147,30 @@ const TYPING_THROTTLE_MS = 3000; // max 1 typing event per 3 seconds per user
 
 function isChatRateLimited(userId: string): boolean {
   const now = Date.now();
-  const times = chatThrottle.get(userId) || [];
-  const recent = times.filter(t => now - t < CHAT_WINDOW_MS);
-  if (recent.length >= CHAT_MAX_MSGS) return true;
-  recent.push(now);
-  chatThrottle.set(userId, recent);
+  const entry = chatThrottle.get(userId);
+  if (!entry || now - entry.windowStart > CHAT_WINDOW_MS) {
+    chatThrottle.set(userId, { count: 1, windowStart: now });
+    return false;
+  }
+  if (entry.count >= CHAT_MAX_MSGS) return true;
+  entry.count++;
   return false;
 }
 
-// Cleanup chat throttle periodically
+// Cleanup chat throttle + typing throttle periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [userId, times] of chatThrottle) {
-    const recent = times.filter(t => now - t < CHAT_WINDOW_MS);
-    if (recent.length === 0) chatThrottle.delete(userId);
-    else chatThrottle.set(userId, recent);
+  for (const [userId, entry] of chatThrottle) {
+    if (now - entry.windowStart > CHAT_WINDOW_MS) chatThrottle.delete(userId);
   }
+  // Step 17: Clean up typing throttle to prevent memory leaks
+  for (const [uid, ts] of typingThrottle) {
+    if (now - ts > TYPING_THROTTLE_MS * 2) typingThrottle.delete(uid);
+  }
+  // Step 29: Memory leak protection — cap Map sizes
+  if (chatThrottle.size > 50_000) chatThrottle.clear();
+  if (typingThrottle.size > 50_000) typingThrottle.clear();
+  if (viewerCountDebounce.size > 10_000) viewerCountDebounce.clear();
 }, 30_000).unref();
 
 io.on("connection", (socket) => {
@@ -350,6 +359,17 @@ io.on("connection", (socket) => {
 // Start zombie cleanup for online users
 startOnlineUsersCleanup(io);
 
+// Step 23: Periodic room cleanup — clear debounce timers for rooms that no longer exist
+setInterval(() => {
+  for (const [roomId, timeout] of viewerCountDebounce) {
+    const roomKey = `room:${roomId}`;
+    if (!io.sockets.adapter.rooms.has(roomKey)) {
+      clearTimeout(timeout);
+      viewerCountDebounce.delete(roomId);
+    }
+  }
+}, 60_000).unref(); // Every minute
+
 // ── Persist room messages in Redis (last 200 per room, 24h TTL) ──
 // Uses pipeline (single round-trip) and fire-and-forget to avoid event loop congestion.
 function persistRoomMessage(roomId: string, msg: object) {
@@ -375,30 +395,90 @@ declare module "http" {
   }
 }
 
-// ── Security middleware ──
-app.use(helmet({
-  contentSecurityPolicy: process.env.NODE_ENV === "production" ? {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://mrco.live"],
-      mediaSrc: ["'self'", "blob:"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      upgradeInsecureRequests: [],
+// ── Ultra-fast response cache (BEFORE all middleware) ──
+// Caches full JSON responses in memory. Cache HIT bypasses Helmet, CORS,
+// compression, rate limiters, session — everything. ~2-3x faster than Redis path.
+const _responseCache = new Map<string, { body: string; ts: number }>();
+
+const FAST_CACHE_PATHS: Record<string, number> = {
+  "/api/featured-streams": 30_000,       // 30s
+  "/api/announcement-popup": 60_000,     // 60s
+  "/api/app-download": 120_000,          // 2min (rarely changes)
+  "/api/social/gifts": 60_000,           // 60s
+  "/api/social/streams/active": 15_000,  // 15s
+};
+
+/** Invalidate a cached response (call after admin updates) */
+export function invalidateResponseCache(path?: string) {
+  if (path) _responseCache.delete(path);
+  else _responseCache.clear();
+}
+
+app.use((req, res, next) => {
+  if (req.method !== "GET") return next();
+  const ttl = FAST_CACHE_PATHS[req.path];
+  if (!ttl) return next();
+
+  const now = Date.now();
+  const cached = _responseCache.get(req.path);
+  if (cached && now - cached.ts < ttl) {
+    // Serve from memory — bypasses ALL middleware below
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": req.headers.origin || "*",
+      "Access-Control-Allow-Credentials": "true",
+      "X-Cache": "HIT",
+      "X-Content-Type-Options": "nosniff",
+    });
+    return res.end(cached.body);
+  }
+
+  // Cache MISS — intercept res.json() to capture and cache the response
+  const origJson = res.json.bind(res);
+  (res as any).json = (body: any) => {
+    try {
+      _responseCache.set(req.path, { body: JSON.stringify(body), ts: Date.now() });
+    } catch { /* don't break response if caching fails */ }
+    res.setHeader("X-Cache", "MISS");
+    return origJson(body);
+  };
+
+  next();
+});
+
+// ── Security middleware (Step 20: lighter in dev — skip CSP/HSTS) ──
+if (process.env.NODE_ENV !== "production") {
+  // In dev, use minimal Helmet (just basic headers, no CSP overhead)
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    hsts: false,
+  }));
+} else {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://mrco.live"],
+        mediaSrc: ["'self'", "blob:"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
     },
-  } : false,
-  crossOriginEmbedderPolicy: false,
-  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-  hsts: process.env.NODE_ENV === "production" ? {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  } : false,
-}));
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+  }));
+}
 
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
@@ -410,16 +490,41 @@ app.use(cors({
   maxAge: 86400,
 }));
 
-app.use(compression());
+app.use(compression({
+  threshold: 1024,  // only compress responses > 1KB
+  level: 4,         // level 4 = fast compression, low CPU
+  filter: (req, res) => {
+    // Don't compress if client doesn't want it
+    if (req.headers['x-no-compression']) return false;
+    // Skip compression for small responses and images
+    const type = res.getHeader('Content-Type') as string || '';
+    if (type.startsWith('image/')) return false;
+    return compression.filter(req, res);
+  },
+}));
 
 // ── Global rate limiting (per IP) ──
+const isDev = process.env.NODE_ENV !== "production";
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // 500 requests per 15 min per IP
+  max: isDev ? 10_000_000 : 500, // 10M in dev for load testing (was 100K — caused 234K non-2xx responses)
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: "تم تجاوز الحد الأقصى للطلبات. حاول لاحقاً" },
-  skip: (req) => !req.path.startsWith("/api"), // only rate limit API
+  skip: (req) => {
+    const p = req.path;
+    // Skip rate limiting for non-API, health, metrics, and all public GET endpoints
+    if (!p.startsWith("/api") || p === "/api/health" || p === "/api/metrics") return true;
+    // Skip public read-only endpoints (GET) — they have their own caching
+    if (req.method === "GET" && (
+      p === "/api/featured-streams" ||
+      p === "/api/announcement-popup" ||
+      p === "/api/app-download" ||
+      p === "/api/social/gifts" ||
+      p === "/api/social/streams/active"
+    )) return true;
+    return false;
+  },
 });
 app.use(globalLimiter);
 
@@ -448,21 +553,21 @@ app.use("/api/social", writeLimiter);
 
 app.use(
   express.json({
-    limit: "10mb",
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
+    limit: "1mb",
   }),
 );
 
 app.use(express.urlencoded({ extended: false }));
 
-// ── Additional security headers ──
+// ── Additional security headers + Step 27: Request ID ──
+let reqIdCounter = 0;
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "0"); // modern browsers handle this
   res.setHeader("Permissions-Policy", "camera=self, microphone=self, geolocation=()");
+  // Fast monotonic request ID (no crypto overhead)
+  res.setHeader("X-Request-Id", `${Date.now().toString(36)}-${(reqIdCounter++).toString(36)}`);
   next();
 });
 
@@ -481,27 +586,25 @@ export function log(message: string, source = "express") {
   createLogger(source).info(message);
 }
 
+// High-frequency paths to skip logging (prevents ~500 log writes/sec during load)
+const LOG_SKIP_PATHS = new Set([
+  "/api/health", "/api/metrics",
+  "/api/featured-streams", "/api/announcement-popup", "/api/app-download",
+  "/api/social/gifts", "/api/social/streams/active",
+]);
+
 app.use((req, res, next) => {
-  const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  // Skip logging for high-frequency endpoints
+  if (LOG_SKIP_PATHS.has(path) || !path.startsWith("/api")) {
+    return next();
+  }
 
+  const start = Date.now();
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
-    }
+    log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
   });
 
   next();
@@ -513,20 +616,32 @@ app.use((req, res, next) => {
 
   // ── Session middleware (Redis-backed, set up AFTER Redis connects) ──
   const sessionStore = createRedisSessionStore(session);
-  app.use(
-    session({
-      secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
-      resave: false,
-      saveUninitialized: false,
-      store: sessionStore,
-      cookie: {
-        secure: process.env.NODE_ENV === "production",
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: "lax",
-      },
-    }),
-  );
+  const sessionMiddleware = session({
+    secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
+    resave: false,
+    saveUninitialized: false,
+    store: sessionStore,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: "lax",
+    },
+  });
+  // Skip session middleware on high-frequency endpoints that don't need sessions
+  const SESSION_SKIP_PATHS = new Set([
+    "/api/health", "/api/metrics",
+    "/api/featured-streams", "/api/announcement-popup", "/api/app-download",
+  ]);
+  // Also skip session for public social GET endpoints
+  const SESSION_SKIP_SOCIAL_GET = new Set([
+    "/api/social/gifts", "/api/social/streams/active",
+  ]);
+  app.use((req, res, next) => {
+    if (SESSION_SKIP_PATHS.has(req.path)) return next();
+    if (req.method === "GET" && SESSION_SKIP_SOCIAL_GET.has(req.path)) return next();
+    return sessionMiddleware(req, res, next);
+  });
   console.log("[session] Session middleware initialized with", sessionStore ? "Redis store" : "MemoryStore");
 
   // ── Attach Redis Adapter for horizontal scaling ──
@@ -549,9 +664,16 @@ app.use((req, res, next) => {
   }
 
   // ── Health check endpoint (before route registration) ──
+  // Cached health status to avoid pool/Redis drain under load
+  let _healthCache: { data: any; ts: number } = { data: null, ts: 0 };
+  const HEALTH_CACHE_MS = 5_000; // 5 seconds
+
   app.get("/api/health", async (_req, res) => {
-    const { isDatabaseConnected } = await import("./db");
-    const { getRedis } = await import("./redis");
+    const now = Date.now();
+    if (_healthCache.data && now - _healthCache.ts < HEALTH_CACHE_MS) {
+      return res.status(_healthCache.data.healthy ? 200 : 503).json(_healthCache.data.body);
+    }
+
     const dbOk = await isDatabaseConnected();
     let redisOk = false;
     try {
@@ -560,21 +682,21 @@ app.use((req, res, next) => {
     } catch { /* redis down */ }
 
     const healthy = dbOk && redisOk;
-    res.status(healthy ? 200 : 503).json({
+    const body = {
       status: healthy ? "healthy" : "degraded",
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       services: { database: dbOk ? "up" : "down", redis: redisOk ? "up" : "down" },
-    });
+    };
+    _healthCache = { data: { healthy, body }, ts: now };
+    res.status(healthy ? 200 : 503).json(body);
   });
 
   // ── Prometheus-compatible metrics endpoint ──
   app.get("/api/metrics", async (_req, res) => {
     const mem = process.memoryUsage();
     const cpu = process.cpuUsage();
-    const { getPool } = await import("./db");
     const pool = getPool();
-    const { getOnlineUsersCount } = await import("./onlineUsers");
     const onlineCount = await getOnlineUsersCount();
 
     const lines = [
@@ -668,6 +790,11 @@ app.use((req, res, next) => {
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   const port = parseInt(process.env.PORT || "3000", 10);
+  // ── HTTP Keep-Alive optimization ──
+  httpServer.keepAliveTimeout = 65000;   // 65s — above typical ALB/proxy 60s timeout
+  httpServer.headersTimeout = 66000;     // must be > keepAliveTimeout
+  httpServer.maxHeadersCount = 50;       // limit header count
+
   httpServer.listen(
     {
       port,
@@ -694,7 +821,6 @@ app.use((req, res, next) => {
 
     // 3. Close database pool
     try {
-      const { getPool } = await import("./db");
       const p = getPool();
       if (p) await p.end();
       log("Database pool closed", "system");

@@ -61,6 +61,22 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Build cluster entry point (imports index.cjs at runtime)
+  console.log("building cluster entry...");
+  await esbuild({
+    entryPoints: ["server/cluster.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/cluster.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: [...externals, "./index.cjs"],
+    logLevel: "info",
+  });
 }
 
 buildAll().catch((err) => {

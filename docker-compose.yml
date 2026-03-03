@@ -17,6 +17,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      CLUSTER_WORKERS: ${CLUSTER_WORKERS:-2}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ablox_admin}:${POSTGRES_PASSWORD:-AbL0x_S3cur3_2026!}@postgres:5432/${POSTGRES_DB:-ablox}
       REDIS_URL: redis://:${REDIS_PASSWORD:-AbL0x_R3d1s_2026!}@redis:6379
       SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
@@ -103,7 +104,7 @@ services:
     container_name: ablox_redis
     restart: unless-stopped
     env_file: .env
-    command: redis-server --requirepass ${REDIS_PASSWORD:-AbL0x_R3d1s_2026!} --maxmemory 256mb --maxmemory-policy allkeys-lru --save 60 1000
+    command: redis-server --requirepass ${REDIS_PASSWORD:-AbL0x_R3d1s_2026!} --maxmemory 256mb --maxmemory-policy allkeys-lru --save 60 1000 --tcp-backlog 511 --tcp-keepalive 60 --hz 100
     # No external port — internal only (avoids conflict with other Redis instances)
     volumes:
       - ablox_redisdata:/data
