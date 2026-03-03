@@ -1,18 +1,40 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { Shield, Lock, User, ArrowRight } from "lucide-react";
+import { Shield, Lock, User, ArrowRight, AlertCircle } from "lucide-react";
 
 export function AdminLogin() {
   const [, setLocation] = useLocation();
   const [loading, setLoading] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      setLocation("/admin/dashboard");
-    }, 1500);
+    setError("");
+
+    try {
+      const res = await fetch("/api/admin/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setLocation("/admin/dashboard");
+      } else {
+        setError(data.message || "فشل تسجيل الدخول");
+      }
+    } catch {
+      setError("خطأ في الاتصال بالخادم");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -32,6 +54,13 @@ export function AdminLogin() {
           <p className="text-white/60 font-medium">لوحة تحكم الإدارة المركزية</p>
         </div>
 
+        {error && (
+          <div className="mb-6 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-2 text-red-400 text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
             <label className="text-sm font-bold text-white/80 mr-2">اسم المستخدم</label>
@@ -40,8 +69,10 @@ export function AdminLogin() {
               <input 
                 type="text" 
                 required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary focus:bg-white/10 transition-all"
-                placeholder="admin_ablox"
+                placeholder="admin"
               />
             </div>
           </div>
@@ -53,6 +84,8 @@ export function AdminLogin() {
               <input 
                 type="password" 
                 required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-12 text-white focus:outline-none focus:border-primary focus:bg-white/10 transition-all"
                 placeholder="••••••••"
               />

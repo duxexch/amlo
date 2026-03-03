@@ -467,6 +467,8 @@ app.use((_req, res, next) => {
 });
 
 // ── Session middleware (Redis-backed) ──
+// NOTE: Session store is set up inside the async IIFE after Redis connects.
+//       We define session config here but apply it after initRedis().
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET && process.env.NODE_ENV === "production") {
   throw new Error("SESSION_SECRET env var is required in production");
@@ -474,21 +476,6 @@ if (!SESSION_SECRET && process.env.NODE_ENV === "production") {
 if (!SESSION_SECRET) {
   console.warn("⚠️  WARNING: Using dev-only SESSION_SECRET — set SESSION_SECRET in .env for production");
 }
-const sessionStore = createRedisSessionStore(session);
-app.use(
-  session({
-    secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
-    resave: false,
-    saveUninitialized: false,
-    store: sessionStore,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: "lax",
-    },
-  }),
-);
 
 export function log(message: string, source = "express") {
   createLogger(source).info(message);
@@ -523,6 +510,24 @@ app.use((req, res, next) => {
 (async () => {
   // ── Initialize Redis (test connectivity before using it) ──
   await initRedis();
+
+  // ── Session middleware (Redis-backed, set up AFTER Redis connects) ──
+  const sessionStore = createRedisSessionStore(session);
+  app.use(
+    session({
+      secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
+      resave: false,
+      saveUninitialized: false,
+      store: sessionStore,
+      cookie: {
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: "lax",
+      },
+    }),
+  );
+  console.log("[session] Session middleware initialized with", sessionStore ? "Redis store" : "MemoryStore");
 
   // ── Attach Redis Adapter for horizontal scaling ──
   try {
