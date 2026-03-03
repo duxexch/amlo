@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, Wallet, Radio, User, MessageCircle, LogIn } from "lucide-react";
+import { Home, Wallet, Radio, User, MessageCircle, LogIn, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -12,12 +12,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [showDownload, setShowDownload] = useState(false);
 
-  // Check auth state once on mount
+  // Check auth state and download visibility on mount
   useEffect(() => {
     authApi.me()
       .then(() => setIsLoggedIn(true))
       .catch(() => setIsLoggedIn(false));
+
+    fetch("/api/app-download")
+      .then(r => r.json())
+      .then(res => {
+        if (res.success && res.data?.enabled) {
+          setShowDownload(true);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Pages without navigation (full-screen experiences)
@@ -66,7 +76,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Language Switcher */}
-        <div className="mt-auto pt-4 border-t border-white/10">
+        <div className="mt-auto pt-4 border-t border-white/10 space-y-2">
+          {showDownload && (
+            <Link href="/download">
+              <a className={cn(
+                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300",
+                location === "/download"
+                  ? "bg-primary/20 text-primary neon-border"
+                  : "hover:bg-white/5 text-muted-foreground hover:text-white"
+              )}>
+                <Download className={cn("w-5 h-5", location === "/download" && "animate-pulse")} />
+                <span className="font-bold text-lg">{t("nav.download")}</span>
+              </a>
+            </Link>
+          )}
           <LanguageSwitcher />
         </div>
       </aside>
@@ -77,6 +100,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center font-bold text-xl neon-border text-white" aria-label="Ablox">A</div>
            <div className="flex items-center gap-2">
              <LanguageSwitcher />
+             {showDownload && (
+               <Link href="/download"><button className="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center hover:bg-green-500/20 transition-all" aria-label={t("nav.download")}><Download className="w-5 h-5 text-green-400" /></button></Link>
+             )}
              {isLoggedIn === false && (
                <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20 flex items-center gap-1.5" aria-label={t("common.login")}><LogIn className="w-4 h-4" />{t("common.login")}</button></Link>
              )}

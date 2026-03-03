@@ -38,7 +38,8 @@
     "wallet": "지갑",
     "profile": "내 계정",
     "adminPanel": "관리자 패널",
-    "social": "소셜"
+    "social": "소셜",
+    "download": "다운로드"
   },
   "home": {
     "heroTitle": "Ablox 세계",
