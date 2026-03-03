@@ -144,9 +144,9 @@ export async function registerRoutes(
   const APP_DOWNLOAD_DEFAULT = {
     enabled: true,
     domain: "https://mrco.live",
-    pwa: { enabled: true, url: "", extension: "/", description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل" },
-    apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد" },
-    aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "ملف AAB — لرفعه على متجر جوجل بلاي" },
+    pwa: { enabled: true, url: "https://mrco.live", extension: "/", description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل" },
+    apk: { enabled: true, url: "https://mrco.live/download/ablox.apk", extension: ".apk", description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد (1.4 MB)" },
+    aab: { enabled: true, url: "https://mrco.live/download/ablox.aab", extension: ".aab", description: "ملف AAB — لرفعه على متجر جوجل بلاي (1.5 MB)" },
   };
 
   app.get("/api/app-download", async (_req, res) => {

@@ -25,6 +25,17 @@ export function serveStatic(app: Express) {
       if (filePath.endsWith("manifest.json")) {
         res.setHeader("Content-Type", "application/manifest+json");
       }
+      // APK/AAB download — force download with correct MIME
+      if (filePath.endsWith(".apk")) {
+        res.setHeader("Content-Type", "application/vnd.android.package-archive");
+        res.setHeader("Content-Disposition", "attachment; filename=\"ablox.apk\"");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      }
+      if (filePath.endsWith(".aab")) {
+        res.setHeader("Content-Type", "application/x-authorware-bin");
+        res.setHeader("Content-Disposition", "attachment; filename=\"ablox.aab\"");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      }
       // Step 28: Immutable caching for hashed assets (Vite output)
       if (/\/assets\/.*\.[a-f0-9]{8}\./i.test(filePath)) {
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");

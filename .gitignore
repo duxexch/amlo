@@ -35,8 +35,10 @@ signing/
 *.keystore
 *.jks
 
-# ── Google Play / App Store packages ──
+# ── Google Play / App Store packages (source) ──
 Ablox-GooglePlay/
-*.aab
-*.apk
 *.zip
+
+# Allow download files for distribution
+!client/public/download/*.apk
+!client/public/download/*.aab
