@@ -1,0 +1,96 @@
+# Ablox — Robots.txt
+# https://mrco.live
+# Updated: 2026-03-03
+
+# ═══════════════════════════════════════════════
+# Allow all major search engines full access
+# ═══════════════════════════════════════════════
+
+User-agent: *
+Allow: /
+Allow: /home
+Allow: /wallet
+Allow: /friends
+Allow: /profile
+Allow: /policy
+Allow: /agent-apply
+Allow: /account-apply
+
+# Block internal/API/auth routes from indexing
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin-login
+Disallow: /admin/
+Disallow: /agent/
+Disallow: /call/
+Disallow: /chat/
+Disallow: /room/
+
+# Block assets that waste crawl budget
+Disallow: /assets/
+Disallow: /icons/
+Disallow: /screenshots/
+
+# Block service worker and manifest from search results
+Disallow: /sw.js
+Disallow: /offline.html
+
+# ═══════════════════════════════════════════════
+# Googlebot — explicit full access
+# ═══════════════════════════════════════════════
+User-agent: Googlebot
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin-login
+Disallow: /admin/
+Disallow: /agent/
+Disallow: /call/
+Disallow: /chat/
+Disallow: /room/
+
+# ═══════════════════════════════════════════════
+# Googlebot-Image — allow OG/social images
+# ═══════════════════════════════════════════════
+User-agent: Googlebot-Image
+Allow: /og-image.png
+Allow: /screenshots/
+Disallow: /icons/
+
+# ═══════════════════════════════════════════════
+# Bingbot
+# ═══════════════════════════════════════════════
+User-agent: bingbot
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin-login
+Disallow: /admin/
+Disallow: /agent/
+
+# ═══════════════════════════════════════════════
+# Block bad bots
+# ═══════════════════════════════════════════════
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+# ═══════════════════════════════════════════════
+# Sitemaps
+# ═══════════════════════════════════════════════
+Sitemap: https://mrco.live/sitemap.xml
+Sitemap: https://mrco.live/sitemap-images.xml
+
+# Host directive (Yandex)
+Host: https://mrco.live

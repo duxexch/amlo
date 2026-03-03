@@ -221,6 +221,19 @@
     {
       "platform": "webapp",
       "url": "https://mrco.live/manifest.json"
+    },
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=app.ablox.twa",
+      "id": "app.ablox.twa"
+    },
+    {
+      "platform": "itunes",
+      "url": "https://apps.apple.com/app/ablox/id0000000000"
+    },
+    {
+      "platform": "windows",
+      "url": "https://www.microsoft.com/store/apps/ablox"
     }
   ],
   "prefer_related_applications": false

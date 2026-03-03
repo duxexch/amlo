@@ -406,6 +406,7 @@ const FAST_CACHE_PATHS: Record<string, number> = {
   "/api/app-download": 120_000,          // 2min (rarely changes)
   "/api/social/gifts": 60_000,           // 60s
   "/api/social/streams/active": 15_000,  // 15s
+  "/api/widgets/status": 60_000,         // 60s
 };
 
 /** Invalidate a cached response (call after admin updates) */
@@ -445,6 +446,10 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// ── SEO: X-Robots-Tag, Sitemap, Security.txt, Apple AASA, Widget API ──
+import { registerSeoRoutes } from "./seo";
+registerSeoRoutes(app);
 
 // ── Security middleware (Step 20: lighter in dev — skip CSP/HSTS) ──
 if (process.env.NODE_ENV !== "production") {
@@ -591,6 +596,8 @@ const LOG_SKIP_PATHS = new Set([
   "/api/health", "/api/metrics",
   "/api/featured-streams", "/api/announcement-popup", "/api/app-download",
   "/api/social/gifts", "/api/social/streams/active",
+  "/sitemap.xml", "/sitemap-images.xml", "/robots.txt", "/ads.txt", "/humans.txt",
+  "/api/widgets/status", "/widgets/status",
 ]);
 
 app.use((req, res, next) => {
@@ -632,6 +639,8 @@ app.use((req, res, next) => {
   const SESSION_SKIP_PATHS = new Set([
     "/api/health", "/api/metrics",
     "/api/featured-streams", "/api/announcement-popup", "/api/app-download",
+    "/sitemap.xml", "/sitemap-images.xml", "/robots.txt", "/ads.txt", "/humans.txt",
+    "/api/widgets/status", "/widgets/status",
   ]);
   // Also skip session for public social GET endpoints
   const SESSION_SKIP_SOCIAL_GET = new Set([
