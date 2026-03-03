@@ -663,6 +663,43 @@ app.use((req, res, next) => {
     console.error("[socket.io] Redis adapter setup failed, using in-memory:", err);
   }
 
+  // ── Digital Asset Links for TWA/APK verification ──
+  app.get("/.well-known/assetlinks.json", (_req, res) => {
+    const fingerprints: string[] = [];
+
+    // Custom signing key fingerprint (from env)
+    const custom = process.env.TWA_SHA256_FINGERPRINT;
+    if (custom && custom !== "__SIGNING_KEY_SHA256_FINGERPRINT__") {
+      fingerprints.push(custom);
+    }
+
+    // Google Play App Signing fingerprint (if using Play App Signing)
+    const play = process.env.PLAY_SHA256_FINGERPRINT;
+    if (play) {
+      fingerprints.push(play);
+    }
+
+    // PWABuilder debug key (well-known fingerprint)
+    fingerprints.push(
+      "91:89:39:3F:F1:4F:E0:52:29:E2:76:AE:71:B3:4D:3E:86:AE:31:A8:CE:4E:53:B7:7E:1F:D1:64:D8:47:48:BA"
+    );
+
+    const packageName = process.env.TWA_PACKAGE_NAME || "app.ablox.twa";
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json([
+      {
+        relation: ["delegate_permission/common.handle_all_urls"],
+        target: {
+          namespace: "android_app",
+          package_name: packageName,
+          sha256_cert_fingerprints: fingerprints,
+        },
+      },
+    ]);
+  });
+
   // ── Health check endpoint (before route registration) ──
   // Cached health status to avoid pool/Redis drain under load
   let _healthCache: { data: any; ts: number } = { data: null, ts: 0 };
