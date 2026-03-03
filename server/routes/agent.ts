@@ -4,6 +4,7 @@ import { rateLimitLogin } from "../middleware/adminAuth";
 import { verifyPasswordAsync } from "../utils/crypto";
 import { z } from "zod";
 import { createLogger } from "../logger";
+import { storage } from "../storage";
 const log = (msg: string, _src?: string) => agentLog.info(msg);
 const agentLog = createLogger("agent");
 
@@ -15,9 +16,21 @@ const agentLoginSchema = z.object({
   password: z.string().min(1),
 });
 
-// ── Import mock agents from admin routes (shared reference) ──
-// We re-export mockAgents from admin routes so agent routes can access them
-import { getMockAgents } from "./admin";
+// Helper to format agent data for API responses
+function formatAgentResponse(agent: any) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    email: agent.email,
+    phone: agent.phone,
+    referralCode: agent.referralCode,
+    commissionRate: agent.commissionRate,
+    totalUsers: agent.totalUsers,
+    totalRevenue: agent.totalRevenue,
+    balance: agent.balance,
+    status: agent.status,
+  };
+}
 
 // ════════════════════════════════════════════════════════════
 // AUTH ROUTES
@@ -31,10 +44,9 @@ router.post("/auth/login", rateLimitLogin, async (req, res) => {
     }
 
     const { email, password } = parsed.data;
-    const mockAgents = getMockAgents();
-    const agent = mockAgents.find((a) => a.email === email && a.status === "active");
+    const agent = await storage.getAgentByEmail(email);
 
-    if (!agent || !(await verifyPasswordAsync(password, agent.passwordHash))) {
+    if (!agent || agent.status !== "active" || !(await verifyPasswordAsync(password, agent.passwordHash))) {
       return res.status(401).json({ success: false, message: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
     }
 
@@ -51,21 +63,7 @@ router.post("/auth/login", rateLimitLogin, async (req, res) => {
 
     log(`Agent login: ${agent.email}`, "agent");
 
-    return res.json({
-      success: true,
-      data: {
-        id: agent.id,
-        name: agent.name,
-        email: agent.email,
-        phone: agent.phone,
-        referralCode: agent.referralCode,
-        commissionRate: agent.commissionRate,
-        totalUsers: agent.totalUsers,
-        totalRevenue: agent.totalRevenue,
-        balance: agent.balance,
-        status: agent.status,
-      },
-    });
+    return res.json({ success: true, data: formatAgentResponse(agent) });
   } catch (err: any) {
     log(`Agent login error: ${err.message}`, "agent");
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -79,35 +77,19 @@ router.post("/auth/logout", requireAgent, (req, res) => {
   });
 });
 
-router.get("/auth/me", requireAgent, (req, res) => {
-  const mockAgents = getMockAgents();
-  const agent = mockAgents.find((a) => a.id === req.session.agentId);
+router.get("/auth/me", requireAgent, async (req, res) => {
+  const agent = await storage.getAgent(req.session.agentId!);
   if (!agent) return res.status(401).json({ success: false, message: "جلسة غير صالحة" });
 
-  return res.json({
-    success: true,
-    data: {
-      id: agent.id,
-      name: agent.name,
-      email: agent.email,
-      phone: agent.phone,
-      referralCode: agent.referralCode,
-      commissionRate: agent.commissionRate,
-      totalUsers: agent.totalUsers,
-      totalRevenue: agent.totalRevenue,
-      balance: agent.balance,
-      status: agent.status,
-    },
-  });
+  return res.json({ success: true, data: formatAgentResponse(agent) });
 });
 
 // ════════════════════════════════════════════════════════════
 // AGENT DASHBOARD STATS
 // ════════════════════════════════════════════════════════════
 
-router.get("/stats", requireAgent, (req, res) => {
-  const mockAgents = getMockAgents();
-  const agent = mockAgents.find((a) => a.id === req.session.agentId);
+router.get("/stats", requireAgent, async (req, res) => {
+  const agent = await storage.getAgent(req.session.agentId!);
   if (!agent) return res.status(401).json({ success: false, message: "جلسة غير صالحة" });
 
   return res.json({

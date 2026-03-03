@@ -1,7 +1,7 @@
 import { eq, desc, asc, sql, and, or, like, ilike, count } from "drizzle-orm";
 import { getDb } from "./db";
 import * as schema from "@shared/schema";
-import type { User, InsertUser, Admin, InsertAdmin, UpgradeRequest } from "@shared/schema";
+import type { User, InsertUser, Admin, InsertAdmin, UpgradeRequest, WalletTransaction, GiftTransaction, FraudAlert, UserReport } from "@shared/schema";
 
 /**
  * DatabaseStorage — backed by PostgreSQL through Drizzle ORM.
@@ -289,6 +289,677 @@ export class DatabaseStorage {
     const [result] = await this.db.select({ count: count() }).from(schema.upgradeRequests)
       .where(eq(schema.upgradeRequests.status, "pending"));
     return result?.count || 0;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // SYSTEM CONFIG — إعدادات النظام المتقدمة
+  // ════════════════════════════════════════════════════════════
+  async getSystemConfig(category: string) {
+    if (!this.db) return null;
+    const [cfg] = await this.db.select().from(schema.systemConfig)
+      .where(eq(schema.systemConfig.category, category)).limit(1);
+    return cfg || null;
+  }
+
+  async upsertSystemConfig(category: string, configData: object, updatedBy?: string) {
+    if (!this.db) return null;
+    const json = JSON.stringify(configData);
+    const existing = await this.getSystemConfig(category);
+    if (existing) {
+      const [updated] = await this.db.update(schema.systemConfig)
+        .set({ configData: json, updatedBy: updatedBy || null, updatedAt: new Date() })
+        .where(eq(schema.systemConfig.id, existing.id)).returning();
+      return updated;
+    }
+    const [created] = await this.db.insert(schema.systemConfig)
+      .values({ category, configData: json, updatedBy }).returning();
+    return created;
+  }
+
+  async getAllSystemConfigs() {
+    if (!this.db) return [];
+    return this.db.select().from(schema.systemConfig).orderBy(schema.systemConfig.category);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // FEATURED STREAMS CONFIG — البثوث المميزة
+  // ════════════════════════════════════════════════════════════
+  async getFeaturedStreams() {
+    if (!this.db) return [];
+    return this.db.select().from(schema.featuredStreamsConfig)
+      .where(eq(schema.featuredStreamsConfig.isActive, true))
+      .orderBy(asc(schema.featuredStreamsConfig.sortOrder));
+  }
+
+  async getAllFeaturedStreams() {
+    if (!this.db) return [];
+    return this.db.select().from(schema.featuredStreamsConfig)
+      .orderBy(asc(schema.featuredStreamsConfig.sortOrder));
+  }
+
+  async createFeaturedStream(data: Partial<typeof schema.featuredStreamsConfig.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.featuredStreamsConfig).values(data as any).returning();
+    return created;
+  }
+
+  async updateFeaturedStream(id: string, data: Partial<typeof schema.featuredStreamsConfig.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.featuredStreamsConfig)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(schema.featuredStreamsConfig.id, id)).returning();
+    return updated;
+  }
+
+  async deleteFeaturedStream(id: string) {
+    if (!this.db) return;
+    await this.db.delete(schema.featuredStreamsConfig)
+      .where(eq(schema.featuredStreamsConfig.id, id));
+  }
+
+  async reorderFeaturedStreams(orderedIds: string[]) {
+    if (!this.db) return;
+    for (let i = 0; i < orderedIds.length; i++) {
+      await this.db.update(schema.featuredStreamsConfig)
+        .set({ sortOrder: i })
+        .where(eq(schema.featuredStreamsConfig.id, orderedIds[i]));
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ANNOUNCEMENT POPUPS
+  // ════════════════════════════════════════════════════════════
+  async getAnnouncementPopup() {
+    if (!this.db) return null;
+    const [popup] = await this.db.select().from(schema.announcementPopups).limit(1);
+    return popup || null;
+  }
+
+  async upsertAnnouncementPopup(data: Partial<typeof schema.announcementPopups.$inferInsert>) {
+    if (!this.db) return null;
+    const existing = await this.getAnnouncementPopup();
+    if (existing) {
+      const [updated] = await this.db.update(schema.announcementPopups)
+        .set({ ...data, updatedAt: new Date() } as any)
+        .where(eq(schema.announcementPopups.id, existing.id)).returning();
+      return updated;
+    }
+    const [created] = await this.db.insert(schema.announcementPopups).values(data as any).returning();
+    return created;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // PAYMENT METHODS — طرق الدفع
+  // ════════════════════════════════════════════════════════════
+  async getPaymentMethods(activeOnly = false) {
+    if (!this.db) return [];
+    const q = this.db.select().from(schema.paymentMethods);
+    if (activeOnly) return q.where(eq(schema.paymentMethods.isActive, true))
+      .orderBy(asc(schema.paymentMethods.sortOrder));
+    return q.orderBy(asc(schema.paymentMethods.sortOrder));
+  }
+
+  async getPaymentMethod(id: string) {
+    if (!this.db) return null;
+    const [m] = await this.db.select().from(schema.paymentMethods)
+      .where(eq(schema.paymentMethods.id, id)).limit(1);
+    return m || null;
+  }
+
+  async createPaymentMethod(data: Partial<typeof schema.paymentMethods.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.paymentMethods).values(data as any).returning();
+    return created;
+  }
+
+  async updatePaymentMethod(id: string, data: Partial<typeof schema.paymentMethods.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.paymentMethods)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(schema.paymentMethods.id, id)).returning();
+    return updated;
+  }
+
+  async deletePaymentMethod(id: string) {
+    if (!this.db) return;
+    await this.db.delete(schema.paymentMethods).where(eq(schema.paymentMethods.id, id));
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // FRAUD ALERTS — تنبيهات الاحتيال
+  // ════════════════════════════════════════════════════════════
+  async getFraudAlerts(page = 1, limit = 20, filters: { status?: string; severity?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.status) conditions.push(eq(schema.fraudAlerts.status, filters.status));
+    if (filters.severity) conditions.push(eq(schema.fraudAlerts.severity, filters.severity));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(where);
+    const data = await this.db.select().from(schema.fraudAlerts).where(where)
+      .orderBy(desc(schema.fraudAlerts.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getFraudAlert(id: string) {
+    if (!this.db) return null;
+    const [alert] = await this.db.select().from(schema.fraudAlerts)
+      .where(eq(schema.fraudAlerts.id, id)).limit(1);
+    return alert || null;
+  }
+
+  async createFraudAlert(data: Partial<typeof schema.fraudAlerts.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.fraudAlerts).values(data as any).returning();
+    return created;
+  }
+
+  async updateFraudAlert(id: string, data: Partial<typeof schema.fraudAlerts.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.fraudAlerts)
+      .set(data as any)
+      .where(eq(schema.fraudAlerts.id, id)).returning();
+    return updated;
+  }
+
+  async getFraudStats() {
+    if (!this.db) return { total: 0, pending: 0, investigating: 0, resolved: 0, dismissed: 0, critical: 0 };
+    const total = await this.db.select({ count: count() }).from(schema.fraudAlerts);
+    const pending = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "pending"));
+    const investigating = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "investigating"));
+    const resolved = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "resolved"));
+    const dismissed = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "dismissed"));
+    const critical = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.severity, "critical"));
+    return {
+      total: total[0]?.count || 0,
+      pending: pending[0]?.count || 0,
+      investigating: investigating[0]?.count || 0,
+      resolved: resolved[0]?.count || 0,
+      dismissed: dismissed[0]?.count || 0,
+      critical: critical[0]?.count || 0,
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // BANNED WORDS — الكلمات المحظورة
+  // ════════════════════════════════════════════════════════════
+  async getBannedWords() {
+    if (!this.db) return [];
+    return this.db.select().from(schema.bannedWords).orderBy(schema.bannedWords.word);
+  }
+
+  async addBannedWord(word: string, language = "all", severity = "block") {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.bannedWords).values({ word, language, severity }).returning();
+    return created;
+  }
+
+  async deleteBannedWord(id: string) {
+    if (!this.db) return;
+    await this.db.delete(schema.bannedWords).where(eq(schema.bannedWords.id, id));
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // AGENT APPLICATIONS — طلبات الوكلاء
+  // ════════════════════════════════════════════════════════════
+  async getAgentApplications(page = 1, limit = 20, filters: { status?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.status) conditions.push(eq(schema.agentApplications.status, filters.status));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.agentApplications).where(where);
+    const data = await this.db.select().from(schema.agentApplications).where(where)
+      .orderBy(desc(schema.agentApplications.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getAgentApplication(id: string) {
+    if (!this.db) return null;
+    const [app] = await this.db.select().from(schema.agentApplications)
+      .where(eq(schema.agentApplications.id, id)).limit(1);
+    return app || null;
+  }
+
+  async createAgentApplication(data: Partial<typeof schema.agentApplications.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.agentApplications).values(data as any).returning();
+    return created;
+  }
+
+  async updateAgentApplication(id: string, data: Partial<typeof schema.agentApplications.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.agentApplications)
+      .set(data as any)
+      .where(eq(schema.agentApplications.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAgentApplication(id: string) {
+    if (!this.db) return;
+    await this.db.delete(schema.agentApplications).where(eq(schema.agentApplications.id, id));
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ACCOUNT APPLICATIONS — طلبات فتح الحسابات
+  // ════════════════════════════════════════════════════════════
+  async getAccountApplications(page = 1, limit = 20, filters: { status?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.status) conditions.push(eq(schema.accountApplications.status, filters.status));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.accountApplications).where(where);
+    const data = await this.db.select().from(schema.accountApplications).where(where)
+      .orderBy(desc(schema.accountApplications.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async createAccountApplication(data: Partial<typeof schema.accountApplications.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.accountApplications).values(data as any).returning();
+    return created;
+  }
+
+  async updateAccountApplication(id: string, data: Partial<typeof schema.accountApplications.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.accountApplications)
+      .set(data as any)
+      .where(eq(schema.accountApplications.id, id)).returning();
+    return updated;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // NOTIFICATION PREFERENCES — تفضيلات الإشعارات
+  // ════════════════════════════════════════════════════════════
+  async getNotificationPreferences(userId: string) {
+    if (!this.db) return null;
+    const [prefs] = await this.db.select().from(schema.notificationPreferences)
+      .where(eq(schema.notificationPreferences.userId, userId)).limit(1);
+    return prefs || null;
+  }
+
+  async upsertNotificationPreferences(userId: string, data: Partial<typeof schema.notificationPreferences.$inferInsert>) {
+    if (!this.db) return null;
+    const existing = await this.getNotificationPreferences(userId);
+    if (existing) {
+      const [updated] = await this.db.update(schema.notificationPreferences)
+        .set({ ...data, updatedAt: new Date() } as any)
+        .where(eq(schema.notificationPreferences.id, existing.id)).returning();
+      return updated;
+    }
+    const [created] = await this.db.insert(schema.notificationPreferences)
+      .values({ userId, ...data } as any).returning();
+    return created;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // WALLET / TRANSACTIONS — المحفظة والمعاملات المالية
+  // ════════════════════════════════════════════════════════════
+  async getUserTransactions(userId: string, page = 1, limit = 20, filters: { type?: string; status?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [eq(schema.walletTransactions.userId, userId)];
+    if (filters.type) conditions.push(eq(schema.walletTransactions.type, filters.type));
+    if (filters.status) conditions.push(eq(schema.walletTransactions.status, filters.status));
+    const where = and(...conditions);
+    const [countResult] = await this.db.select({ count: count() }).from(schema.walletTransactions).where(where);
+    const data = await this.db.select().from(schema.walletTransactions).where(where)
+      .orderBy(desc(schema.walletTransactions.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getAllTransactions(page = 1, limit = 20, filters: { type?: string; status?: string; userId?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.type) conditions.push(eq(schema.walletTransactions.type, filters.type));
+    if (filters.status) conditions.push(eq(schema.walletTransactions.status, filters.status));
+    if (filters.userId) conditions.push(eq(schema.walletTransactions.userId, filters.userId));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.walletTransactions).where(where);
+    const data = await this.db.select().from(schema.walletTransactions).where(where)
+      .orderBy(desc(schema.walletTransactions.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getTransaction(id: string) {
+    if (!this.db) return null;
+    const [tx] = await this.db.select().from(schema.walletTransactions)
+      .where(eq(schema.walletTransactions.id, id)).limit(1);
+    return tx || null;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // GIFT TRANSACTIONS — معاملات الهدايا
+  // ════════════════════════════════════════════════════════════
+  async createGiftTransaction(data: Partial<typeof schema.giftTransactions.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.giftTransactions).values(data as any).returning();
+    return created;
+  }
+
+  async getUserGiftHistory(userId: string, role: "sent" | "received" = "sent", page = 1, limit = 20) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const col = role === "sent" ? schema.giftTransactions.senderId : schema.giftTransactions.receiverId;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.giftTransactions).where(eq(col, userId));
+    const data = await this.db.select().from(schema.giftTransactions).where(eq(col, userId))
+      .orderBy(desc(schema.giftTransactions.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // WITHDRAWAL REQUESTS — طلبات السحب
+  // ════════════════════════════════════════════════════════════
+  async getWithdrawalRequests(page = 1, limit = 20, filters: { status?: string; userId?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.status) conditions.push(eq(schema.withdrawalRequests.status, filters.status));
+    if (filters.userId) conditions.push(eq(schema.withdrawalRequests.userId, filters.userId));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.withdrawalRequests).where(where);
+    const data = await this.db.select().from(schema.withdrawalRequests).where(where)
+      .orderBy(desc(schema.withdrawalRequests.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async createWithdrawalRequest(data: Partial<typeof schema.withdrawalRequests.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.withdrawalRequests).values(data as any).returning();
+    return created;
+  }
+
+  async updateWithdrawalRequest(id: string, data: Partial<typeof schema.withdrawalRequests.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.withdrawalRequests)
+      .set(data as any)
+      .where(eq(schema.withdrawalRequests.id, id)).returning();
+    return updated;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // STREAMS — البثوث المباشرة
+  // ════════════════════════════════════════════════════════════
+  async getActiveStreams(page = 1, limit = 20) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const where = eq(schema.streams.status, "active");
+    const [countResult] = await this.db.select({ count: count() }).from(schema.streams).where(where);
+    const data = await this.db.select().from(schema.streams).where(where)
+      .orderBy(desc(schema.streams.viewerCount)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getStream(id: string) {
+    if (!this.db) return null;
+    const [stream] = await this.db.select().from(schema.streams)
+      .where(eq(schema.streams.id, id)).limit(1);
+    return stream || null;
+  }
+
+  async createStream(data: Partial<typeof schema.streams.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.streams).values(data as any).returning();
+    return created;
+  }
+
+  async updateStream(id: string, data: Partial<typeof schema.streams.$inferInsert>) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.streams)
+      .set(data as any)
+      .where(eq(schema.streams.id, id)).returning();
+    return updated;
+  }
+
+  async endStream(id: string) {
+    if (!this.db) return null;
+    const [updated] = await this.db.update(schema.streams)
+      .set({ status: "ended", endedAt: new Date() })
+      .where(eq(schema.streams.id, id)).returning();
+    return updated;
+  }
+
+  async getUserActiveStream(userId: string) {
+    if (!this.db) return null;
+    const [stream] = await this.db.select().from(schema.streams)
+      .where(and(eq(schema.streams.userId, userId), eq(schema.streams.status, "active")))
+      .limit(1);
+    return stream || null;
+  }
+
+  async getStreamsByUser(userId: string) {
+    if (!this.db) return [];
+    return this.db.select().from(schema.streams)
+      .where(eq(schema.streams.userId, userId))
+      .orderBy(desc(schema.streams.startedAt));
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // STREAM VIEWERS — مشاهدو البث
+  // ════════════════════════════════════════════════════════════
+  async addStreamViewer(streamId: string, userId: string, role = "viewer") {
+    if (!this.db) return null;
+    const [viewer] = await this.db.insert(schema.streamViewers)
+      .values({ streamId, userId, role }).returning();
+    // Increment viewer count
+    await this.db.update(schema.streams)
+      .set({ viewerCount: sql`viewer_count + 1` })
+      .where(eq(schema.streams.id, streamId));
+    return viewer;
+  }
+
+  async removeStreamViewer(streamId: string, userId: string) {
+    if (!this.db) return;
+    await this.db.update(schema.streamViewers)
+      .set({ leftAt: new Date() })
+      .where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        eq(schema.streamViewers.userId, userId),
+        sql`left_at IS NULL`
+      ));
+    await this.db.update(schema.streams)
+      .set({ viewerCount: sql`GREATEST(viewer_count - 1, 0)` })
+      .where(eq(schema.streams.id, streamId));
+  }
+
+  async getStreamViewers(streamId: string) {
+    if (!this.db) return [];
+    return this.db.select().from(schema.streamViewers)
+      .where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        sql`left_at IS NULL`
+      ));
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // USER FOLLOWS — نظام المتابعة العام
+  // ════════════════════════════════════════════════════════════
+  async followUser(followerId: string, followingId: string) {
+    if (!this.db) return null;
+    // Check if already following
+    const existing = await this.db.select().from(schema.userFollows)
+      .where(and(
+        eq(schema.userFollows.followerId, followerId),
+        eq(schema.userFollows.followingId, followingId)
+      )).limit(1);
+    if (existing.length > 0) return existing[0];
+    const [follow] = await this.db.insert(schema.userFollows)
+      .values({ followerId, followingId }).returning();
+    return follow;
+  }
+
+  async unfollowUser(followerId: string, followingId: string) {
+    if (!this.db) return;
+    await this.db.delete(schema.userFollows)
+      .where(and(
+        eq(schema.userFollows.followerId, followerId),
+        eq(schema.userFollows.followingId, followingId)
+      ));
+  }
+
+  async getFollowers(userId: string, page = 1, limit = 20) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const where = eq(schema.userFollows.followingId, userId);
+    const [countResult] = await this.db.select({ count: count() }).from(schema.userFollows).where(where);
+    const data = await this.db.select().from(schema.userFollows).where(where)
+      .orderBy(desc(schema.userFollows.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getFollowing(userId: string, page = 1, limit = 20) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const where = eq(schema.userFollows.followerId, userId);
+    const [countResult] = await this.db.select({ count: count() }).from(schema.userFollows).where(where);
+    const data = await this.db.select().from(schema.userFollows).where(where)
+      .orderBy(desc(schema.userFollows.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async getFollowCounts(userId: string) {
+    if (!this.db) return { followers: 0, following: 0 };
+    const [followers] = await this.db.select({ count: count() }).from(schema.userFollows)
+      .where(eq(schema.userFollows.followingId, userId));
+    const [following] = await this.db.select({ count: count() }).from(schema.userFollows)
+      .where(eq(schema.userFollows.followerId, userId));
+    return { followers: followers?.count || 0, following: following?.count || 0 };
+  }
+
+  async isFollowing(followerId: string, followingId: string) {
+    if (!this.db) return false;
+    const [result] = await this.db.select().from(schema.userFollows)
+      .where(and(
+        eq(schema.userFollows.followerId, followerId),
+        eq(schema.userFollows.followingId, followingId)
+      )).limit(1);
+    return !!result;
+  }
+
+  async getFollowedAccounts(userId: string, limit = 20) {
+    if (!this.db) return [];
+    const follows = await this.db.select({
+      followId: schema.userFollows.id,
+      followingId: schema.userFollows.followingId,
+    }).from(schema.userFollows)
+      .where(eq(schema.userFollows.followerId, userId))
+      .limit(limit);
+    if (follows.length === 0) return [];
+    const userIds = follows.map(f => f.followingId);
+    const users = await this.db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      status: schema.users.status,
+      level: schema.users.level,
+      country: schema.users.country,
+    }).from(schema.users)
+      .where(or(...userIds.map(uid => eq(schema.users.id, uid))));
+    return users;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // USER REPORTS — بلاغات المستخدمين (موسّعة)
+  // ════════════════════════════════════════════════════════════
+  async getReports(page = 1, limit = 20, filters: { status?: string; type?: string } = {}) {
+    if (!this.db) return { data: [], total: 0 };
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (filters.status) conditions.push(eq(schema.userReports.status, filters.status));
+    if (filters.type) conditions.push(eq(schema.userReports.type, filters.type));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.userReports).where(where);
+    const data = await this.db.select().from(schema.userReports).where(where)
+      .orderBy(desc(schema.userReports.createdAt)).limit(limit).offset(offset);
+    return { data, total: countResult?.count || 0 };
+  }
+
+  async createReport(data: Partial<typeof schema.userReports.$inferInsert>) {
+    if (!this.db) return null;
+    const [created] = await this.db.insert(schema.userReports).values(data as any).returning();
+    return created;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ADMIN STATS — إحصائيات حقيقية
+  // ════════════════════════════════════════════════════════════
+  async getAdminDashboardStats() {
+    if (!this.db) return { totalUsers: 0, totalAgents: 0, activeStreams: 0, todayRevenue: 0, weeklyRevenue: 0 };
+    const [usersCount] = await this.db.select({ count: count() }).from(schema.users);
+    const [agentsCount] = await this.db.select({ count: count() }).from(schema.agents);
+    const [streamsCount] = await this.db.select({ count: count() }).from(schema.streams)
+      .where(eq(schema.streams.status, "active"));
+    
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    const todayRevResult = await this.db.select({ 
+      total: sql<number>`COALESCE(SUM(amount), 0)` 
+    }).from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.type, "purchase"),
+        eq(schema.walletTransactions.status, "completed"),
+        sql`created_at >= ${today.toISOString()}`
+      ));
+    
+    const weekRevResult = await this.db.select({
+      total: sql<number>`COALESCE(SUM(amount), 0)`
+    }).from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.type, "purchase"),
+        eq(schema.walletTransactions.status, "completed"),
+        sql`created_at >= ${weekAgo.toISOString()}`
+      ));
+
+    return {
+      totalUsers: usersCount?.count || 0,
+      totalAgents: agentsCount?.count || 0,
+      activeStreams: streamsCount?.count || 0,
+      todayRevenue: Number(todayRevResult[0]?.total || 0),
+      weeklyRevenue: Number(weekRevResult[0]?.total || 0),
+    };
+  }
+
+  async getWeeklyUserRegistrations() {
+    if (!this.db) return [];
+    const result = await this.db.select({
+      day: sql<string>`DATE(created_at)`,
+      count: count(),
+    }).from(schema.users)
+      .where(sql`created_at >= NOW() - INTERVAL '7 days'`)
+      .groupBy(sql`DATE(created_at)`)
+      .orderBy(sql`DATE(created_at)`);
+    return result;
+  }
+
+  async getRecentAdminActivity(limit = 10) {
+    if (!this.db) return [];
+    return this.db.select().from(schema.adminLogs)
+      .orderBy(desc(schema.adminLogs.createdAt))
+      .limit(limit);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // User deletion
+  // ════════════════════════════════════════════════════════════
+  async deleteUser(id: string) {
+    if (!this.db) return;
+    // Delete related data
+    await this.db.delete(schema.userProfiles).where(eq(schema.userProfiles.userId, id));
+    await this.db.delete(schema.friendProfileVisibility)
+      .where(or(eq(schema.friendProfileVisibility.userId, id), eq(schema.friendProfileVisibility.friendId, id)));
+    await this.db.delete(schema.notificationPreferences).where(eq(schema.notificationPreferences.userId, id));
+    await this.db.delete(schema.friendships)
+      .where(or(eq(schema.friendships.senderId, id), eq(schema.friendships.receiverId, id)));
+    await this.db.delete(schema.chatBlocks)
+      .where(or(eq(schema.chatBlocks.blockerId, id), eq(schema.chatBlocks.blockedId, id)));
+    await this.db.delete(schema.userFollows)
+      .where(or(eq(schema.userFollows.followerId, id), eq(schema.userFollows.followingId, id)));
+    // Finally delete the user
+    await this.db.delete(schema.users).where(eq(schema.users.id, id));
   }
 }
 

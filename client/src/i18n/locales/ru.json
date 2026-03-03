@@ -69,9 +69,6 @@
     "giftModalTitle": "Отправить подарки",
     "giftCoinsLabel": "Монеты",
     "giftRecharge": "Пополнить",
-    "mockMsg1": "Всем привет!",
-    "mockMsg2": "Этот стрим потрясающий 🔥",
-    "mockMsg3": "Можно мне сделать запрос?",
     "giftSent": "{{name}} отправил ",
     "giftAmount": "{{amount}} монет!"
   },

@@ -1,40 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { History, ShieldCheck, ArrowDownLeft, ArrowUpRight, Coins, TrendingUp, Filter, Download, Send, Clock, CheckCircle2, XCircle, AlertCircle, Navigation, Sparkles, Rocket, Plane, Compass, Globe2, Star } from "lucide-react";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
+import { walletApi } from "@/lib/socialApi";
 
 type WalletTab = "recharge" | "miles" | "history" | "income" | "withdraw";
-
-// Mock transaction history
-const mockTransactions = [
-  { id: 1, type: "recharge", amount: 5000, date: "2025-01-15 14:30", method: "Visa •••• 4242", status: "completed" as const },
-  { id: 2, type: "gift_sent", amount: -200, date: "2025-01-15 12:00", to: "Omar_12", status: "completed" as const },
-  { id: 3, type: "gift_received", amount: 500, date: "2025-01-14 20:45", from: "Sara_VIP", status: "completed" as const },
-  { id: 4, type: "recharge", amount: 10000, date: "2025-01-13 09:00", method: "Apple Pay", status: "completed" as const },
-  { id: 5, type: "withdrawal", amount: -3000, date: "2025-01-12 16:20", method: "Bank ••• 789", status: "pending" as const },
-  { id: 6, type: "gift_sent", amount: -100, date: "2025-01-12 11:30", to: "Noor_98", status: "completed" as const },
-  { id: 7, type: "commission", amount: 1200, date: "2025-01-11 08:00", from: "System", status: "completed" as const },
-  { id: 8, type: "gift_received", amount: 2000, date: "2025-01-10 22:15", from: "Ahmed_Pro", status: "completed" as const },
-  { id: 9, type: "recharge", amount: 2000, date: "2025-01-09 10:00", method: "Google Pay", status: "failed" as const },
-  { id: 10, type: "withdrawal", amount: -5000, date: "2025-01-08 14:00", method: "PayPal", status: "completed" as const },
-];
-
-// Mock income data
-const mockIncome = {
-  totalEarnings: 45200,
-  thisMonth: 8500,
-  lastMonth: 12000,
-  giftsIncome: 32000,
-  commissionIncome: 13200,
-  breakdown: [
-    { month: "Jan", gifts: 5000, commission: 3500 },
-    { month: "Dec", gifts: 8000, commission: 4000 },
-    { month: "Nov", gifts: 6500, commission: 2800 },
-    { month: "Oct", gifts: 7200, commission: 1900 },
-    { month: "Sep", gifts: 5300, commission: 1000 },
-  ],
-};
 
 export function Wallet() {
   const { t, i18n } = useTranslation();
@@ -43,6 +14,16 @@ export function Wallet() {
   const [txFilter, setTxFilter] = useState<string>("all");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawMethod, setWithdrawMethod] = useState("bank");
+  const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+
+  // Real data state
+  const [balance, setBalance] = useState({ coins: 0, diamonds: 0 });
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [income, setIncome] = useState({ totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 });
+  const [incomeLoading, setIncomeLoading] = useState(false);
 
   const packages = [
     { coins: 100, price: "$0.99", bonus: 0 },
@@ -57,7 +38,58 @@ export function Wallet() {
     { coins: 500000, price: "$2999.99", bonus: 250000 },
   ];
 
-  const filteredTx = txFilter === "all" ? mockTransactions : mockTransactions.filter(tx => tx.type === txFilter);
+  // Load balance on mount
+  useEffect(() => {
+    walletApi.balance()
+      .then(data => setBalance({ coins: data?.coins || 0, diamonds: data?.diamonds || 0 }))
+      .catch(() => {});
+  }, []);
+
+  // Load transactions when history tab is active
+  useEffect(() => {
+    if (activeTab === "history") {
+      setTxLoading(true);
+      const typeFilter = txFilter === "all" ? undefined : txFilter;
+      walletApi.transactions(1, typeFilter)
+        .then((data: any) => {
+          setTransactions(Array.isArray(data) ? data : data?.data || []);
+        })
+        .catch(() => setTransactions([]))
+        .finally(() => setTxLoading(false));
+    }
+  }, [activeTab, txFilter]);
+
+  // Load income when income tab is active
+  useEffect(() => {
+    if (activeTab === "income") {
+      setIncomeLoading(true);
+      walletApi.income()
+        .then(data => setIncome(data || { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 }))
+        .catch(() => {})
+        .finally(() => setIncomeLoading(false));
+    }
+  }, [activeTab]);
+
+  const handleWithdraw = async () => {
+    const amount = Number(withdrawAmount);
+    if (!amount || amount < 1000) return;
+    setWithdrawSubmitting(true);
+    setWithdrawError(null);
+    setWithdrawSuccess(false);
+    try {
+      await walletApi.withdraw({ amount, paymentMethodId: withdrawMethod });
+      setWithdrawSuccess(true);
+      setWithdrawAmount("");
+      // Refresh balance
+      walletApi.balance().then(data => setBalance({ coins: data?.coins || 0, diamonds: data?.diamonds || 0 })).catch(() => {});
+    } catch (err: any) {
+      setWithdrawError(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setWithdrawSubmitting(false);
+    }
+  };
+
+  const filteredTx = transactions;
 
   const [milesPackages, setMilesPackages] = useState<{id: string; miles: number; price: string}[]>([]);
   const [milesLoading, setMilesLoading] = useState(false);
@@ -99,14 +131,14 @@ export function Wallet() {
     return <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center"><ArrowUpRight className="w-5 h-5 text-red-400" /></div>;
   };
 
-  const getTxLabel = (tx: typeof mockTransactions[0]) => {
+  const getTxLabel = (tx: any) => {
     switch (tx.type) {
-      case "recharge": return t("wallet.txRecharge");
-      case "gift_sent": return `${t("wallet.txGiftSent")} → ${tx.to}`;
-      case "gift_received": return `${t("wallet.txGiftReceived")} ← ${tx.from}`;
+      case "recharge": case "purchase": return t("wallet.txRecharge");
+      case "gift_sent": return `${t("wallet.txGiftSent")} → ${tx.description || ""}`;
+      case "gift_received": return `${t("wallet.txGiftReceived")} ← ${tx.description || ""}`;
       case "withdrawal": return t("wallet.txWithdrawal");
-      case "commission": return t("wallet.txCommission");
-      default: return tx.type;
+      case "commission": case "bonus": return t("wallet.txCommission");
+      default: return tx.description || tx.type;
     }
   };
 
@@ -196,7 +228,7 @@ export function Wallet() {
                 <span className="text-yellow-400/80 text-xs font-bold uppercase tracking-wide">{t("common.coins")}</span>
               </div>
               <div className="flex items-end gap-3">
-                <span className="text-5xl md:text-6xl font-black text-white tracking-tight" style={{ textShadow: '0 0 40px rgba(255,255,255,0.15)' }}>1,250</span>
+                <span className="text-5xl md:text-6xl font-black text-white tracking-tight" style={{ textShadow: '0 0 40px rgba(255,255,255,0.15)' }}>{balance.coins.toLocaleString()}</span>
               </div>
             </motion.div>
 
@@ -234,10 +266,10 @@ export function Wallet() {
           {/* Stats row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: t("wallet.totalSpent"), value: "15,300", color: "text-red-400", icon: <ArrowUpRight className="w-3 h-3" />, bg: "bg-red-500/10 border-red-500/20" },
-              { label: t("wallet.totalEarned"), value: "45,200", color: "text-emerald-400", icon: <ArrowDownLeft className="w-3 h-3" />, bg: "bg-emerald-500/10 border-emerald-500/20" },
-              { label: t("wallet.milesBalance"), value: "0", color: "text-cyan-400", icon: <Navigation className="w-3 h-3" />, bg: "bg-cyan-500/10 border-cyan-500/20" },
-              { label: t("wallet.tabIncome"), value: "8,500", color: "text-yellow-400", icon: <TrendingUp className="w-3 h-3" />, bg: "bg-yellow-500/10 border-yellow-500/20" },
+              { label: t("wallet.totalSpent"), value: transactions.filter(tx => tx.type === 'debit' || tx.amount < 0).reduce((sum, tx) => sum + Math.abs(tx.amount || 0), 0).toLocaleString(), color: "text-red-400", icon: <ArrowUpRight className="w-3 h-3" />, bg: "bg-red-500/10 border-red-500/20" },
+              { label: t("wallet.totalEarned"), value: income.totalReceived.toLocaleString(), color: "text-emerald-400", icon: <ArrowDownLeft className="w-3 h-3" />, bg: "bg-emerald-500/10 border-emerald-500/20" },
+              { label: t("wallet.milesBalance"), value: balance.diamonds.toLocaleString(), color: "text-cyan-400", icon: <Navigation className="w-3 h-3" />, bg: "bg-cyan-500/10 border-cyan-500/20" },
+              { label: t("wallet.tabIncome"), value: income.monthReceived.toLocaleString(), color: "text-yellow-400", icon: <TrendingUp className="w-3 h-3" />, bg: "bg-yellow-500/10 border-yellow-500/20" },
             ].map((stat, i) => (
               <motion.div
                 key={i}
@@ -532,7 +564,11 @@ export function Wallet() {
 
             {/* Transactions List */}
             <div className="space-y-3">
-              {filteredTx.length === 0 ? (
+              {txLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : filteredTx.length === 0 ? (
                 <div className="glass p-12 rounded-2xl text-center border border-white/10">
                   <AlertCircle className="w-12 h-12 text-white/20 mx-auto mb-3" />
                   <p className="text-white/40 font-medium">{t("wallet.noTransactions")}</p>
@@ -549,7 +585,7 @@ export function Wallet() {
                     {getTxIcon(tx.type)}
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-bold text-sm truncate">{getTxLabel(tx)}</p>
-                      <p className="text-white/40 text-xs mt-0.5" dir="ltr">{tx.date}</p>
+                      <p className="text-white/40 text-xs mt-0.5" dir="ltr">{tx.createdAt ? new Date(tx.createdAt).toLocaleString("ar") : tx.date}</p>
                     </div>
                     <div className="text-end shrink-0">
                       <p className={`font-black text-sm ${tx.amount > 0 ? "text-emerald-400" : "text-red-400"}`}>
@@ -578,54 +614,35 @@ export function Wallet() {
         {/* ---- INCOME TAB ---- */}
         {activeTab === "income" && (
           <motion.div key="income" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
-            {/* Income Summary Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { label: t("wallet.incomeTotal"), value: mockIncome.totalEarnings, color: "text-white" },
-                { label: t("wallet.incomeThisMonth"), value: mockIncome.thisMonth, color: "text-emerald-400" },
-                { label: t("wallet.incomeGifts"), value: mockIncome.giftsIncome, color: "text-yellow-400" },
-                { label: t("wallet.incomeCommission"), value: mockIncome.commissionIncome, color: "text-primary" },
-              ].map((card, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ y: 15, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: i * 0.08 }}
-                  className="glass p-5 rounded-2xl border border-white/10"
-                >
-                  <p className="text-white/50 text-xs font-bold mb-2">{card.label}</p>
-                  <p className={`text-2xl font-black ${card.color}`}>{card.value.toLocaleString()}</p>
-                  <p className="text-white/30 text-xs mt-1">{t("common.coins")}</p>
-                </motion.div>
-              ))}
-            </div>
-
-            {/* Monthly Breakdown */}
-            <div className="glass p-6 rounded-2xl border border-white/10">
-              <h3 className="text-lg font-bold text-white mb-4">{t("wallet.monthlyBreakdown")}</h3>
-              <div className="space-y-3">
-                {mockIncome.breakdown.map((row, i) => {
-                  const total = row.gifts + row.commission;
-                  const giftPct = Math.round((row.gifts / total) * 100);
-                  return (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-white/70 font-medium">{row.month}</span>
-                        <span className="text-white font-bold">{total.toLocaleString()}</span>
-                      </div>
-                      <div className="flex h-3 rounded-full overflow-hidden bg-white/5">
-                        <div className="bg-yellow-400/80 rounded-r-none rounded-l-full transition-all" style={{ width: `${giftPct}%` }} />
-                        <div className="bg-primary/80 rounded-l-none rounded-r-full transition-all" style={{ width: `${100 - giftPct}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
+            {incomeLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               </div>
-              <div className="flex gap-6 mt-4 text-xs">
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-yellow-400/80" />{t("wallet.incomeGifts")}</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-primary/80" />{t("wallet.incomeCommission")}</span>
-              </div>
-            </div>
+            ) : (
+              <>
+                {/* Income Summary Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: t("wallet.incomeTotal"), value: income.totalReceived, color: "text-white" },
+                    { label: t("wallet.incomeThisMonth"), value: income.monthReceived, color: "text-emerald-400" },
+                    { label: t("wallet.incomeGifts"), value: income.weekReceived, color: "text-yellow-400" },
+                    { label: t("wallet.incomeCommission"), value: income.todayReceived, color: "text-primary" },
+                  ].map((card, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ y: 15, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ delay: i * 0.08 }}
+                      className="glass p-5 rounded-2xl border border-white/10"
+                    >
+                      <p className="text-white/50 text-xs font-bold mb-2">{card.label}</p>
+                      <p className={`text-2xl font-black ${card.color}`}>{card.value.toLocaleString()}</p>
+                      <p className="text-white/30 text-xs mt-1">{t("common.coins")}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              </>
+            )}
           </motion.div>
         )}
 
@@ -639,7 +656,7 @@ export function Wallet() {
               </div>
               <div>
                 <p className="text-white/50 text-xs font-bold">{t("wallet.availableWithdraw")}</p>
-                <p className="text-2xl font-black text-emerald-400">45,200 <span className="text-sm text-white/40 font-medium">{t("common.coins")}</span></p>
+                <p className="text-2xl font-black text-emerald-400">{balance.coins.toLocaleString()} <span className="text-sm text-white/40 font-medium">{t("common.coins")}</span></p>
               </div>
             </div>
 
@@ -706,12 +723,20 @@ export function Wallet() {
               )}
 
               <button
-                disabled={!withdrawAmount || Number(withdrawAmount) < 1000}
+                onClick={handleWithdraw}
+                disabled={!withdrawAmount || Number(withdrawAmount) < 1000 || withdrawSubmitting}
                 className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg mt-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-all flex items-center justify-center gap-2"
               >
                 <Send className="w-5 h-5" />
-                {t("wallet.submitWithdraw")}
+                {withdrawSubmitting ? t("common.sending", "جاري الإرسال...") : t("wallet.submitWithdraw")}
               </button>
+
+              {withdrawError && (
+                <p className="text-destructive text-sm font-medium bg-destructive/10 px-3 py-2 rounded-lg">{withdrawError}</p>
+              )}
+              {withdrawSuccess && (
+                <p className="text-emerald-400 text-sm font-medium bg-emerald-500/10 px-3 py-2 rounded-lg">{t("wallet.withdrawSuccess", "تم إرسال طلب السحب بنجاح")}</p>
+              )}
 
               <div className="flex items-start gap-2 text-white/30 text-xs">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />

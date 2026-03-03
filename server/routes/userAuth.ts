@@ -1011,6 +1011,129 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════
+// PUT /auth/change-password — تغيير كلمة المرور
+// ════════════════════════════════════════════════════════════
+router.put("/change-password", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال كلمة المرور الحالية والجديدة" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل" });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    }
+
+    const valid = await verifyPasswordAsync(currentPassword, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: "كلمة المرور الحالية غير صحيحة" });
+    }
+
+    const newHash = await hashPasswordAsync(newPassword);
+    await storage.updateUser(userId, { passwordHash: newHash } as any);
+
+    log(`User ${userId} changed password`);
+    return res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
+  } catch (err: any) {
+    authLog.error({ err }, "Change password error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في تغيير كلمة المرور" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// DELETE /auth/account — حذف الحساب
+// ════════════════════════════════════════════════════════════
+router.delete("/account", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال كلمة المرور للتأكيد" });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    }
+
+    const valid = await verifyPasswordAsync(password, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+    }
+
+    // Delete user and all related data
+    await storage.deleteUser(userId);
+
+    // Destroy session
+    req.session.destroy(() => {});
+
+    log(`User ${userId} deleted their account`);
+    return res.json({ success: true, message: "تم حذف الحساب بنجاح" });
+  } catch (err: any) {
+    authLog.error({ err }, "Delete account error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في حذف الحساب" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// GET /auth/notification-preferences — تفضيلات الإشعارات
+// ════════════════════════════════════════════════════════════
+router.get("/notification-preferences", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const prefs = await storage.getNotificationPreferences(userId);
+    // Return defaults if no preferences exist yet
+    return res.json({
+      success: true,
+      data: prefs || {
+        messages: true,
+        calls: true,
+        friendRequests: true,
+        gifts: true,
+        streams: true,
+        systemUpdates: true,
+        marketing: false,
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Get notification preferences error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// PUT /auth/notification-preferences — تحديث تفضيلات الإشعارات
+// ════════════════════════════════════════════════════════════
+router.put("/notification-preferences", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const parsed = schema.updateNotificationPrefsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.flatten() });
+    }
+
+    const updated = await storage.upsertNotificationPreferences(userId, parsed.data);
+    return res.json({ success: true, data: updated });
+  } catch (err: any) {
+    authLog.error({ err }, "Update notification preferences error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في تحديث الإعدادات" });
+  }
+});
+
 /** Helper: mask email for display (e.g., f***@gmail.com) */
 function maskEmail(email: string): string {
   const [local, domain] = email.split("@");

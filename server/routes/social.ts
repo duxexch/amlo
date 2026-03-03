@@ -13,6 +13,7 @@ import { io } from "../index";
 import { getUserSocketId, isUserOnline } from "../onlineUsers";
 import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
+import { storage } from "../storage";
 import { encryptMessage, decryptMessages } from "../utils/encryption";
 
 const router = Router();
@@ -1348,6 +1349,448 @@ router.get("/chat/settings", async (_req, res) => {
     return res.json({ success: true, data: result });
   } catch {
     return res.json({ success: true, data: defaults });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// WALLET — المحفظة
+// ════════════════════════════════════════════════════════════
+
+/**
+ * GET /social/wallet/balance — رصيد المحفظة
+ */
+router.get("/wallet/balance", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    return res.json({
+      success: true,
+      data: {
+        coins: user.coins,
+        diamonds: user.diamonds,
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet balance error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/transactions — سجل المعاملات
+ */
+router.get("/wallet/transactions", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const type = req.query.type as string | undefined;
+    const result = await storage.getUserTransactions(userId, page, limit, { type });
+    return res.json({ success: true, data: result.data, total: result.total, page, limit });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet transactions error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/income — ملخص الدخل  
+ */
+router.get("/wallet/income", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 } });
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 7);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // Total received (gifts received)
+    const [totalResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        eq(schema.walletTransactions.type, "gift_received"),
+        eq(schema.walletTransactions.status, "completed")
+      ));
+
+    const [todayResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        eq(schema.walletTransactions.type, "gift_received"),
+        eq(schema.walletTransactions.status, "completed"),
+        sql`${schema.walletTransactions.createdAt} >= ${todayStart}`
+      ));
+
+    const [weekResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        eq(schema.walletTransactions.type, "gift_received"),
+        eq(schema.walletTransactions.status, "completed"),
+        sql`${schema.walletTransactions.createdAt} >= ${weekStart}`
+      ));
+
+    const [monthResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        eq(schema.walletTransactions.type, "gift_received"),
+        eq(schema.walletTransactions.status, "completed"),
+        sql`${schema.walletTransactions.createdAt} >= ${monthStart}`
+      ));
+
+    return res.json({
+      success: true,
+      data: {
+        totalReceived: Number(totalResult?.total || 0),
+        todayReceived: Number(todayResult?.total || 0),
+        weekReceived: Number(weekResult?.total || 0),
+        monthReceived: Number(monthResult?.total || 0),
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet income error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * POST /social/wallet/recharge — شحن العملات
+ */
+router.post("/wallet/recharge", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const { packageId, amount, paymentMethod } = req.body;
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: "المبلغ مطلوب" });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+
+    const newBalance = user.coins + amount;
+    await storage.updateUser(userId, { coins: newBalance } as any);
+
+    await storage.createTransaction({
+      userId,
+      type: "purchase",
+      amount,
+      balanceAfter: newBalance,
+      currency: "coins",
+      description: packageId ? `شحن باقة ${packageId}` : `شحن ${amount} عملة`,
+      paymentMethod: paymentMethod || "card",
+      status: "completed",
+    });
+
+    return res.json({ success: true, data: { coins: newBalance }, message: "تم الشحن بنجاح" });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet recharge error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في الشحن" });
+  }
+});
+
+/**
+ * POST /social/wallet/withdraw — طلب سحب
+ */
+router.post("/wallet/withdraw", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const parsed = schema.withdrawalRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.flatten() });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+
+    if (user.coins < parsed.data.amount) {
+      return res.status(400).json({ success: false, message: "رصيد غير كافي" });
+    }
+
+    const withdrawal = await storage.createWithdrawalRequest({
+      userId,
+      amount: parsed.data.amount,
+      paymentMethodId: parsed.data.paymentMethodId,
+      paymentDetails: parsed.data.paymentDetails,
+      status: "pending",
+    });
+
+    if (!withdrawal) {
+      return res.status(500).json({ success: false, message: "حدث خطأ في إنشاء طلب السحب" });
+    }
+
+    const withdrawalId = withdrawal.id;
+
+    // Deduct coins immediately (held until processed)
+    const newBalance = user.coins - parsed.data.amount;
+    await storage.updateUser(userId, { coins: newBalance } as any);
+
+    await storage.createTransaction({
+      userId,
+      type: "withdrawal",
+      amount: -parsed.data.amount,
+      balanceAfter: newBalance,
+      currency: "coins",
+      description: `طلب سحب #${withdrawalId}`,
+      referenceId: withdrawalId,
+      status: "pending",
+    });
+
+    return res.json({ success: true, data: withdrawal, message: "تم إرسال طلب السحب بنجاح" });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet withdraw error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في طلب السحب" });
+  }
+});
+
+// ═══════════════════════════════════════
+// GIFT SYSTEM — User-facing endpoints
+// ═══════════════════════════════════════
+
+// GET /social/gifts — public gift catalog
+router.get("/gifts", async (req: Request, res: Response) => {
+  try {
+    const gifts = await storage.getGifts();
+    const activeGifts = (gifts || []).filter((g: any) => g.isActive !== false);
+    return res.json(activeGifts);
+  } catch (err: any) {
+    socialLog.error({ err }, "Get gifts error");
+    return res.status(500).json({ success: false, message: "خطأ في جلب الهدايا" });
+  }
+});
+
+// POST /social/gifts/send — send gift to another user (deducts coins, creates records)
+router.post("/gifts/send", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const { giftId, receiverId, streamId, quantity = 1 } = req.body;
+    if (!giftId || !receiverId) {
+      return res.status(400).json({ success: false, message: "معرف الهدية والمستلم مطلوبان" });
+    }
+
+    const gift = await storage.getGift(giftId);
+    if (!gift || gift.isActive === false) {
+      return res.status(404).json({ success: false, message: "الهدية غير موجودة" });
+    }
+
+    const totalPrice = gift.price * Math.max(1, Math.min(quantity, 9999));
+    const user = await storage.getUser(userId);
+    if (!user || user.coins < totalPrice) {
+      return res.status(400).json({ success: false, message: "رصيدك غير كافٍ" });
+    }
+
+    // Deduct coins from sender
+    await storage.updateUser(userId, { coins: user.coins - totalPrice } as any);
+
+    // Add coins to receiver (gifts convert to diamonds/coins for receiver)
+    const receiver = await storage.getUser(receiverId);
+    if (receiver) {
+      await storage.updateUser(receiverId, { diamonds: (receiver.diamonds || 0) + totalPrice } as any);
+    }
+
+    // Create gift transaction record
+    await storage.createGiftTransaction({
+      senderId: userId,
+      receiverId,
+      giftId,
+      streamId: streamId || null,
+      quantity: Math.max(1, quantity),
+      totalPrice,
+    });
+
+    // Create wallet transactions for both parties
+    await storage.createTransaction({
+      userId,
+      type: "gift_sent",
+      amount: -totalPrice,
+      balanceAfter: user.coins - totalPrice,
+      currency: "coins",
+      description: `إرسال هدية ${gift.name || gift.nameAr}`,
+      referenceId: giftId,
+      status: "completed",
+    });
+
+    await storage.createTransaction({
+      userId: receiverId,
+      type: "gift_received",
+      amount: totalPrice,
+      balanceAfter: (receiver?.diamonds || 0) + totalPrice,
+      currency: "diamonds",
+      description: `استلام هدية ${gift.name || gift.nameAr}`,
+      referenceId: giftId,
+      status: "completed",
+    });
+
+    // Update stream totalGifts if in a stream
+    if (streamId) {
+      const db = getDb();
+      if (db) {
+        await db.update(schema.streams).set({
+          totalGifts: sql`${schema.streams.totalGifts} + ${totalPrice}`,
+        }).where(eq(schema.streams.id, streamId));
+      }
+    }
+
+    return res.json({ success: true, message: "تم إرسال الهدية بنجاح", newBalance: user.coins - totalPrice });
+  } catch (err: any) {
+    socialLog.error({ err }, "Send gift error");
+    return res.status(500).json({ success: false, message: "خطأ في إرسال الهدية" });
+  }
+});
+
+// GET /social/gifts/history — user's gift history
+router.get("/gifts/history", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const role = (req.query.role as string) === "received" ? "received" : "sent";
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const history = await storage.getUserGiftHistory(userId, role as "sent" | "received", page, 20);
+    return res.json(history || []);
+  } catch (err: any) {
+    socialLog.error({ err }, "Gift history error");
+    return res.status(500).json({ success: false, message: "خطأ في جلب سجل الهدايا" });
+  }
+});
+
+// ═══════════════════════════════════════
+// FOLLOW SYSTEM — User-facing endpoints
+// ═══════════════════════════════════════
+
+// POST /social/follow/:userId — follow a user
+router.post("/follow/:userId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const targetId = paramStr(req.params.userId);
+  if (!targetId || targetId === userId) {
+    return res.status(400).json({ success: false, message: "لا يمكن متابعة نفسك" });
+  }
+  try {
+    await storage.followUser(userId, targetId);
+    return res.json({ success: true, message: "تمت المتابعة" });
+  } catch (err: any) {
+    socialLog.error({ err }, "Follow error");
+    return res.status(500).json({ success: false, message: "خطأ في المتابعة" });
+  }
+});
+
+// DELETE /social/follow/:userId — unfollow a user
+router.delete("/follow/:userId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const targetId = paramStr(req.params.userId);
+  try {
+    await storage.unfollowUser(userId, targetId);
+    return res.json({ success: true, message: "تم إلغاء المتابعة" });
+  } catch (err: any) {
+    socialLog.error({ err }, "Unfollow error");
+    return res.status(500).json({ success: false, message: "خطأ في إلغاء المتابعة" });
+  }
+});
+
+// GET /social/followers — my followers
+router.get("/followers", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const followers = await storage.getFollowers(userId, page, 20);
+    return res.json(followers || []);
+  } catch (err: any) {
+    socialLog.error({ err }, "Followers error");
+    return res.status(500).json({ success: false, message: "خطأ في جلب المتابعين" });
+  }
+});
+
+// GET /social/following — who I follow
+router.get("/following", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const following = await storage.getFollowing(userId, page, 20);
+    return res.json(following || []);
+  } catch (err: any) {
+    socialLog.error({ err }, "Following error");
+    return res.status(500).json({ success: false, message: "خطأ في جلب المتابَعين" });
+  }
+});
+
+// GET /social/follow/count/:userId — follower/following counts for any user
+router.get("/follow/count/:userId", async (req: Request, res: Response) => {
+  const targetId = paramStr(req.params.userId);
+  try {
+    const counts = await storage.getFollowCounts(targetId);
+    return res.json(counts || { followers: 0, following: 0 });
+  } catch (err: any) {
+    socialLog.error({ err }, "Follow counts error");
+    return res.status(500).json({ success: false, message: "خطأ في جلب الأعداد" });
+  }
+});
+
+// GET /social/follow/status/:userId — check if I follow this user
+router.get("/follow/status/:userId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const targetId = paramStr(req.params.userId);
+  try {
+    const following = await storage.isFollowing(userId, targetId);
+    return res.json({ following });
+  } catch (err: any) {
+    socialLog.error({ err }, "Follow status error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ═══════════════════════════════════════
+// STREAMS — Public active stream listing
+// ═══════════════════════════════════════
+
+// GET /social/streams/active — list active live streams with host info
+router.get("/streams/active", async (_req: Request, res: Response) => {
+  try {
+    const result = await storage.getActiveStreams(1, 50);
+    if (!result || !result.data?.length) return res.json([]);
+
+    // Enrich with user info
+    const db = getDb();
+    if (!db) return res.json(result.data);
+
+    const userIds = result.data.map((s: any) => s.userId).filter(Boolean);
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
+      users.forEach((u: any) => { usersMap[u.id] = u; });
+    }
+
+    const enriched = result.data.map((s: any) => {
+      const host = usersMap[s.userId];
+      return {
+        ...s,
+        host: host?.displayName || host?.username || "مجهول",
+        username: host?.username || "",
+        avatar: host?.avatar || null,
+        level: host?.level || 1,
+        tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
+      };
+    });
+
+    return res.json(enriched);
+  } catch (err: any) {
+    socialLog.error({ err }, "Active streams error");
+    return res.json([]);
   }
 });
 

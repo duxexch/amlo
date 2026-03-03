@@ -26,30 +26,16 @@ const p = (val: string | string[]): string => Array.isArray(val) ? val[0] : val;
 router.get("/overview/stats", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) {
-    // Fallback mock stats
+    // No DB — return zeros
     return res.json({
       success: true,
       data: {
-        totalConversations: 1284,
-        totalMessages: 45820,
-        totalCalls: 3256,
-        activeCallsNow: 12,
-        messagesToday: 1205,
-        callsToday: 89,
-        callRevenueToday: 4520,
-        messageRevenueToday: 1205,
-        totalCallRevenue: 156800,
-        totalMessageRevenue: 45820,
-        activeChatsNow: 34,
+        totalConversations: 0, totalMessages: 0, totalCalls: 0, activeCallsNow: 0,
+        messagesToday: 0, callsToday: 0, callRevenueToday: 0, messageRevenueToday: 0,
+        totalCallRevenue: 0, totalMessageRevenue: 0, activeChatsNow: 0,
         onlineUsers: await getOnlineUsersCount(),
-        avgCallDuration: 245,
-        avgMessagesPerConv: 35,
-        voiceCalls: 2100,
-        videoCalls: 1156,
-        textMessages: 38500,
-        imageMessages: 4200,
-        voiceMessages: 2100,
-        giftMessages: 1020,
+        avgCallDuration: 0, avgMessagesPerConv: 0,
+        voiceCalls: 0, videoCalls: 0, textMessages: 0, imageMessages: 0, voiceMessages: 0, giftMessages: 0,
       },
     });
   }
@@ -143,12 +129,7 @@ router.get("/overview/trends", requireAdmin, async (_req, res) => {
   }
 
   if (!db) {
-    // Mock data when no DB
-    for (const day of days) {
-      day.messages = Math.floor(Math.random() * 300) + 50;
-      day.calls = Math.floor(Math.random() * 40) + 5;
-      day.revenue = Math.floor(Math.random() * 2000) + 200;
-    }
+    // No DB — return zeros
     return res.json({ success: true, data: days });
   }
 
@@ -201,16 +182,7 @@ router.get("/overview/trends", requireAdmin, async (_req, res) => {
 router.get("/overview/top-chatters", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) {
-    return res.json({
-      success: true,
-      data: [
-        { userId: "u1", username: "sara_singer", displayName: "سارة المغنية", avatar: null, messageCount: 1250, callCount: 45, totalSpent: 3400 },
-        { userId: "u2", username: "ali_gamer", displayName: "علي جيمر", avatar: null, messageCount: 980, callCount: 32, totalSpent: 2800 },
-        { userId: "u3", username: "mona_star", displayName: "منى ستار", avatar: null, messageCount: 870, callCount: 28, totalSpent: 2100 },
-        { userId: "u4", username: "khalid_dj", displayName: "خالد دي جي", avatar: null, messageCount: 720, callCount: 21, totalSpent: 1800 },
-        { userId: "u5", username: "reem_singer", displayName: "ريم المغنية", avatar: null, messageCount: 650, callCount: 18, totalSpent: 1450 },
-      ],
-    });
+    return res.json({ success: true, data: [] });
   }
 
   try {
@@ -264,15 +236,7 @@ router.get("/conversations", requireAdmin, async (req, res) => {
   const offset = (page - 1) * limit;
 
   if (!db) {
-    const mock = Array.from({ length: 12 }, (_, i) => ({
-      id: `conv-${i + 1}`,
-      participant1: { id: `u${i * 2 + 1}`, username: `user_${i * 2 + 1}`, displayName: `مستخدم ${i * 2 + 1}`, avatar: null },
-      participant2: { id: `u${i * 2 + 2}`, username: `user_${i * 2 + 2}`, displayName: `مستخدم ${i * 2 + 2}`, avatar: null },
-      messageCount: Math.floor(Math.random() * 200) + 10,
-      lastMessageAt: new Date(Date.now() - Math.random() * 86400000 * 7),
-      isActive: Math.random() > 0.2,
-    }));
-    return res.json({ success: true, data: mock.slice(offset, offset + limit), pagination: { page, limit, total: 12, totalPages: 1 } });
+    return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
   }
 
   try {
@@ -341,18 +305,7 @@ router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
   const offset = (page - 1) * limit;
 
   if (!db) {
-    const mock = Array.from({ length: 20 }, (_, i) => ({
-      id: `msg-${i}`,
-      senderId: i % 3 === 0 ? "u1" : "u2",
-      senderName: i % 3 === 0 ? "سارة" : "علي",
-      content: ["مرحباً!", "كيف حالك؟", "شفت البث الجديد؟", "بخير والحمدلله", "أهلاً وسهلاً 😊"][i % 5],
-      type: i % 8 === 0 ? "image" : i % 12 === 0 ? "voice" : "text",
-      mediaUrl: null,
-      isDeleted: false,
-      coinsCost: Math.random() > 0.8 ? 1 : 0,
-      createdAt: new Date(Date.now() - (20 - i) * 60000),
-    }));
-    return res.json({ success: true, data: mock });
+    return res.json({ success: true, data: [] });
   }
 
   try {
@@ -411,20 +364,7 @@ router.get("/messages", requireAdmin, async (req, res) => {
   const offset = (page - 1) * limit;
 
   if (!db) {
-    const types = ["text", "image", "voice", "gift"];
-    const mock = Array.from({ length: 30 }, (_, i) => ({
-      id: `msg-${i}`,
-      conversationId: `conv-${(i % 5) + 1}`,
-      senderId: `u${(i % 8) + 1}`,
-      senderName: ["سارة", "علي", "منى", "خالد", "ريم", "عمر", "نور", "أحمد"][i % 8],
-      content: ["مرحباً!", "كيف الحال؟", "أهلاً 😊", "شكراً", "البث رائع 🔥"][i % 5],
-      type: types[i % 4],
-      isDeleted: false,
-      coinsCost: i % 3 === 0 ? 1 : 0,
-      createdAt: new Date(Date.now() - i * 120000),
-    }));
-    const filtered = type ? mock.filter(m => m.type === type) : mock;
-    return res.json({ success: true, data: filtered.slice(0, limit), pagination: { page, limit, total: filtered.length, totalPages: 1 } });
+    return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
   }
 
   try {
@@ -502,18 +442,7 @@ router.get("/calls", requireAdmin, async (req, res) => {
   const offset = (page - 1) * limit;
 
   if (!db) {
-    const mock = Array.from({ length: 25 }, (_, i) => ({
-      id: `call-${i}`,
-      caller: { id: `u${i + 1}`, username: `user_${i + 1}`, displayName: `المتصل ${i + 1}`, avatar: null },
-      receiver: { id: `u${i + 10}`, username: `user_${i + 10}`, displayName: `المستقبل ${i + 10}`, avatar: null },
-      type: i % 3 === 0 ? "video" : "voice",
-      status: ["ended", "ended", "missed", "ended", "rejected"][i % 5],
-      durationSeconds: Math.floor(Math.random() * 600) + 30,
-      coinsCharged: Math.floor(Math.random() * 50) + 5,
-      coinRate: i % 3 === 0 ? 10 : 5,
-      createdAt: new Date(Date.now() - i * 3600000),
-    }));
-    return res.json({ success: true, data: mock.slice(0, limit), pagination: { page, limit, total: 25, totalPages: 2 } });
+    return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
   }
 
   try {
@@ -578,8 +507,8 @@ router.post("/calls/:id/force-end", requireAdmin, async (req, res) => {
 // MODERATION — الحظر والرقابة
 // ══════════════════════════════════════════════════════════
 
-// In-memory moderation settings (can be moved to DB later)
-let moderationSettings = {
+// Default moderation settings (used as fallback when DB has no config)
+const defaultModerationSettings = {
   bannedWords: ["كلمة_محظورة", "spam", "سب", "شتم", "تحرش"],
   autoDelete: true,
   maxMessageLength: 2000,
@@ -587,24 +516,43 @@ let moderationSettings = {
   allowImages: true,
   allowVoice: true,
   allowGifts: true,
-  maxCallDuration: 3600, // seconds
+  maxCallDuration: 3600,
   minLevelToChat: 1,
   minLevelToCall: 1,
   minLevelToStream: 5,
   maxConcurrentStreams: 100,
   streamMaxViewers: 10000,
-  chatCooldown: 2, // seconds between messages
+  chatCooldown: 2,
   enableProfanityFilter: true,
   enableSpamDetection: true,
   autoMuteSpammers: true,
-  spamThreshold: 5, // messages in 10 seconds
+  spamThreshold: 5,
 };
 
-router.get("/moderation/settings", requireAdmin, (_req, res) => {
-  return res.json({ success: true, data: moderationSettings });
+/** Load moderation settings from DB, falling back to defaults */
+async function getModerationSettings(): Promise<typeof defaultModerationSettings> {
+  try {
+    const cfg = await storage.getSystemConfig("moderation");
+    if (cfg && cfg.configData) {
+      const data = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
+      return { ...defaultModerationSettings, ...data };
+    }
+  } catch {}
+  return { ...defaultModerationSettings };
+}
+
+/** Save moderation settings to DB */
+async function saveModerationSettings(settings: typeof defaultModerationSettings, adminId?: string) {
+  await storage.upsertSystemConfig("moderation", settings, adminId);
+}
+
+router.get("/moderation/settings", requireAdmin, async (_req, res) => {
+  const settings = await getModerationSettings();
+  return res.json({ success: true, data: settings });
 });
 
 router.put("/moderation/settings", requireAdmin, async (req, res) => {
+  const current = await getModerationSettings();
   const allowed = ["bannedWords", "autoDelete", "maxMessageLength", "maxMessagesPerMinute",
     "allowImages", "allowVoice", "allowGifts", "maxCallDuration", "minLevelToChat",
     "minLevelToCall", "minLevelToStream", "maxConcurrentStreams", "streamMaxViewers",
@@ -613,31 +561,37 @@ router.put("/moderation/settings", requireAdmin, async (req, res) => {
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
-  moderationSettings = { ...moderationSettings, ...updates } as typeof moderationSettings;
+  const updated = { ...current, ...updates } as typeof defaultModerationSettings;
+  await saveModerationSettings(updated, req.session.adminId);
   await storage.addAdminLog(req.session.adminId!, "update_moderation", "settings", "", JSON.stringify(Object.keys(updates)));
-  return res.json({ success: true, data: moderationSettings, message: "تم تحديث إعدادات الرقابة" });
+  return res.json({ success: true, data: updated, message: "تم تحديث إعدادات الرقابة" });
 });
 
 // Banned words management
-router.get("/moderation/banned-words", requireAdmin, (_req, res) => {
-  return res.json({ success: true, data: moderationSettings.bannedWords });
+router.get("/moderation/banned-words", requireAdmin, async (_req, res) => {
+  const settings = await getModerationSettings();
+  return res.json({ success: true, data: settings.bannedWords });
 });
 
 router.post("/moderation/banned-words", requireAdmin, async (req, res) => {
   const { word } = req.body;
   if (!word || typeof word !== "string") return res.status(400).json({ success: false, message: "يرجى إدخال كلمة" });
-  if (!moderationSettings.bannedWords.includes(word.trim())) {
-    moderationSettings.bannedWords.push(word.trim());
+  const settings = await getModerationSettings();
+  if (!settings.bannedWords.includes(word.trim())) {
+    settings.bannedWords.push(word.trim());
   }
+  await saveModerationSettings(settings, req.session.adminId);
   await storage.addAdminLog(req.session.adminId!, "add_banned_word", "moderation", "", word);
-  return res.json({ success: true, data: moderationSettings.bannedWords });
+  return res.json({ success: true, data: settings.bannedWords });
 });
 
 router.delete("/moderation/banned-words/:word", requireAdmin, async (req, res) => {
   const word = p(req.params.word);
-  moderationSettings.bannedWords = moderationSettings.bannedWords.filter(w => w !== word);
+  const settings = await getModerationSettings();
+  settings.bannedWords = settings.bannedWords.filter(w => w !== word);
+  await saveModerationSettings(settings, req.session.adminId);
   await storage.addAdminLog(req.session.adminId!, "remove_banned_word", "moderation", "", word);
-  return res.json({ success: true, data: moderationSettings.bannedWords });
+  return res.json({ success: true, data: settings.bannedWords });
 });
 
 // ══════════════════════════════════════════════════════════
@@ -712,44 +666,92 @@ router.put("/settings", requireAdmin, async (req, res) => {
 // LIVE STREAMS — البث المباشر
 // ══════════════════════════════════════════════════════════
 
-// Mock active streams
-const mockActiveStreams = [
-  { id: "s1", userId: "u1", username: "horizon_live", displayName: "أفق لايف", title: "سهرة موسيقية 🎵", viewers: 1205, peakViewers: 2100, duration: 7200, giftsReceived: 45, coinsEarned: 12500, status: "live", startedAt: new Date(Date.now() - 7200000) },
-  { id: "s2", userId: "u2", username: "stars_broadcast", displayName: "نجوم البث", title: "حفلة دي جي 🎧", viewers: 3400, peakViewers: 5200, duration: 5400, giftsReceived: 89, coinsEarned: 28000, status: "live", startedAt: new Date(Date.now() - 5400000) },
-  { id: "s3", userId: "u3", username: "gamer_ali", displayName: "علي جيمر", title: "تحدي الألعاب 🎮", viewers: 2100, peakViewers: 3000, duration: 3600, giftsReceived: 23, coinsEarned: 6800, status: "live", startedAt: new Date(Date.now() - 3600000) },
-  { id: "s4", userId: "u4", username: "riada_live", displayName: "ريادة لايف", title: "كوميديا ليلية 😂", viewers: 670, peakViewers: 1200, duration: 1800, giftsReceived: 12, coinsEarned: 3400, status: "live", startedAt: new Date(Date.now() - 1800000) },
-];
+router.get("/streams/active", requireAdmin, async (_req, res) => {
+  const db = getDb();
+  if (!db) return res.json({ success: true, data: [] });
 
-router.get("/streams/active", requireAdmin, (_req, res) => {
-  return res.json({ success: true, data: mockActiveStreams });
+  try {
+    const activeStreams = await db.select().from(schema.streams)
+      .where(eq(schema.streams.status, "active"))
+      .orderBy(desc(schema.streams.viewerCount));
+
+    // Enrich with user info
+    const userIds = activeStreams.map(s => s.userId);
+    const users = userIds.length > 0
+      ? await db.select({ id: schema.users.id, username: schema.users.username, displayName: schema.users.displayName })
+          .from(schema.users).where(inArray(schema.users.id, userIds))
+      : [];
+
+    const data = activeStreams.map(s => {
+      const user = users.find(u => u.id === s.userId);
+      return {
+        id: s.id,
+        userId: s.userId,
+        username: user?.username || "unknown",
+        displayName: user?.displayName || "مجهول",
+        title: s.title,
+        viewers: s.viewerCount,
+        peakViewers: s.peakViewers,
+        duration: s.startedAt ? Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 1000) : 0,
+        giftsReceived: s.totalGifts,
+        coinsEarned: 0,
+        status: s.status,
+        startedAt: s.startedAt,
+      };
+    });
+
+    return res.json({ success: true, data });
+  } catch (err: any) {
+    log(`Active streams error: ${err.message}`, "admin");
+    return res.json({ success: true, data: [] });
+  }
 });
 
-router.get("/streams/stats", requireAdmin, (_req, res) => {
-  return res.json({
-    success: true,
-    data: {
-      activeNow: mockActiveStreams.length,
-      totalViewers: mockActiveStreams.reduce((sum, s) => sum + s.viewers, 0),
-      totalToday: 18,
-      avgDuration: 4500,
-      avgViewers: 1850,
-      totalGiftsToday: 169,
-      totalRevenueToday: 50700,
-      peakConcurrent: 12,
-      topCategories: [
-        { name: "موسيقى", count: 8, viewers: 8500 },
-        { name: "ألعاب", count: 5, viewers: 5200 },
-        { name: "ترفيه", count: 3, viewers: 2800 },
-        { name: "تعليم", count: 2, viewers: 1200 },
-      ],
-    },
-  });
+router.get("/streams/stats", requireAdmin, async (_req, res) => {
+  const db = getDb();
+  if (!db) return res.json({ success: true, data: { activeNow: 0, totalViewers: 0, totalToday: 0, avgDuration: 0, avgViewers: 0, totalGiftsToday: 0, totalRevenueToday: 0, peakConcurrent: 0, topCategories: [] } });
+
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [activeNow] = await db.select({ count: count() }).from(schema.streams).where(eq(schema.streams.status, "active"));
+    const [totalViewers] = await db.select({ total: sql<number>`COALESCE(SUM(viewer_count), 0)` }).from(schema.streams).where(eq(schema.streams.status, "active"));
+    const [totalToday] = await db.select({ count: count() }).from(schema.streams).where(gte(schema.streams.startedAt, today));
+    const [totalGiftsToday] = await db.select({ total: sql<number>`COALESCE(SUM(total_gifts), 0)` }).from(schema.streams).where(gte(schema.streams.startedAt, today));
+
+    return res.json({
+      success: true,
+      data: {
+        activeNow: activeNow?.count || 0,
+        totalViewers: totalViewers?.total || 0,
+        totalToday: totalToday?.count || 0,
+        avgDuration: 0,
+        avgViewers: 0,
+        totalGiftsToday: totalGiftsToday?.total || 0,
+        totalRevenueToday: 0,
+        peakConcurrent: 0,
+        topCategories: [],
+      },
+    });
+  } catch (err: any) {
+    log(`Stream stats error: ${err.message}`, "admin");
+    return res.json({ success: true, data: { activeNow: 0, totalViewers: 0, totalToday: 0, avgDuration: 0, avgViewers: 0, totalGiftsToday: 0, totalRevenueToday: 0, peakConcurrent: 0, topCategories: [] } });
+  }
 });
 
 router.post("/streams/:id/end", requireAdmin, async (req, res) => {
+  const db = getDb();
   const streamId = p(req.params.id);
-  const idx = mockActiveStreams.findIndex(s => s.id === streamId);
-  if (idx >= 0) mockActiveStreams[idx].status = "ended";
+
+  if (db) {
+    try {
+      await db.update(schema.streams).set({ status: "ended", endedAt: new Date() }).where(eq(schema.streams.id, streamId));
+    } catch (err: any) {
+      log(`Force end stream error: ${err.message}`, "admin");
+    }
+  }
+
   await storage.addAdminLog(req.session.adminId!, "force_end_stream", "stream", streamId, "إيقاف بث إجبارياً");
   return res.json({ success: true, message: "تم إيقاف البث" });
 });

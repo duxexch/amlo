@@ -881,3 +881,265 @@ export const resetPasswordSchema = z.object({
   token: z.string().min(10).max(200),
   password: z.string().min(6).max(200),
 });
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(6).max(200),
+});
+
+// ════════════════════════════════════════════════════════════
+// 25. SYSTEM_CONFIG — إعدادات النظام المتقدمة (SEO, ASO, Branding, etc.)
+// ════════════════════════════════════════════════════════════
+export const systemConfig = pgTable("system_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull(), // seo | aso | branding | social_login | otp | policies | app_download | advanced
+  configData: text("config_data").notNull().default("{}"), // JSON string
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("system_config_category_idx").on(table.category),
+]);
+
+export type SystemConfig = typeof systemConfig.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 26. FEATURED_STREAMS_CONFIG — البثوث المميزة على الصفحة الرئيسية
+// ════════════════════════════════════════════════════════════
+export const featuredStreamsConfig = pgTable("featured_streams_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  titleAr: text("title_ar"),
+  streamerName: text("streamer_name").notNull(),
+  image: text("image").notNull(),
+  streamId: varchar("stream_id"),
+  viewerCount: integer("viewer_count").notNull().default(0),
+  isLive: boolean("is_live").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type FeaturedStreamConfig = typeof featuredStreamsConfig.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 27. ANNOUNCEMENT_POPUPS — إعلانات البوب أب
+// ════════════════════════════════════════════════════════════
+export const announcementPopups = pgTable("announcement_popups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  enabled: boolean("enabled").notNull().default(false),
+  imageUrl: text("image_url"),
+  title: text("title"),
+  subtitle: text("subtitle"),
+  buttons: text("buttons").default("[]"), // JSON array
+  showOnce: boolean("show_once").notNull().default(true),
+  delaySeconds: integer("delay_seconds").notNull().default(3),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type AnnouncementPopup = typeof announcementPopups.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 28. PAYMENT_METHODS — طرق الدفع
+// ════════════════════════════════════════════════════════════
+export const paymentMethods = pgTable("payment_methods", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  nameAr: text("name_ar"),
+  type: text("type").notNull().default("manual"), // manual | auto | crypto
+  icon: text("icon"),
+  instructions: text("instructions"),
+  instructionsAr: text("instructions_ar"),
+  accountDetails: text("account_details"), // JSON
+  minAmount: numeric("min_amount", { precision: 12, scale: 2 }).default("1.00"),
+  maxAmount: numeric("max_amount", { precision: 12, scale: 2 }).default("10000.00"),
+  currency: text("currency").notNull().default("USD"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 29. FRAUD_ALERTS — تنبيهات الاحتيال
+// ════════════════════════════════════════════════════════════
+export const fraudAlerts = pgTable("fraud_alerts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),
+  agentId: varchar("agent_id"),
+  type: text("type").notNull(), // suspicious_login | unusual_transaction | multiple_accounts | rapid_gifting | bot_behavior
+  severity: text("severity").notNull().default("medium"), // low | medium | high | critical
+  description: text("description").notNull(),
+  details: text("details"), // JSON with additional context
+  status: text("status").notNull().default("pending"), // pending | investigating | resolved | dismissed
+  adminNotes: text("admin_notes"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("fraud_alerts_user_idx").on(table.userId),
+  index("fraud_alerts_status_idx").on(table.status),
+  index("fraud_alerts_severity_idx").on(table.severity),
+  index("fraud_alerts_created_idx").on(table.createdAt),
+]);
+
+export type FraudAlert = typeof fraudAlerts.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 30. MODERATION_CONFIG + BANNED_WORDS — إعدادات الإشراف
+// ════════════════════════════════════════════════════════════
+export const bannedWords = pgTable("banned_words", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  word: text("word").notNull(),
+  language: text("language").notNull().default("all"), // all | ar | en | etc
+  severity: text("severity").notNull().default("block"), // warn | block | ban
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("banned_words_word_idx").on(table.word),
+]);
+
+export type BannedWord = typeof bannedWords.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 31. AGENT_APPLICATIONS — طلبات تسجيل الوكلاء
+// ════════════════════════════════════════════════════════════
+export const agentApplications = pgTable("agent_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  bio: text("bio"),
+  photoUrl: text("photo_url"),
+  whatsapp: text("whatsapp"),
+  telegram: text("telegram"),
+  instagram: text("instagram"),
+  twitter: text("twitter"),
+  accountType: text("account_type").notNull().default("agent"), // marketer | agent | both
+  referralCode: text("referral_code"),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected
+  adminNotes: text("admin_notes"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("agent_apps_status_idx").on(table.status),
+  index("agent_apps_email_idx").on(table.email),
+  index("agent_apps_created_idx").on(table.createdAt),
+]);
+
+export type AgentApplication = typeof agentApplications.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 32. ACCOUNT_APPLICATIONS — طلبات فتح حسابات
+// ════════════════════════════════════════════════════════════
+export const accountApplications = pgTable("account_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  bio: text("bio"),
+  accountReferralCode: text("account_referral_code"),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected
+  adminNotes: text("admin_notes"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("account_apps_status_idx").on(table.status),
+  index("account_apps_created_idx").on(table.createdAt),
+]);
+
+export type AccountApplication = typeof accountApplications.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 33. NOTIFICATION_PREFERENCES — تفضيلات الإشعارات
+// ════════════════════════════════════════════════════════════
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique(),
+  messages: boolean("messages").notNull().default(true),
+  calls: boolean("calls").notNull().default(true),
+  friendRequests: boolean("friend_requests").notNull().default(true),
+  gifts: boolean("gifts").notNull().default(true),
+  streams: boolean("streams").notNull().default(true),
+  systemUpdates: boolean("system_updates").notNull().default(true),
+  marketing: boolean("marketing").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("notif_prefs_user_idx").on(table.userId),
+]);
+
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 34. WITHDRAWAL_REQUESTS — طلبات سحب الأموال
+// ════════════════════════════════════════════════════════════
+export const withdrawalRequests = pgTable("withdrawal_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  amount: integer("amount").notNull(), // in coins
+  amountUsd: numeric("amount_usd", { precision: 12, scale: 2 }),
+  paymentMethodId: varchar("payment_method_id"),
+  paymentDetails: text("payment_details"), // JSON with user's payment info
+  status: text("status").notNull().default("pending"), // pending | processing | completed | rejected
+  adminNotes: text("admin_notes"),
+  processedBy: varchar("processed_by"),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("withdrawal_user_idx").on(table.userId),
+  index("withdrawal_status_idx").on(table.status),
+  index("withdrawal_created_idx").on(table.createdAt),
+]);
+
+export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 35. STREAM_VIEWERS — مشاهدي البث المباشر
+// ════════════════════════════════════════════════════════════
+export const streamViewers = pgTable("stream_viewers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  role: text("role").notNull().default("viewer"), // viewer | speaker | moderator | host
+  joinedAt: timestamp("joined_at").notNull().defaultNow(),
+  leftAt: timestamp("left_at"),
+}, (table) => [
+  index("stream_viewers_stream_idx").on(table.streamId),
+  index("stream_viewers_user_idx").on(table.userId),
+]);
+
+export type StreamViewer = typeof streamViewers.$inferSelect;
+
+// ═══ Additional Validation Schemas ═══
+
+export const sendGiftSchema = z.object({
+  giftId: z.string().min(1).max(100),
+  receiverId: z.string().min(1).max(100),
+  streamId: z.string().max(100).optional(),
+  quantity: z.number().int().positive().max(100).default(1),
+});
+
+export const createStreamSchema = z.object({
+  title: z.string().min(1).max(200),
+  type: z.enum(["live", "audio"]).default("live"),
+  tags: z.string().max(500).optional(),
+});
+
+export const withdrawalRequestSchema = z.object({
+  amount: z.number().int().positive(),
+  paymentMethodId: z.string().max(100).optional(),
+  paymentDetails: z.string().max(2000).optional(),
+});
+
+export const updateNotificationPrefsSchema = z.object({
+  messages: z.boolean().optional(),
+  calls: z.boolean().optional(),
+  friendRequests: z.boolean().optional(),
+  gifts: z.boolean().optional(),
+  streams: z.boolean().optional(),
+  systemUpdates: z.boolean().optional(),
+  marketing: z.boolean().optional(),
+});

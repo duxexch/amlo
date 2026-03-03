@@ -69,9 +69,6 @@
     "giftModalTitle": "Envoyer des cadeaux",
     "giftCoinsLabel": "Pièces",
     "giftRecharge": "Recharger",
-    "mockMsg1": "Bonjour à tous !",
-    "mockMsg2": "Ce stream est incroyable 🔥",
-    "mockMsg3": "Puis-je faire une demande ?",
     "giftSent": "{{name}} a envoyé ",
     "giftAmount": "{{amount}} pièces !"
   },

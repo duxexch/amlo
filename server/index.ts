@@ -631,10 +631,6 @@ app.use((req, res, next) => {
   await applyDatabaseConstraints();
   await ensureDefaultAdmin();
 
-  // Hash mock agent account passwords at startup
-  const { initMockAccountHashes } = await import("./routes/admin");
-  await initMockAccountHashes();
-
   // Initialize email/OTP service
   const { initEmailService } = await import("./services/email");
   initEmailService();

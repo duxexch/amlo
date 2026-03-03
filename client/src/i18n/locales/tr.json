@@ -69,9 +69,6 @@
     "giftModalTitle": "Hediye Gönder",
     "giftCoinsLabel": "Jeton",
     "giftRecharge": "Yükle",
-    "mockMsg1": "Herkese merhaba!",
-    "mockMsg2": "Bu yayın harika 🔥",
-    "mockMsg3": "Bir istek yapabilir miyim?",
     "giftSent": "{{name}} gönderdi ",
     "giftAmount": "{{amount}} jeton!"
   },

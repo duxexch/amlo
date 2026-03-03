@@ -7,41 +7,34 @@ import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
+import { streamsApi, walletApi, giftsApi } from "@/lib/socialApi";
 
 // ══════════════════════════════════════════════════════════
-// Mock Data
+// Stream Types
 // ══════════════════════════════════════════════════════════
 
-const mockLiveStreams = [
-  { id: "v1", type: "video" as const, host: "سارة أحمد", username: "sara_live", avatar: avatarImg, viewers: 1205, title: "بث مباشر 🔥", tags: ["ترفيه", "دردشة"], isLive: true, level: 35 },
-  { id: "v2", type: "video" as const, host: "عمر يوسف", username: "omar_yt", avatar: avatarImg, viewers: 832, title: "ألعاب + توزيعات 🎮", tags: ["ألعاب"], isLive: true, level: 28 },
-  { id: "v3", type: "video" as const, host: "ليلى كريم", username: "layla_k", avatar: avatarImg, viewers: 2100, title: "أزياء وإطلالات ✨", tags: ["أزياء", "جمال"], isLive: true, level: 42 },
-  { id: "v4", type: "video" as const, host: "خالد محمد", username: "khaled_m", avatar: avatarImg, viewers: 456, title: "دروس تقنية 💻", tags: ["تعليم"], isLive: true, level: 20 },
-  { id: "v5", type: "video" as const, host: "نور حسن", username: "noor_h", avatar: avatarImg, viewers: 1890, title: "طبخ عربي 🍳", tags: ["طبخ"], isLive: true, level: 38 },
-  { id: "v6", type: "video" as const, host: "أمير رشيد", username: "amir_r", avatar: avatarImg, viewers: 670, title: "رحلة في الطبيعة 🌿", tags: ["سفر"], isLive: true, level: 18 },
-];
-
-const mockAudioStreams = [
-  { id: "a1", type: "audio" as const, host: "محمد علي", username: "moali_talk", avatar: avatarImg, viewers: 340, title: "سوالف ليلية 🌙", tags: ["دردشة"], isLive: true, level: 25, speakers: ["فاطمة", "أحمد"], maxSpeakers: 5 },
-  { id: "a2", type: "audio" as const, host: "هدى سالم", username: "huda_radio", avatar: avatarImg, viewers: 520, title: "قصص وروايات 📚", tags: ["ثقافة"], isLive: true, level: 30, speakers: ["يوسف"], maxSpeakers: 4 },
-  { id: "a3", type: "audio" as const, host: "ياسر خان", username: "yaser_k", avatar: avatarImg, viewers: 180, title: "نقاش سياسي 🗳", tags: ["أخبار"], isLive: true, level: 22, speakers: ["مريم", "سعود", "ريم"], maxSpeakers: 6 },
-  { id: "a4", type: "audio" as const, host: "رنا أحمد", username: "rana_voice", avatar: avatarImg, viewers: 890, title: "أغاني ومواهب 🎵", tags: ["موسيقى"], isLive: true, level: 40, speakers: ["طارق"], maxSpeakers: 3 },
-  { id: "a5", type: "audio" as const, host: "زياد مصطفى", username: "ziad_m", avatar: avatarImg, viewers: 210, title: "تطوير الذات 💡", tags: ["تحفيز"], isLive: true, level: 15, speakers: [], maxSpeakers: 4 },
-];
-
-const mockChatUsers = [
-  { id: "u1", name: "أحمد", username: "ahmed_99", avatar: avatarImg, level: 15, badge: 'vip' as const },
-  { id: "u2", name: "ياسمين", username: "yasmine_star", avatar: avatarImg, level: 32, badge: 'top' as const },
-  { id: "u3", name: "نادر", username: "nader_live", avatar: avatarImg, level: 8 },
-  { id: "u4", name: "طارق", username: "tariq_pro", avatar: avatarImg, level: 45, badge: 'mod' as const },
-  { id: "u5", name: "ليلى", username: "layla_music", avatar: avatarImg, level: 22 },
-];
+interface StreamItem {
+  id: string;
+  type: string;
+  host: string;
+  username: string;
+  avatar: string | null;
+  viewers: number;
+  viewerCount: number;
+  title: string;
+  tags: string[];
+  isLive: boolean;
+  level: number;
+  speakers?: string[];
+  maxSpeakers?: number;
+  status: string;
+}
 
 // ══════════════════════════════════════════════════════════
 // Live Stream Card Components
 // ══════════════════════════════════════════════════════════
 
-function VideoStreamCard({ stream, onClick }: { stream: typeof mockLiveStreams[0]; onClick: () => void }) {
+function VideoStreamCard({ stream, onClick }: { stream: StreamItem; onClick: () => void }) {
   const { t } = useTranslation();
   return (
     <motion.button
@@ -50,7 +43,7 @@ function VideoStreamCard({ stream, onClick }: { stream: typeof mockLiveStreams[0
       whileTap={{ scale: 0.98 }}
       className="relative w-full aspect-[3/4] rounded-2xl overflow-hidden group border border-white/10 hover:border-primary/40 transition-all duration-300 hover:shadow-[0_0_25px_rgba(168,85,247,0.3)] text-left"
     >
-      <img src={stream.avatar} alt={stream.host} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+      <img src={stream.avatar || avatarImg} alt={stream.host} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
 
       {/* LIVE badge */}
@@ -62,7 +55,7 @@ function VideoStreamCard({ stream, onClick }: { stream: typeof mockLiveStreams[0
       {/* Viewers */}
       <div className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 z-10">
         <Eye className="w-2.5 h-2.5" />
-        {stream.viewers >= 1000 ? (stream.viewers / 1000).toFixed(1) + "K" : stream.viewers}
+        {(stream.viewers || stream.viewerCount || 0) >= 1000 ? ((stream.viewers || stream.viewerCount || 0) / 1000).toFixed(1) + "K" : (stream.viewers || stream.viewerCount || 0)}
       </div>
 
       {/* Video icon */}
@@ -74,7 +67,7 @@ function VideoStreamCard({ stream, onClick }: { stream: typeof mockLiveStreams[0
       <div className="absolute bottom-0 left-0 right-0 p-3 z-10">
         <div className="flex items-center gap-2 mb-1.5">
           <div className="w-7 h-7 rounded-full border-2 border-primary/50 overflow-hidden">
-            <img src={stream.avatar} alt={stream.host} className="w-full h-full object-cover" />
+            <img src={stream.avatar || avatarImg} alt={stream.host} className="w-full h-full object-cover" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-white text-xs font-bold truncate">{stream.host}</p>
@@ -95,7 +88,7 @@ function VideoStreamCard({ stream, onClick }: { stream: typeof mockLiveStreams[0
   );
 }
 
-function AudioStreamCard({ stream, onClick }: { stream: typeof mockAudioStreams[0]; onClick: () => void }) {
+function AudioStreamCard({ stream, onClick }: { stream: StreamItem; onClick: () => void }) {
   const { t } = useTranslation();
   return (
     <motion.button
@@ -118,7 +111,7 @@ function AudioStreamCard({ stream, onClick }: { stream: typeof mockAudioStreams[
         </div>
         <div className="bg-black/30 text-white/60 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
           <Eye className="w-2.5 h-2.5" />
-          {stream.viewers}
+          {stream.viewers || stream.viewerCount || 0}
         </div>
       </div>
 
@@ -126,7 +119,7 @@ function AudioStreamCard({ stream, onClick }: { stream: typeof mockAudioStreams[
       <div className="flex items-center gap-3 mb-3">
         <div className="relative">
           <div className="w-12 h-12 rounded-full border-2 border-emerald-500/50 overflow-hidden ring-2 ring-emerald-500/20">
-            <img src={stream.avatar} alt={stream.host} className="w-full h-full object-cover" />
+            <img src={stream.avatar || avatarImg} alt={stream.host} className="w-full h-full object-cover" />
           </div>
           <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center border-2 border-[#0c0c1d]">
             <Mic className="w-2.5 h-2.5 text-white" />
@@ -141,29 +134,29 @@ function AudioStreamCard({ stream, onClick }: { stream: typeof mockAudioStreams[
       {/* Speakers row */}
       <div className="flex items-center gap-2 mb-2">
         <div className="flex -space-x-2 rtl:space-x-reverse">
-          {stream.speakers.slice(0, 3).map((s, i) => (
+          {(stream.speakers || []).slice(0, 3).map((s: any, i: number) => (
             <div key={i} className="w-7 h-7 rounded-full border-2 border-[#0c0c1d] overflow-hidden bg-emerald-500/10">
               <img src={avatarImg} alt={s} className="w-full h-full object-cover" />
             </div>
           ))}
-          {stream.speakers.length === 0 && (
+          {(!stream.speakers || stream.speakers.length === 0) && (
             <div className="text-white/30 text-[10px]">{t("live.noSpeakersYet")}</div>
           )}
         </div>
-        {stream.speakers.length > 0 && (
+        {stream.speakers && stream.speakers.length > 0 && (
           <span className="text-white/40 text-[10px]">
-            {stream.speakers.slice(0, 2).join("، ")} {stream.speakers.length > 2 ? `+${stream.speakers.length - 2}` : ""}
+            {stream.speakers.slice(0, 2).join("، ")}{" "}{stream.speakers.length > 2 ? `+${stream.speakers.length - 2}` : ""}
           </span>
         )}
         <div className="mr-auto rtl:ml-auto rtl:mr-0 bg-white/5 text-white/30 text-[10px] px-1.5 py-0.5 rounded-full">
-          {stream.speakers.length}/{stream.maxSpeakers} {t("live.speakers")}
+          {(stream.speakers || []).length}/{stream.maxSpeakers || 4} {t("live.speakers")}
         </div>
       </div>
 
       {/* Tags */}
       {stream.tags?.length > 0 && (
         <div className="flex gap-1">
-          {stream.tags.map((tag) => (
+          {(stream.tags || []).map((tag: string) => (
             <span key={tag} className="text-[9px] font-medium bg-emerald-500/10 text-emerald-400/70 px-1.5 py-0.5 rounded-md border border-emerald-500/10">
               #{tag}
             </span>
@@ -199,26 +192,20 @@ interface ChatMsg {
   timestamp: number;
 }
 
-function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]; onClose: () => void }) {
+function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () => void }) {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [inputValue, setInputValue] = useState('');
   const [hearts, setHearts] = useState<{id: number; x: number}[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [speakers, setSpeakers] = useState(stream.speakers);
-  const [isHost] = useState(true); // mock: user is host
+  const [speakers, setSpeakers] = useState(stream.speakers || []);
+  const [isHost] = useState(false); // determined by real auth
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [showGiftModal, setShowGiftModal] = useState(false);
   const conn = useConnectionQuality();
   const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
 
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { id: 1, type: 'join', user: { id: 'u1', name: 'أحمد', avatar: avatarImg, level: 15 }, color: 'text-yellow-400', timestamp: Date.now() - 30000 },
-    { id: 2, type: 'message', user: { id: 'u2', name: 'ياسمين', avatar: avatarImg, level: 32, badge: 'vip' }, text: 'مرحبا بالجميع! 👋', color: 'text-pink-400', timestamp: Date.now() - 20000 },
-    { id: 3, type: 'message', user: { id: 'u3', name: 'نادر', avatar: avatarImg, level: 8 }, text: 'يا سلام على الصوت 🎵', color: 'text-green-400', timestamp: Date.now() - 15000 },
-    { id: 4, type: 'invite', user: { id: 'u4', name: 'فاطمة', avatar: avatarImg, level: 20 }, text: t("live.joinedSpeakers"), color: 'text-emerald-400', timestamp: Date.now() - 10000 },
-    { id: 5, type: 'message', user: { id: 'u5', name: 'سعود', avatar: avatarImg, level: 18 }, text: 'موضوع ممتاز 👏', color: 'text-blue-400', timestamp: Date.now() - 5000 },
-  ]);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -232,39 +219,25 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
 
     const handleChatMessage = (data: any) => {
       if (!data?.message) return;
+      const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
       setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
         id: data.id || Date.now(),
         type: 'message',
-        user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 } : mockChatUsers[0],
+        user: data.user
+          ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 }
+          : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
         text: data.message,
-        color: 'text-cyan-400',
+        color: colors[Math.floor(Math.random() * colors.length)],
         timestamp: data.ts || Date.now(),
       }]);
     };
     socket.on('chat-message', handleChatMessage);
 
-    // Fallback mock messages (slower on weak connections)
-    const phrases = ["ما شاء الله 🌟", "يا سلام!", "هههههه 😂", "أبدعت 💪", "قلبي ❤️", "المزيد! ☝️", "رائع 🔥"];
-    const intervalMs = conn.quality === 'poor' ? 10000 : conn.quality === 'fair' ? 7000 : 5000;
-    const interval = setInterval(() => {
-      const u = mockChatUsers[Math.floor(Math.random() * mockChatUsers.length)];
-      const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
-      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
-        id: Date.now(),
-        type: 'message',
-        user: u,
-        text: phrases[Math.floor(Math.random() * phrases.length)],
-        color: colors[Math.floor(Math.random() * colors.length)],
-        timestamp: Date.now(),
-      }]);
-    }, intervalMs);
-
     return () => {
-      clearInterval(interval);
       socket.emit('leave-room', roomId);
       socket.off('chat-message', handleChatMessage);
     };
-  }, [conn.quality]);
+  }, []);
 
   const addHeart = () => {
     const id = Date.now();
@@ -292,7 +265,7 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
     setInputValue('');
   };
 
-  const inviteSpeaker = (user: typeof mockChatUsers[0]) => {
+  const inviteSpeaker = (user: { id: string; name: string; username?: string; avatar: string; level: number; badge?: string }) => {
     setSpeakers(prev => [...prev, user.name]);
     setMessages(prev => [...prev, {
       id: Date.now(),
@@ -319,7 +292,7 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
         <div className="flex flex-col gap-1.5 pt-2">
           <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl rounded-full pr-3 p-1 border border-white/10">
             <div className="relative">
-              <img src={stream.avatar} className="w-9 h-9 rounded-full border border-emerald-500" alt="Host" />
+              <img src={stream.avatar || avatarImg} className="w-9 h-9 rounded-full border border-emerald-500" alt="Host" />
               <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center border-2 border-[#06060f]">
                 <Mic className="w-2 h-2 text-white" />
               </div>
@@ -388,7 +361,7 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
             <div className="flex flex-col items-center gap-1.5">
               <div className="relative">
                 <div className="w-16 h-16 rounded-full border-2 border-emerald-500 overflow-hidden ring-4 ring-emerald-500/20">
-                  <img src={stream.avatar} alt={stream.host} className="w-full h-full object-cover" />
+                  <img src={stream.avatar || avatarImg} alt={stream.host} className="w-full h-full object-cover" />
                 </div>
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                   <Crown className="w-2 h-2" />
@@ -425,7 +398,7 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
             ))}
 
             {/* Empty slots */}
-            {Array.from({ length: Math.max(0, stream.maxSpeakers - speakers.length - 1) }).map((_, i) => (
+            {Array.from({ length: Math.max(0, (stream.maxSpeakers || 4) - speakers.length - 1) }).map((_, i) => (
               <div key={`empty-${i}`} className="flex flex-col items-center gap-1.5">
                 <div className="w-14 h-14 rounded-full border-2 border-dashed border-white/10 flex items-center justify-center bg-white/[0.02]">
                   <UserPlus className="w-5 h-5 text-white/15" />
@@ -530,24 +503,7 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
               </h3>
               <p className="text-white/40 text-xs mb-4">{t("live.inviteDesc")}</p>
               <div className="space-y-2 max-h-[40vh] overflow-y-auto">
-                {mockChatUsers.filter(u => !speakers.includes(u.name)).map(user => (
-                  <button key={user.id} onClick={() => inviteSpeaker(user)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all"
-                  >
-                    <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full border border-white/10" />
-                    <div className="text-right rtl:text-right ltr:text-left flex-1 min-w-0">
-                      <p className="text-white text-sm font-bold flex items-center gap-1">
-                        {user.name}
-                        {user.badge === 'vip' && <Crown className="w-3 h-3 text-yellow-400" />}
-                        {user.badge === 'mod' && <Shield className="w-3 h-3 text-blue-400" />}
-                      </p>
-                      <p className="text-white/30 text-xs">@{user.username}</p>
-                    </div>
-                    <div className="bg-emerald-500/15 text-emerald-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-500/30">
-                      {t("live.invite")}
-                    </div>
-                  </button>
-                ))}
+                <p className="text-white/30 text-xs text-center py-8">{t("live.noViewersToInvite")}</p>
               </div>
             </motion.div>
           </div>
@@ -563,29 +519,62 @@ function AudioRoomView({ stream, onClose }: { stream: typeof mockAudioStreams[0]
               className="relative w-full max-w-lg bg-[#0c0c1d]/95 backdrop-blur-2xl rounded-t-[32px] p-6 border-t border-white/10 max-h-[70vh] flex flex-col"
             >
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-white/20 rounded-full" />
-              <div className="flex justify-between items-center mb-6 mt-4">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Gift className="text-primary w-5 h-5" />
-                  {t("room.giftModalTitle")}
-                </h3>
-                <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/10">
-                  <span className="font-black text-yellow-400 text-lg">1,250</span>
-                  <span className="text-xs text-white/60 font-bold">{t("room.giftCoinsLabel")}</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-3 overflow-y-auto p-1 no-scrollbar">
-                {[10, 50, 100, 500, 1000, 5000, 10000, 50000].map((val, i) => (
-                  <button key={val} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1">
-                    <img src={giftImg} alt="Gift" className="w-12 h-12 object-contain group-hover:scale-110 transition-transform" style={{ filter: `hue-rotate(${i * 45}deg)` }} />
-                    <span className="text-xs font-black text-white">{val}</span>
-                  </button>
-                ))}
-              </div>
+              <GiftModalContent streamId={stream.id} onClose={() => setShowGiftModal(false)} />
             </motion.div>
           </div>
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// Gift Modal Content (shared)
+// ══════════════════════════════════════════════════════════
+
+function GiftModalContent({ streamId, onClose }: { streamId: string; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [coinBalance, setCoinBalance] = useState(0);
+  const [giftCatalog, setGiftCatalog] = useState<any[]>([]);
+
+  useEffect(() => {
+    walletApi.balance().then(r => setCoinBalance(r.coins || 0)).catch(() => {});
+    giftsApi.list().then(setGiftCatalog).catch(() => {});
+  }, []);
+
+  const sendGift = async (gift: any) => {
+    try {
+      await giftsApi.send({ giftId: gift.id, receiverId: streamId, streamId });
+      setCoinBalance(prev => Math.max(0, prev - (gift.price || gift.coinCost || 0)));
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <>
+      <div className="flex justify-between items-center mb-6 mt-4">
+        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <Gift className="text-primary w-5 h-5" />
+          {t("room.giftModalTitle")}
+        </h3>
+        <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/10">
+          <span className="font-black text-yellow-400 text-lg">{coinBalance.toLocaleString()}</span>
+          <span className="text-xs text-white/60 font-bold">{t("room.giftCoinsLabel")}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-3 overflow-y-auto p-1 no-scrollbar">
+        {giftCatalog.length > 0 ? giftCatalog.map((gift, i) => (
+          <button key={gift.id} onClick={() => sendGift(gift)} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1">
+            <img src={gift.imageUrl || giftImg} alt={gift.name} className="w-12 h-12 object-contain group-hover:scale-110 transition-transform" style={{ filter: gift.imageUrl ? undefined : `hue-rotate(${i * 45}deg)` }} />
+            <span className="text-xs font-black text-white">{gift.price || gift.coinCost || 0}</span>
+          </button>
+        )) : [10, 50, 100, 500, 1000, 5000, 10000, 50000].map((val, i) => (
+          <button key={val} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1">
+            <img src={giftImg} alt="Gift" className="w-12 h-12 object-contain group-hover:scale-110 transition-transform" style={{ filter: `hue-rotate(${i * 45}deg)` }} />
+            <span className="text-xs font-black text-white">{val}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -598,7 +587,43 @@ export function LiveBroadcast() {
   const dir = i18n.dir();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<"video" | "audio">("video");
-  const [selectedAudioRoom, setSelectedAudioRoom] = useState<typeof mockAudioStreams[0] | null>(null);
+  const [selectedAudioRoom, setSelectedAudioRoom] = useState<StreamItem | null>(null);
+  const [videoStreams, setVideoStreams] = useState<StreamItem[]>([]);
+  const [audioStreams, setAudioStreams] = useState<StreamItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    streamsApi.active()
+      .then((streams: any[]) => {
+        const vids: StreamItem[] = [];
+        const auds: StreamItem[] = [];
+        for (const s of streams) {
+          const item: StreamItem = {
+            id: String(s.id),
+            type: s.type || 'video',
+            host: s.hostName || s.host || 'مجهول',
+            username: s.hostUsername || '',
+            avatar: s.hostAvatar || null,
+            viewers: s.viewerCount || s.viewers || 0,
+            viewerCount: s.viewerCount || s.viewers || 0,
+            title: s.title || '',
+            tags: s.tags || [],
+            isLive: true,
+            level: s.hostLevel || 1,
+            speakers: s.speakers || [],
+            maxSpeakers: s.maxSpeakers || 4,
+            status: s.status || 'live',
+          };
+          if (item.type === 'audio') auds.push(item);
+          else vids.push(item);
+        }
+        setVideoStreams(vids);
+        setAudioStreams(auds);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   // If audio room is selected, show full-screen audio room
   if (selectedAudioRoom) {
@@ -619,7 +644,7 @@ export function LiveBroadcast() {
         <div className="flex items-center gap-2">
           <div className="bg-red-500/15 text-red-400 text-xs font-bold px-3 py-1.5 rounded-full border border-red-500/20 flex items-center gap-1.5 animate-pulse">
             <span className="w-2 h-2 rounded-full bg-red-500" />
-            {mockLiveStreams.length + mockAudioStreams.length} {t("live.liveNow")}
+            {videoStreams.length + audioStreams.length} {t("live.liveNow")}
           </div>
         </div>
       </div>
@@ -637,7 +662,7 @@ export function LiveBroadcast() {
           <Video className={`w-5 h-5 ${activeTab === "video" ? "text-blue-400" : ""}`} />
           {t("live.videoLive")}
           <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${activeTab === "video" ? "bg-blue-500/20 text-blue-400" : "bg-white/5 text-white/30"}`}>
-            {mockLiveStreams.length}
+            {videoStreams.length}
           </span>
         </button>
         <button
@@ -651,67 +676,76 @@ export function LiveBroadcast() {
           <Headphones className={`w-5 h-5 ${activeTab === "audio" ? "text-emerald-400" : ""}`} />
           {t("live.audioLive")}
           <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${activeTab === "audio" ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-white/30"}`}>
-            {mockAudioStreams.length}
+            {audioStreams.length}
           </span>
         </button>
       </div>
 
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
       {/* Content */}
-      <AnimatePresence mode="wait">
-        {activeTab === "video" ? (
-          <motion.div
-            key="video"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            transition={{ duration: 0.2 }}
-          >
-            {/* Video Streams Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {mockLiveStreams.map(stream => (
-                <VideoStreamCard
-                  key={stream.id}
-                  stream={stream}
-                  onClick={() => setLocation(`/room/${stream.id}`)}
-                />
-              ))}
-            </div>
-
-            {mockLiveStreams.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <Video className="w-16 h-16 text-white/10 mb-4" />
-                <p className="text-white/30 text-sm">{t("live.noVideoStreams")}</p>
+      {!loading && (
+        <AnimatePresence mode="wait">
+          {activeTab === "video" ? (
+            <motion.div
+              key="video"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.2 }}
+            >
+              {/* Video Streams Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {videoStreams.map(stream => (
+                  <VideoStreamCard
+                    key={stream.id}
+                    stream={stream}
+                    onClick={() => setLocation(`/room/${stream.id}`)}
+                  />
+                ))}
               </div>
-            )}
-          </motion.div>
-        ) : (
-          <motion.div
-            key="audio"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.2 }}
-          >
-            {/* Audio Streams List */}
-            <div className="space-y-3">
-              {mockAudioStreams.map(stream => (
-                <AudioStreamCard
-                  key={stream.id}
-                  stream={stream}
-                  onClick={() => setSelectedAudioRoom(stream)}
-                />
-              ))}
-            </div>
 
-            {mockAudioStreams.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <Headphones className="w-16 h-16 text-white/10 mb-4" />
-                <p className="text-white/30 text-sm">{t("live.noAudioStreams")}</p>
+              {videoStreams.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <Video className="w-16 h-16 text-white/10 mb-4" />
+                  <p className="text-white/30 text-sm">{t("live.noVideoStreams")}</p>
+                </div>
+              )}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="audio"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+            >
+              {/* Audio Streams List */}
+              <div className="space-y-3">
+                {audioStreams.map(stream => (
+                  <AudioStreamCard
+                    key={stream.id}
+                    stream={stream}
+                    onClick={() => setSelectedAudioRoom(stream)}
+                  />
+                ))}
               </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+              {audioStreams.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <Headphones className="w-16 h-16 text-white/10 mb-4" />
+                  <p className="text-white/30 text-sm">{t("live.noAudioStreams")}</p>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }

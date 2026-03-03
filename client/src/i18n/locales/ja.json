@@ -69,9 +69,6 @@
     "giftModalTitle": "ギフトを送る",
     "giftCoinsLabel": "コイン",
     "giftRecharge": "チャージ",
-    "mockMsg1": "みなさん、こんにちは！",
-    "mockMsg2": "この配信すごい 🔥",
-    "mockMsg3": "リクエストしてもいいですか？",
     "giftSent": "{{name}}が送りました ",
     "giftAmount": "{{amount}}コイン!"
   },

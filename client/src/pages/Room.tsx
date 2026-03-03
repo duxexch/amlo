@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield } from "lucide-react";
-import { useLocation } from "wouter";
+import { useLocation, useRoute } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
+import { walletApi, giftsApi, followApi } from "@/lib/socialApi";
 
 // ── Mock chat data ─────────────────────────────────────
 interface ChatMessage {
@@ -27,14 +28,7 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const mockUsers = [
-  { id: "u1", name: "أحمد", username: "ahmed_99", avatar: avatarImg, level: 15, badge: 'vip' as const, isFollowed: false },
-  { id: "u2", name: "ياسمين", username: "yasmine_star", avatar: avatarImg, level: 32, badge: 'top' as const, isFollowed: true },
-  { id: "u3", name: "نادر", username: "nader_live", avatar: avatarImg, level: 8, isFollowed: false },
-  { id: "u4", name: "طارق", username: "tariq_pro", avatar: avatarImg, level: 45, badge: 'mod' as const, isFollowed: true },
-  { id: "u5", name: "ليلى", username: "layla_music", avatar: avatarImg, level: 22, isFollowed: false },
-  { id: "u6", name: "محمد علي", username: "moali_gamer", avatar: avatarImg, level: 5, isFollowed: false },
-];
+
 
 // ── User Profile Popup ─────────────────────────────────
 function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['user']; onClose: () => void; onFollow: (id: string) => void; t: any }) {
@@ -213,14 +207,19 @@ export function Room() {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [, setLocation] = useLocation();
+  const [, params] = useRoute("/room/:id");
+  const roomId = params?.id || "default";
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
+  const [coinBalance, setCoinBalance] = useState(0);
+  const [heartCount, setHeartCount] = useState(0);
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [hearts, setHearts] = useState<{id: number, x: number}[]>([]);
   const [selectedUser, setSelectedUser] = useState<ChatMessage['user'] | null>(null);
-  const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set(['u2', 'u4']));
+  const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
   const [inputValue, setInputValue] = useState('');
   const [viewerCount, setViewerCount] = useState(0);
+  const [giftCatalog, setGiftCatalog] = useState<any[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const conn = useConnectionQuality();
@@ -235,92 +234,78 @@ export function Room() {
     };
   }, []);
   
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 1, type: 'join', user: mockUsers[5], color: 'text-yellow-400', timestamp: Date.now() - 30000 },
-    { id: 2, type: 'message', user: mockUsers[0], text: t("room.mockMsg1"), color: 'text-blue-400', timestamp: Date.now() - 25000 },
-    { id: 3, type: 'message', user: mockUsers[1], text: t("room.mockMsg2"), color: 'text-pink-400', timestamp: Date.now() - 20000 },
-    { id: 4, type: 'follow', user: mockUsers[4], color: 'text-pink-400', timestamp: Date.now() - 15000 },
-    { id: 5, type: 'message', user: mockUsers[2], text: t("room.mockMsg3"), color: 'text-green-400', timestamp: Date.now() - 10000 },
-    { id: 6, type: 'gift', user: mockUsers[3], giftAmount: 50, color: 'text-purple-400', timestamp: Date.now() - 5000 },
-    { id: 7, type: 'message', user: mockUsers[4], text: t("room.mockMsg4", "أحلى بث 🔥🎵"), color: 'text-orange-400', timestamp: Date.now() - 2000 },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Auto-scroll to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Simulate incoming messages (will be replaced by real socket events in production)
+  // Load coin balance and gift catalog
+  useEffect(() => {
+    walletApi.balance().then(b => setCoinBalance(b?.coins || 0)).catch(() => {});
+    giftsApi.list().then(g => setGiftCatalog(g || [])).catch(() => {});
+  }, []);
+
+  // Socket: join room, listen for messages, viewer count, gifts
   useEffect(() => {
     const socket = getSocket();
-    const roomId = 'default'; // TODO: get from route params
 
-    // Join room via socket
     socket.emit('join-room', roomId);
 
-    // Listen for real chat messages from server
     const handleChatMessage = (data: any) => {
       if (!data?.message) return;
+      const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400', 'text-yellow-400'];
       setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
         id: data.id || Date.now(),
         type: 'message',
-        user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, isFollowed: false } : mockUsers[0],
+        user: data.user
+          ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, username: data.user.username || data.user.id, isFollowed: false }
+          : { id: 'unknown', name: t("room.anonymous", "مجهول"), username: 'unknown', avatar: avatarImg, level: 1, isFollowed: false },
         text: data.message,
-        color: 'text-white',
+        color: colors[Math.floor(Math.random() * colors.length)],
         timestamp: data.ts || Date.now(),
       }]);
     };
 
     const handleViewerCount = (count: number) => setViewerCount(count);
 
-    socket.on('chat-message', handleChatMessage);
-    socket.on('viewer-count', handleViewerCount);
-
-    // Fallback: simulate messages if no real ones arrive (for demo/testing)
-    const phrases = [
-      t("room.mockPhrase1", "ما شاء الله 🌟"),
-      t("room.mockPhrase2", "يا سلام عليك!"),
-      t("room.mockPhrase3", "هههههه 😂"),
-      t("room.mockPhrase4", "تسلم يا بطل 💪"),
-      t("room.mockPhrase5", "أبدعت والله ✨"),
-      t("room.mockPhrase6", "قلبي عليك ❤️"),
-      t("room.mockPhrase7", "يا جماعة اللايك ☝️"),
-    ];
-    // Slower interval for weak connections
-    const intervalMs = conn.quality === 'poor' ? 8000 : conn.quality === 'fair' ? 6000 : 4000;
-    const interval = setInterval(() => {
-      const randomUser = mockUsers[Math.floor(Math.random() * mockUsers.length)];
-      const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
-      const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400', 'text-yellow-400'];
-      const randomColor = colors[Math.floor(Math.random() * colors.length)];
-      
+    const handleGiftReceived = (data: any) => {
+      if (!data?.sender?.name || !data?.gift?.price) return;
       setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
         id: Date.now(),
-        type: 'message',
-        user: { ...randomUser, isFollowed: followedUsers.has(randomUser.id) },
-        text: randomPhrase,
-        color: randomColor,
+        type: 'gift',
+        user: { id: data.sender.id || 'unknown', name: data.sender.name, username: data.sender.id || 'unknown', avatar: data.sender.avatar || avatarImg, level: 1, isFollowed: false },
+        giftAmount: data.gift.price,
+        color: 'text-purple-400',
         timestamp: Date.now(),
       }]);
-    }, intervalMs);
+    };
+
+    socket.on('chat-message', handleChatMessage);
+    socket.on('viewer-count', handleViewerCount);
+    socket.on('gift-received', handleGiftReceived);
 
     return () => {
-      clearInterval(interval);
       socket.emit('leave-room', roomId);
       socket.off('chat-message', handleChatMessage);
       socket.off('viewer-count', handleViewerCount);
+      socket.off('gift-received', handleGiftReceived);
     };
-  }, [followedUsers, conn.quality]);
+  }, [roomId]);
 
   const addHeart = () => {
     const id = Date.now();
     const x = Math.random() * 100;
     setHearts(prev => [...prev, {id, x}]);
+    setHeartCount(prev => prev + 1);
     const timer = setTimeout(() => setHearts(prev => prev.filter(h => h.id !== id)), 2000);
     heartTimersRef.current.push(timer);
   };
 
-  const toggleFollow = (userId: string) => {
+  const toggleFollow = async (userId: string) => {
+    const wasFollowed = followedUsers.has(userId);
+    // Optimistic update
     setFollowedUsers(prev => {
       const next = new Set(prev);
       if (next.has(userId)) next.delete(userId);
@@ -328,12 +313,26 @@ export function Room() {
       return next;
     });
     setSelectedUser(prev => prev ? { ...prev, isFollowed: !prev.isFollowed } : null);
+    try {
+      if (wasFollowed) {
+        await followApi.unfollow(userId);
+      } else {
+        await followApi.follow(userId);
+      }
+    } catch {
+      // Rollback on error
+      setFollowedUsers(prev => {
+        const next = new Set(prev);
+        if (wasFollowed) next.add(userId);
+        else next.delete(userId);
+        return next;
+      });
+      setSelectedUser(prev => prev ? { ...prev, isFollowed: wasFollowed } : null);
+    }
   };
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    const roomId = 'default'; // TODO: get from route params
-    // Send via socket (server will broadcast to all viewers)
     socketManager.emit('chat-message', {
       roomId,
       message: inputValue.trim(),
@@ -379,7 +378,7 @@ export function Room() {
               <p className="text-white text-xs font-bold leading-tight">{t("room.hostName", "سارة أحمد")}</p>
               <div className="flex items-center gap-1 text-white/70 text-[10px]">
                 <Users className="w-2.5 h-2.5" />
-                <span>{viewerCount > 0 ? viewerCount.toLocaleString() : '1,205'}</span>
+                <span>{viewerCount.toLocaleString()}</span>
               </div>
             </div>
             <button className="w-7 h-7 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors">
@@ -423,7 +422,7 @@ export function Room() {
           <div className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center border border-white/10">
             <Heart className="w-5 h-5 fill-current text-primary" />
           </div>
-          <span className="text-white/60 text-[10px] font-bold">2.1K</span>
+          <span className="text-white/60 text-[10px] font-bold">{heartCount > 0 ? heartCount >= 1000 ? `${(heartCount / 1000).toFixed(1)}K` : heartCount : 0}</span>
         </button>
 
         {/* Gift */}
@@ -558,21 +557,29 @@ export function Room() {
                   {t("room.giftModalTitle")}
                 </h3>
                 <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/10">
-                  <span className="font-black text-yellow-400 text-lg">1,250</span>
+                  <span className="font-black text-yellow-400 text-lg">{coinBalance.toLocaleString()}</span>
                   <span className="text-xs text-white/60 font-bold">{t("room.giftCoinsLabel")}</span>
                 </div>
               </div>
 
               <div className="grid grid-cols-4 gap-3 overflow-y-auto p-1 no-scrollbar">
-                {[10, 50, 100, 500, 1000, 5000, 10000, 50000].map((val, i) => (
-                  <button key={val} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1">
+                {(giftCatalog.length > 0 ? giftCatalog : [10, 50, 100, 500, 1000, 5000, 10000, 50000].map((val, i) => ({ id: `default-${i}`, price: val, name: `${val}`, icon: null }))).map((gift: any, i: number) => (
+                  <button
+                    key={gift.id}
+                    onClick={async () => {
+                      // TODO: need receiverId (host user id) — for now emit socket gift
+                      socketManager.emit('send-gift', { roomId, gift: { id: gift.id, name: gift.name || gift.nameAr, price: gift.price }, sender: { id: 'me', name: t("room.you", "أنت") } });
+                      setShowGiftModal(false);
+                    }}
+                    className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1"
+                  >
                     <img 
-                      src={giftImg} 
-                      alt="Gift" 
+                      src={gift.icon || giftImg} 
+                      alt={gift.name || gift.nameAr || "Gift"} 
                       className="w-12 h-12 object-contain group-hover:scale-110 transition-transform" 
-                      style={{ filter: `hue-rotate(${i * 45}deg)` }}
+                      style={{ filter: gift.icon ? undefined : `hue-rotate(${i * 45}deg)` }}
                     />
-                    <span className="text-xs font-black text-white">{val}</span>
+                    <span className="text-xs font-black text-white">{gift.price}</span>
                   </button>
                 ))}
               </div>

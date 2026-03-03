@@ -69,9 +69,6 @@
     "giftModalTitle": "ارسال هدیه",
     "giftCoinsLabel": "سکه‌ها",
     "giftRecharge": "شارژ",
-    "mockMsg1": "سلام به همه!",
-    "mockMsg2": "این استریم فوق‌العاده‌ست 🔥",
-    "mockMsg3": "میشه یه درخواست بدم؟",
     "giftSent": "{{name}} فرستاد ",
     "giftAmount": "{{amount}} سکه!"
   },

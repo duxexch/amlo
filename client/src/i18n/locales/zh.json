@@ -69,9 +69,6 @@
     "giftModalTitle": "发送礼物",
     "giftCoinsLabel": "金币",
     "giftRecharge": "充值",
-    "mockMsg1": "大家好！",
-    "mockMsg2": "这个直播太棒了 🔥",
-    "mockMsg3": "我可以点个歌吗？",
     "giftSent": "{{name}} 送出 ",
     "giftAmount": "{{amount}} 金币！"
   },

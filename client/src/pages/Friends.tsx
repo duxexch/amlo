@@ -56,20 +56,7 @@ function formatTime(date: Date): string {
   return date.toLocaleDateString(lang, { month: "short", day: "numeric" });
 }
 
-// ── Mock data ──
-const mockFriends = [
-  { id: "u1", username: "sara_singer", displayName: "سارة المغنية", avatar: null, level: 28, isVerified: true, isOnline: true, country: "SA", friendshipId: "f1" },
-  { id: "u2", username: "ali_gamer", displayName: "علي جيمر", avatar: null, level: 42, isVerified: true, isOnline: true, country: "AE", friendshipId: "f2" },
-  { id: "u3", username: "mona_star", displayName: "منى ستار", avatar: null, level: 15, isVerified: false, isOnline: false, country: "EG", friendshipId: "f3" },
-  { id: "u4", username: "khalid_dj", displayName: "خالد دي جي", avatar: null, level: 36, isVerified: true, isOnline: false, country: "KW", friendshipId: "f4" },
-  { id: "u5", username: "reem_singer", displayName: "ريم المغنية", avatar: null, level: 20, isVerified: false, isOnline: true, country: "LB", friendshipId: "f5" },
-  { id: "u6", username: "omar_pr", displayName: "عمر بي آر", avatar: null, level: 50, isVerified: true, isOnline: true, country: "JO", friendshipId: "f6" },
-];
 
-const mockRequests = [
-  { id: "r1", sender: { id: "u7", username: "noor_light", displayName: "نور الضياء", avatar: null, level: 12, isVerified: false, country: "IQ" }, createdAt: new Date(Date.now() - 3600000) },
-  { id: "r2", sender: { id: "u8", username: "ahmed_pro", displayName: "أحمد بروفيشنال", avatar: null, level: 33, isVerified: true, country: "SA" }, createdAt: new Date(Date.now() - 7200000) },
-];
 
 // ═══════════════════════════════════
 // SUB-COMPONENTS
@@ -518,8 +505,9 @@ export function Friends() {
   const [tab, setTab] = useState<Tab>("chats");
 
   // ── Friends state ──
-  const [friends, setFriends] = useState(mockFriends);
-  const [requests, setRequests] = useState(mockRequests);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
 
   // ── Global search ──
   const [globalSearch, setGlobalSearch] = useState("");
@@ -563,6 +551,22 @@ export function Friends() {
     [conversations]
   );
 
+  // ── Load friends & requests ──
+  useEffect(() => {
+    (async () => {
+      setFriendsLoading(true);
+      try {
+        const [friendsList, requestsList] = await Promise.all([
+          friendsApi.list(),
+          friendsApi.requests(),
+        ]);
+        setFriends(friendsList || []);
+        setRequests(requestsList || []);
+      } catch {}
+      setFriendsLoading(false);
+    })();
+  }, []);
+
   // ── Load conversations & settings ──
   useEffect(() => {
     (async () => {
@@ -571,11 +575,8 @@ export function Friends() {
         const [convs, settings] = await Promise.all([chatApi.conversations(), chatApi.settings()]);
         setConversations(convs || []);
         setChatSettings(settings);
-      } catch {
-        // fallback — API not ready
-      } finally {
-        setLoading(false);
-      }
+      } catch {}
+      setLoading(false);
     })();
   }, []);
 
@@ -644,10 +645,7 @@ export function Friends() {
       const data = await friendsApi.searchUsers(globalSearch);
       setSearchResults(data);
     } catch {
-      setSearchResults([
-        { id: "s1", username: "layla_dance", displayName: "ليلى دانس", avatar: null, level: 18, isVerified: false, isOnline: false, friendshipStatus: null },
-        { id: "s2", username: "youssef_mc", displayName: "يوسف إم سي", avatar: null, level: 25, isVerified: true, isOnline: true, friendshipStatus: null },
-      ]);
+      setSearchResults([]);
     }
     setSearching(false);
   };
@@ -787,7 +785,12 @@ export function Friends() {
   };
 
   const handleAccept = async (id: string) => {
-    try { await friendsApi.accept(id); } catch {}
+    try {
+      await friendsApi.accept(id);
+      // Refresh friends list after accepting
+      const updated = await friendsApi.list();
+      setFriends(updated || []);
+    } catch {}
     setRequests(prev => prev.filter(r => r.id !== id));
   };
 

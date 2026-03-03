@@ -69,9 +69,6 @@
     "giftModalTitle": "Enviar presentes",
     "giftCoinsLabel": "Moedas",
     "giftRecharge": "Recarregar",
-    "mockMsg1": "Olá a todos!",
-    "mockMsg2": "Essa transmissão é incrível 🔥",
-    "mockMsg3": "Posso fazer um pedido?",
     "giftSent": "{{name}} enviou ",
     "giftAmount": "{{amount}} moedas!"
   },

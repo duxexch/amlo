@@ -62,8 +62,8 @@ export function UserAuth() {
     setAuthSuccess(null);
 
     if (authMethod === "phone") {
-      setShowOtp(true);
-      setOtpTimer(60);
+      // Phone OTP not yet implemented
+      setAuthError(t("auth.phoneComingSoon", "تسجيل الدخول عبر الهاتف قريباً"));
       return;
     }
 

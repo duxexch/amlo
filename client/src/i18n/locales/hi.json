@@ -69,9 +69,6 @@
     "giftModalTitle": "उपहार भेजें",
     "giftCoinsLabel": "सिक्के",
     "giftRecharge": "रिचार्ज",
-    "mockMsg1": "सभी को नमस्ते!",
-    "mockMsg2": "यह स्ट्रीम शानदार है 🔥",
-    "mockMsg3": "क्या मैं अनुरोध कर सकता हूं?",
     "giftSent": "{{name}} ने भेजा ",
     "giftAmount": "{{amount}} सिक्के!"
   },

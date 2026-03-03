@@ -69,9 +69,6 @@
     "giftModalTitle": "선물 보내기",
     "giftCoinsLabel": "코인",
     "giftRecharge": "충전",
-    "mockMsg1": "모두 안녕하세요!",
-    "mockMsg2": "이 방송 정말 대박 🔥",
-    "mockMsg3": "요청해도 될까요?",
     "giftSent": "{{name}}님이 보냈습니다 ",
     "giftAmount": "{{amount}} 코인!"
   },

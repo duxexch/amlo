@@ -69,9 +69,6 @@
     "giftModalTitle": "Kirim Hadiah",
     "giftCoinsLabel": "Koin",
     "giftRecharge": "Isi ulang",
-    "mockMsg1": "Halo semua!",
-    "mockMsg2": "Siaran ini luar biasa 🔥",
-    "mockMsg3": "Boleh saya minta sesuatu?",
     "giftSent": "{{name}} mengirim ",
     "giftAmount": "{{amount}} koin!"
   },

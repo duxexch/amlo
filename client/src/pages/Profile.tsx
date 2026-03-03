@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, User, Bell, Shield, LogOut, Camera, ShieldCheck, ChevronDown,
@@ -10,68 +10,35 @@ import {
 import avatarImg from "@/assets/images/avatar-3d.png";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
-import { profileApi } from "@/lib/authApi";
+import { authApi, profileApi } from "@/lib/authApi";
 import { PinSetup } from "@/pages/PinSetup";
+import { useLocation } from "wouter";
 
-// Mock user data
-const mockUser = {
-  id: "USR-001",
-  name: "فارس البطل",
-  username: "fares_hero",
-  email: "fares@example.com",
-  phone: "+966 55 123 4567",
-  bio: "عاشق للتكنولوجيا والدردشة الصوتية. انضم إلي في غرفتي الخاصة كل يوم سبت!",
-  gender: "male",
-  country: "SA",
-  birthday: "1998-03-15",
+// Default user shape (used before API data loads)
+const defaultUser = {
+  id: "",
+  name: "",
+  username: "",
+  email: "",
+  phone: "",
+  bio: "",
+  gender: "",
+  country: "",
+  birthday: "",
   avatar: avatarImg,
-  level: 24,
-  xp: 7500,
-  xpNext: 10000,
-  isVerified: true,
-  isVip: true,
-  vipLevel: "gold",
-  coins: 1250,
-  stats: {
-    followers: 4200,
-    following: 312,
-    giftsReceived: 856,
-    giftsSent: 234,
-    streamHours: 128,
-    friends: 89,
-  },
-  referral: {
-    code: "FARES2024",
-    link: "https://ablox.app/ref/FARES2024",
-    invited: 23,
-    earnings: 450,
-  },
-  linkedAccounts: {
-    google: { connected: true, email: "fares@gmail.com" },
-    facebook: { connected: false, email: "" },
-    apple: { connected: true, email: "fares@icloud.com" },
-    twitter: { connected: false, email: "" },
-    tiktok: { connected: false, email: "" },
-    snapchat: { connected: false, email: "" },
-    instagram: { connected: true, email: "@fares_hero" },
-    github: { connected: false, email: "" },
-  },
-  notifications: {
-    streams: true,
-    calls: true,
-    messages: true,
-    gifts: true,
-    followers: true,
-    promotions: false,
-    sounds: true,
-    vibration: true,
-  },
-  sessions: [
-    { id: 1, device: "iPhone 15 Pro", location: "Riyadh, SA", lastActive: "now", current: true },
-    { id: 2, device: "MacBook Pro", location: "Riyadh, SA", lastActive: "2h ago", current: false },
-    { id: 3, device: "iPad Air", location: "Jeddah, SA", lastActive: "3d ago", current: false },
-  ],
-  joinDate: "2024-01-15",
+  level: 1,
+  xp: 0,
+  xpNext: 1000,
+  isVerified: false,
+  isVip: false,
+  vipLevel: "",
+  coins: 0,
+  stats: { followers: 0, following: 0, giftsReceived: 0, giftsSent: 0, streamHours: 0, friends: 0 },
+  referral: { code: "", link: "", invited: 0, earnings: 0 },
+  linkedAccounts: {} as Record<string, { connected: boolean; email: string }>,
+  notifications: { streams: true, calls: true, messages: true, gifts: true, followers: true, promotions: false, sounds: true, vibration: true },
+  sessions: [] as { id: number; device: string; location: string; lastActive: string; current: boolean }[],
+  joinDate: "",
 };
 
 const countries = [
@@ -168,25 +135,100 @@ function ExpandableSection({ icon: Icon, title, desc, children, defaultOpen = fa
 
 export function Profile() {
   const { t, i18n } = useTranslation();
-  const [user, setUser] = useState(mockUser);
+  const [, navigate] = useLocation();
+  const [user, setUser] = useState(defaultUser);
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: "", new: "", confirm: "" });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
-  const [notifications, setNotifications] = useState(user.notifications);
+  const [notifications, setNotifications] = useState(defaultUser.notifications);
   const [saving, setSaving] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // PIN management state
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(true);
-  const [showPinSetup, setShowPinSetup] = useState<number | null>(null); // profileIndex to create
+  const [showPinSetup, setShowPinSetup] = useState<number | null>(null);
   const [changingPin, setChangingPin] = useState<number | null>(null);
   const [changePinForm, setChangePinForm] = useState({ current: "", newPin: "", confirm: "" });
   const [changePinError, setChangePinError] = useState<string | null>(null);
   const [changePinLoading, setChangePinLoading] = useState(false);
   const [deletingProfile, setDeletingProfile] = useState<number | null>(null);
+
+  // Load user data from API
+  const loadUser = useCallback(async () => {
+    try {
+      const res = await authApi.me();
+      if (res.success && res.data) {
+        const u = res.data.user || res.data;
+        setUser({
+          id: u.id || "",
+          name: u.displayName || u.username || "",
+          username: u.username || "",
+          email: u.email || "",
+          phone: u.phone || "",
+          bio: u.bio || "",
+          gender: u.gender || "",
+          country: u.country || "",
+          birthday: u.birthDate || "",
+          avatar: u.avatar || avatarImg,
+          level: u.level || 1,
+          xp: u.xp || 0,
+          xpNext: (u.level || 1) * 1000,
+          isVerified: u.isVerified || false,
+          isVip: false,
+          vipLevel: "",
+          coins: u.coins || 0,
+          stats: { followers: 0, following: 0, giftsReceived: 0, giftsSent: 0, streamHours: 0, friends: 0 },
+          referral: {
+            code: u.referralCode || "",
+            link: u.referralCode ? `${window.location.origin}/ref/${u.referralCode}` : "",
+            invited: 0,
+            earnings: 0,
+          },
+          linkedAccounts: {},
+          notifications: defaultUser.notifications,
+          sessions: [],
+          joinDate: u.createdAt || "",
+        });
+      }
+    } catch {
+      // Will show default empty state
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load notification preferences from API
+  const loadNotifications = useCallback(async () => {
+    try {
+      const res = await authApi.getNotificationPreferences();
+      if (res.success && res.data) {
+        setNotifications({
+          streams: res.data.streams ?? true,
+          calls: res.data.calls ?? true,
+          messages: res.data.messages ?? true,
+          gifts: res.data.gifts ?? true,
+          followers: res.data.friendRequests ?? true,
+          promotions: res.data.marketing ?? false,
+          sounds: true,
+          vibration: true,
+        });
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadUser();
+    loadNotifications();
+  }, [loadUser, loadNotifications]);
 
   // Load profiles on mount
   useEffect(() => {
@@ -249,13 +291,27 @@ export function Profile() {
     setEditing(field);
     setEditValues({ ...editValues, [field]: value });
   };
-  const saveEdit = (field: string) => {
+  const saveEdit = async (field: string) => {
     setSaving(true);
-    setTimeout(() => {
-      setUser({ ...user, [field]: editValues[field] || (user as any)[field] });
+    try {
+      const fieldMap: Record<string, string> = {
+        name: "displayName",
+        email: "email",
+        bio: "bio",
+        gender: "gender",
+        country: "country",
+        birthday: "birthDate",
+      };
+      const apiField = fieldMap[field] || field;
+      const value = editValues[field] || (user as any)[field];
+      await profileApi.updateProfile(1, { [apiField]: value });
+      setUser({ ...user, [field]: value });
       setEditing(null);
+    } catch (err: any) {
+      alert(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
       setSaving(false);
-    }, 500);
+    }
   };
   const cancelEdit = () => setEditing(null);
   const copyReferral = () => {
@@ -263,8 +319,80 @@ export function Profile() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-  const toggleNotification = (key: keyof typeof notifications) => {
-    setNotifications({ ...notifications, [key]: !notifications[key] });
+  const toggleNotification = async (key: keyof typeof notifications) => {
+    const newValue = !notifications[key];
+    setNotifications({ ...notifications, [key]: newValue });
+    try {
+      // Map frontend keys to backend keys
+      const backendMap: Record<string, string> = {
+        streams: "streams",
+        calls: "calls",
+        messages: "messages",
+        gifts: "gifts",
+        followers: "friendRequests",
+        promotions: "marketing",
+      };
+      const backendKey = backendMap[key];
+      if (backendKey) {
+        await authApi.updateNotificationPreferences({ [backendKey]: newValue });
+      }
+    } catch {
+      // Revert on error
+      setNotifications({ ...notifications, [key]: !newValue });
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError(null);
+    if (!passwordForm.current || !passwordForm.new) {
+      setPasswordError(t("profile.fillAllFields", "يرجى ملء جميع الحقول"));
+      return;
+    }
+    if (passwordForm.new.length < 6) {
+      setPasswordError(t("profile.passwordMin6", "كلمة المرور يجب أن تكون 6 أحرف على الأقل"));
+      return;
+    }
+    if (passwordForm.new !== passwordForm.confirm) {
+      setPasswordError(t("profile.passwordMismatch", "كلمة المرور غير متطابقة"));
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await authApi.changePassword(passwordForm.current, passwordForm.new);
+      setPasswordForm({ current: "", new: "", confirm: "" });
+      setPasswordError(null);
+      alert(t("profile.passwordChanged", "تم تغيير كلمة المرور بنجاح"));
+    } catch (err: any) {
+      setPasswordError(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout();
+      navigate("/auth");
+    } catch {
+      navigate("/auth");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+    if (!deletePassword) {
+      setDeleteError(t("profile.enterPasswordToDelete", "يرجى إدخال كلمة المرور للتأكيد"));
+      return;
+    }
+    setDeleting(true);
+    try {
+      await authApi.deleteAccount(deletePassword);
+      navigate("/auth");
+    } catch (err: any) {
+      setDeleteError(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const vipBadge = vipBadges[user.vipLevel];
@@ -311,6 +439,14 @@ export function Profile() {
       )}
     </div>
   );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500 pb-10 max-w-3xl mx-auto">
@@ -457,7 +593,7 @@ export function Profile() {
               <User className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldGender")}</p>
-                <select value={user.gender} onChange={(e) => setUser({ ...user, gender: e.target.value })} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
+                <select value={user.gender} onChange={async (e) => { const v = e.target.value; setUser({ ...user, gender: v }); try { await profileApi.updateProfile(1, { gender: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
                   <option value="male" className="bg-[#1a1a2e] text-white">{t("profile.genderMale")}</option>
                   <option value="female" className="bg-[#1a1a2e] text-white">{t("profile.genderFemale")}</option>
                   <option value="other" className="bg-[#1a1a2e] text-white">{t("profile.genderOther")}</option>
@@ -469,7 +605,7 @@ export function Profile() {
               <MapPin className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldCountry")}</p>
-                <select value={user.country} onChange={(e) => setUser({ ...user, country: e.target.value })} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
+                <select value={user.country} onChange={async (e) => { const v = e.target.value; setUser({ ...user, country: v }); try { await profileApi.updateProfile(1, { country: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
                   {countries.map(c => (<option key={c.code} value={c.code} className="bg-[#1a1a2e] text-white">{c.flag} {c.name}</option>))}
                 </select>
               </div>
@@ -479,7 +615,7 @@ export function Profile() {
               <Calendar className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldBirthday")}</p>
-                <input type="date" value={user.birthday} onChange={(e) => setUser({ ...user, birthday: e.target.value })} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1" dir="ltr" />
+                <input type="date" value={user.birthday} onChange={async (e) => { const v = e.target.value; setUser({ ...user, birthday: v }); try { await profileApi.updateProfile(1, { birthDate: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1" dir="ltr" />
               </div>
             </div>
           </div>
@@ -555,7 +691,10 @@ export function Profile() {
                 </div>
                 <input type="password" value={passwordForm.new} onChange={(e) => setPasswordForm({ ...passwordForm, new: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary" placeholder={t("profile.newPassword")} dir="ltr" />
                 <input type="password" value={passwordForm.confirm} onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary" placeholder={t("profile.confirmPassword")} dir="ltr" />
-                <button className="w-full bg-primary/10 border border-primary/20 text-primary font-bold py-2.5 rounded-xl text-sm hover:bg-primary/20 transition-all">{t("profile.updatePassword")}</button>
+                {passwordError && <p className="text-destructive text-xs font-medium bg-destructive/10 px-3 py-2 rounded-lg">{passwordError}</p>}
+                <button onClick={handleChangePassword} disabled={passwordSaving} className="w-full bg-primary/10 border border-primary/20 text-primary font-bold py-2.5 rounded-xl text-sm hover:bg-primary/20 transition-all disabled:opacity-50">
+                  {passwordSaving ? t("common.saving", "جاري الحفظ...") : t("profile.updatePassword")}
+                </button>
               </div>
             </div>
             <div className="border-t border-white/5 pt-4">
@@ -766,7 +905,7 @@ export function Profile() {
         <ExpandableSection icon={LogOut} title={t("common.logout")} desc={t("profile.logoutDesc")} danger>
           <div className="space-y-3">
             <p className="text-white/60 text-sm">{t("profile.logoutConfirm")}</p>
-            <button className="w-full bg-destructive/10 border border-destructive/20 text-destructive font-bold py-3 rounded-xl text-sm hover:bg-destructive/20 transition-all">{t("common.logout")}</button>
+            <button onClick={handleLogout} className="w-full bg-destructive/10 border border-destructive/20 text-destructive font-bold py-3 rounded-xl text-sm hover:bg-destructive/20 transition-all">{t("common.logout")}</button>
           </div>
         </ExpandableSection>
 
@@ -776,7 +915,22 @@ export function Profile() {
             <div className="bg-destructive/5 border border-destructive/10 rounded-xl p-4">
               <p className="text-destructive/80 text-sm leading-relaxed">{t("profile.deleteWarning")}</p>
             </div>
-            <button className="w-full bg-destructive/10 border border-destructive/20 text-destructive font-bold py-3 rounded-xl text-sm hover:bg-destructive/20 transition-all">{t("profile.deleteAccountBtn")}</button>
+            <input
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-destructive"
+              placeholder={t("profile.enterPasswordToDelete", "أدخل كلمة المرور للتأكيد")}
+              dir="ltr"
+            />
+            {deleteError && <p className="text-destructive text-xs font-medium bg-destructive/10 px-3 py-2 rounded-lg">{deleteError}</p>}
+            <button
+              onClick={handleDeleteAccount}
+              disabled={deleting || !deletePassword}
+              className="w-full bg-destructive/10 border border-destructive/20 text-destructive font-bold py-3 rounded-xl text-sm hover:bg-destructive/20 transition-all disabled:opacity-50"
+            >
+              {deleting ? t("common.deleting", "جاري الحذف...") : t("profile.deleteAccountBtn")}
+            </button>
           </div>
         </ExpandableSection>
       </div>

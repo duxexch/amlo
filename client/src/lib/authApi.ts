@@ -55,6 +55,35 @@ export const authApi = {
       body: JSON.stringify({ token, password }),
     }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ success: boolean; message: string }>("/change-password", {
+      method: "PUT",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
+  deleteAccount: (password: string) =>
+    request<{ success: boolean; message: string }>("/account", {
+      method: "DELETE",
+      body: JSON.stringify({ password }),
+    }),
+
+  getNotificationPreferences: () =>
+    request<{ success: boolean; data: any }>("/notification-preferences"),
+
+  updateNotificationPreferences: (prefs: {
+    messages?: boolean;
+    calls?: boolean;
+    friendRequests?: boolean;
+    gifts?: boolean;
+    streams?: boolean;
+    systemUpdates?: boolean;
+    marketing?: boolean;
+  }) =>
+    request<{ success: boolean; data: any }>("/notification-preferences", {
+      method: "PUT",
+      body: JSON.stringify(prefs),
+    }),
+
   // OTP
   sendOtp: (email: string) =>
     request<{ success: boolean; message: string; cooldownSeconds?: number }>("/otp/send", {

@@ -69,9 +69,6 @@
     "giftModalTitle": "Geschenke senden",
     "giftCoinsLabel": "Münzen",
     "giftRecharge": "Aufladen",
-    "mockMsg1": "Hallo zusammen!",
-    "mockMsg2": "Dieser Stream ist unglaublich 🔥",
-    "mockMsg3": "Kann ich eine Anfrage stellen?",
     "giftSent": "{{name}} hat gesendet ",
     "giftAmount": "{{amount}} Münzen!"
   },

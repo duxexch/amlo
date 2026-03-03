@@ -116,3 +116,42 @@ export const callsApi = {
   history: (page = 1) => request<any[]>(`/calls/history?page=${page}`),
   pricing: () => request<{ voice_call_rate: number; video_call_rate: number; message_cost: number }>("/pricing"),
 };
+
+// ── Wallet ──
+export const walletApi = {
+  balance: () => request<{ coins: number; diamonds: number }>("/wallet/balance"),
+  transactions: (page = 1, type?: string) => {
+    const params = new URLSearchParams({ page: String(page) });
+    if (type) params.set("type", type);
+    return request<any[]>(`/wallet/transactions?${params}`);
+  },
+  income: () => request<{ totalReceived: number; todayReceived: number; weekReceived: number; monthReceived: number }>("/wallet/income"),
+  recharge: (data: { packageId?: string; amount: number; paymentMethod?: string }) =>
+    request("/wallet/recharge", { method: "POST", body: JSON.stringify(data) }),
+  withdraw: (data: { amount: number; paymentMethodId?: string; paymentDetails?: string }) =>
+    request("/wallet/withdraw", { method: "POST", body: JSON.stringify(data) }),
+};
+
+// ── Gifts ──
+export const giftsApi = {
+  list: () => request<any[]>("/gifts"),
+  send: (data: { giftId: string; receiverId: string; streamId?: string; quantity?: number }) =>
+    request<{ success: boolean; newBalance: number }>("/gifts/send", { method: "POST", body: JSON.stringify(data) }),
+  history: (role: "sent" | "received" = "sent", page = 1) =>
+    request<any[]>(`/gifts/history?role=${role}&page=${page}`),
+};
+
+// ── Follows ──
+export const followApi = {
+  follow: (userId: string) => request("/follow/" + userId, { method: "POST" }),
+  unfollow: (userId: string) => request("/follow/" + userId, { method: "DELETE" }),
+  followers: (page = 1) => request<any[]>(`/followers?page=${page}`),
+  following: (page = 1) => request<any[]>(`/following?page=${page}`),
+  counts: (userId: string) => request<{ followers: number; following: number }>(`/follow/count/${userId}`),
+  status: (userId: string) => request<{ following: boolean }>(`/follow/status/${userId}`),
+};
+
+// ── Streams ──
+export const streamsApi = {
+  active: () => request<any[]>("/streams/active"),
+};
