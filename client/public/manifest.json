@@ -1,10 +1,10 @@
 {
-  "id": "/",
+  "id": "https://mrco.live/",
   "name": "Ablox — دردشة فيديو وصوت عشوائية وبث مباشر",
   "short_name": "Ablox",
   "description": "دردشة فيديو وصوت عشوائية وبث مباشر — تعرّف على أشخاص جدد من حول العالم",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "https://mrco.live/",
+  "scope": "https://mrco.live/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "portrait",
