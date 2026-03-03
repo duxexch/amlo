@@ -34,3 +34,9 @@ LOAD-TEST-REPORT.md
 signing/
 *.keystore
 *.jks
+
+# ── Google Play / App Store packages ──
+Ablox-GooglePlay/
+*.aab
+*.apk
+*.zip

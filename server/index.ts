@@ -688,12 +688,12 @@ app.use((req, res, next) => {
       fingerprints.push(play);
     }
 
-    // PWABuilder debug key (well-known fingerprint)
+    // PWABuilder signing key fingerprint (from Google Play package)
     fingerprints.push(
-      "91:89:39:3F:F1:4F:E0:52:29:E2:76:AE:71:B3:4D:3E:86:AE:31:A8:CE:4E:53:B7:7E:1F:D1:64:D8:47:48:BA"
+      "04:CA:7C:EB:B7:6A:2E:74:9E:B8:C8:8D:94:E9:B7:69:AF:29:E6:08:9E:81:6C:51:73:0C:7F:C5:AB:86:3E:65"
     );
 
-    const packageName = process.env.TWA_PACKAGE_NAME || "app.ablox.twa";
+    const packageName = process.env.TWA_PACKAGE_NAME || "live.mrco.twa";
 
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "public, max-age=3600");

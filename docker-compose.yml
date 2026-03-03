@@ -40,7 +40,7 @@ services:
       # ── TWA / Android App ──
       TWA_SHA256_FINGERPRINT: ${TWA_SHA256_FINGERPRINT:-}
       PLAY_SHA256_FINGERPRINT: ${PLAY_SHA256_FINGERPRINT:-}
-      TWA_PACKAGE_NAME: ${TWA_PACKAGE_NAME:-app.ablox.twa}
+      TWA_PACKAGE_NAME: ${TWA_PACKAGE_NAME:-live.mrco.twa}
       # ── Apple iOS App ──
       APPLE_TEAM_ID: ${APPLE_TEAM_ID:-XXXXXXXXXX}
       APPLE_BUNDLE_ID: ${APPLE_BUNDLE_ID:-app.ablox.ios}
