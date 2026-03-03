@@ -6,7 +6,7 @@
   "start_url": "https://mrco.live/",
   "scope": "https://mrco.live/",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "display_override": ["window-controls-overlay", "tabbed", "standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#06060f",
   "theme_color": "#0c0c1d",
@@ -21,6 +21,58 @@
   "edge_side_panel": {
     "preferred_width": 400
   },
+  "tab_strip": {
+    "home_tab": {
+      "url": "https://mrco.live/",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    "new_tab_button": {
+      "url": "https://mrco.live/home"
+    }
+  },
+  "note_taking": {
+    "new_note_url": "https://mrco.live/friends"
+  },
+  "file_handlers": [
+    {
+      "action": "/share",
+      "accept": {
+        "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"],
+        "video/*": [".mp4", ".webm", ".ogg", ".mov", ".avi"],
+        "audio/*": [".mp3", ".wav", ".ogg", ".m4a", ".aac"]
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "name": "Ablox — حالة الدردشة",
+      "short_name": "حالة",
+      "description": "عرض سريع لحالة الدردشة والإشعارات",
+      "tag": "ablox-status",
+      "ms_ac_template": "https://mrco.live/widgets/status",
+      "data": "https://mrco.live/api/widgets/status",
+      "type": "application/json",
+      "screenshots": [
+        {
+          "src": "/screenshots/narrow-home.png",
+          "sizes": "390x844",
+          "label": "حالة الدردشة"
+        }
+      ],
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ],
+      "backgrounds": [
+        {
+          "src": "/icons/icon-512x512.png",
+          "sizes": "512x512"
+        }
+      ]
+    }
+  ],
   "icons": [
     {
       "src": "/icons/icon-72x72.png",
@@ -75,6 +127,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "monochrome"
     }
   ],
   "screenshots": [
@@ -159,6 +217,11 @@
       "url": "/%s"
     }
   ],
-  "related_applications": [],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://mrco.live/manifest.json"
+    }
+  ],
   "prefer_related_applications": false
 }

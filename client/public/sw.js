@@ -10,7 +10,7 @@
  *   - Offline: Custom offline page fallback
  */
 
-var CACHE_VERSION = "ablox-v3";
+var CACHE_VERSION = "ablox-v4";
 var STATIC_CACHE = CACHE_VERSION + "-static";
 var DYNAMIC_CACHE = CACHE_VERSION + "-dynamic";
 var IMAGE_CACHE = CACHE_VERSION + "-images";
@@ -30,6 +30,8 @@ var NEVER_CACHE = [
   "/socket.io/",
   "/api/health",
   "/api/metrics",
+  "/share",
+  "/api/widgets/",
 ];
 
 // Maximum cache sizes
