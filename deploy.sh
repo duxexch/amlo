@@ -33,13 +33,11 @@ command -v git >/dev/null 2>&1 || err "Git not installed."
 log "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+')"
 log "Docker Compose available"
 
-# ── Check 'proxy' network (Traefik) exists ──
-if ! docker network inspect proxy >/dev/null 2>&1; then
-  info "Creating 'proxy' network for Traefik..."
-  docker network create proxy
-  log "'proxy' network created"
-else
-  log "'proxy' network exists (Traefik)"
+# ── Stop conflicting Traefik (classitest) if running on 80/443 ──
+if docker ps --format '{{.Names}}' | grep -q 'classitest-traefik'; then
+  warn "classitest Traefik detected on ports 80/443 — stopping it..."
+  docker stop classitest-traefik-1 2>/dev/null || true
+  log "classitest Traefik stopped (ablox Traefik will handle routing)"
 fi
 
 # ── 2. Check .env file ──
@@ -65,8 +63,10 @@ if [ ! -f .env ]; then
   sed -i "s|DATABASE_URL=postgresql://ablox_admin:CHANGE_ME@localhost:5432/ablox|DATABASE_URL=postgresql://ablox_admin:${POSTGRES_PASSWORD}@postgres:5432/ablox|g" .env
   sed -i "s|REDIS_URL=redis://:CHANGE_ME@localhost:6379|REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379|g" .env
 
+  # Auto-set CORS_ORIGIN (no manual editing needed)
+  sed -i "s|SMTP_PASS=CHANGE_ME_EMAIL_PASSWORD|SMTP_PASS=|g" .env
+
   log ".env created with auto-generated secrets"
-  warn "IMPORTANT: Edit .env and set CORS_ORIGIN to your domain!"
   warn "Admin password: ${ADMIN_PASSWORD}"
   echo ""
   echo "  ──────────────────────────────────────────"
@@ -76,7 +76,6 @@ if [ ! -f .env ]; then
   echo "  Admin Password: ${ADMIN_PASSWORD}"
   echo "  ──────────────────────────────────────────"
   echo ""
-  read -p "Press Enter after editing .env (especially CORS_ORIGIN)..."
 fi
 
 # ── 3. Verify NODE_ENV is production ──
@@ -86,12 +85,12 @@ if [ "${NODE_ENV:-development}" != "production" ]; then
   sed -i "s|NODE_ENV=development|NODE_ENV=production|g" .env
 fi
 
-# ── 4. Build and start containers ──
+# ── 4. Build and start containers (skip dev override) ──
 info "Building Docker images..."
-docker compose build --no-cache
+docker compose -f docker-compose.yml build --no-cache
 
 info "Starting services..."
-docker compose up -d
+docker compose -f docker-compose.yml up -d
 
 # ── 5. Wait for health ──
 info "Waiting for services to be healthy..."
@@ -99,7 +98,7 @@ sleep 10
 
 MAX_RETRIES=30
 RETRY=0
-until docker compose exec app wget -qO- http://localhost:3000/api/health 2>/dev/null | grep -q "healthy\|degraded"; do
+until docker compose -f docker-compose.yml exec app wget -qO- http://localhost:3000/api/health 2>/dev/null | grep -q "healthy\|degraded"; do
   RETRY=$((RETRY + 1))
   if [ $RETRY -ge $MAX_RETRIES ]; then
     err "Health check failed after ${MAX_RETRIES} attempts. Check logs: docker compose logs app"
@@ -111,10 +110,10 @@ echo ""
 
 # ── 6. Run database migrations ──
 info "Pushing database schema..."
-docker compose exec app npx drizzle-kit push 2>/dev/null || warn "Schema push skipped (may need DATABASE_URL fix)"
+docker compose -f docker-compose.yml exec app npx drizzle-kit push 2>/dev/null || warn "Schema push skipped (may need DATABASE_URL fix)"
 
 info "Seeding database..."
-docker compose exec app npx tsx server/seed.ts 2>/dev/null || warn "Seed skipped"
+docker compose -f docker-compose.yml exec app npx tsx server/seed.ts 2>/dev/null || warn "Seed skipped"
 
 # ── 7. Status ──
 echo ""
@@ -122,21 +121,20 @@ echo "════════════════════════�
 echo ""
 log "Ablox is running! 🚀"
 echo ""
-docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+docker compose -f docker-compose.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 echo ""
 
 # Check health
-HEALTH=$(docker compose exec app wget -qO- http://localhost:3000/api/health 2>/dev/null || echo '{}')
+HEALTH=$(docker compose -f docker-compose.yml exec app wget -qO- http://localhost:3000/api/health 2>/dev/null || echo '{}')
 echo "Health: ${HEALTH}"
 echo ""
 
 info "Next steps:"
-echo "  1. Set DOMAIN in .env to your domain (or use srv1118737.hstgr.cloud)"
-echo "  2. If using a custom domain, point DNS A record to your server IP"
+echo "  1. Set SMTP_PASS in .env for email/OTP support"
+echo "  2. DNS A record for mrco.live should point to this server"
 echo "  3. Traefik handles SSL automatically via Let's Encrypt"
 echo ""
-echo "  Note: Traefik (port 80/443) is managed by Hostinger Docker Manager."
-echo "  Ablox connects via the 'proxy' network — no nginx needed."
+echo "  Ablox includes its own Traefik — no external proxy needed."
 echo ""
 echo "Useful commands:"
 echo "  docker compose logs -f app     # View app logs"

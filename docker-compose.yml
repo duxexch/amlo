@@ -1,11 +1,47 @@
 # ═══════════════════════════════════════════════════════
 # Ablox — Production Docker Compose
-# Isolated network: ablox_network (no port conflicts)
-# Only port 3000 exposed externally (app)
-# DB/Redis communicate internally — no host ports needed
+# 4 services: traefik (reverse proxy) + app + postgres + redis
+# Traefik handles SSL automatically via Let's Encrypt
 # ═══════════════════════════════════════════════════════
 
 services:
+  # ── Traefik Reverse Proxy + SSL ──
+  traefik:
+    image: traefik:v3.3
+    container_name: ablox_traefik
+    restart: unless-stopped
+    command:
+      # ── API / Dashboard ──
+      - "--api.dashboard=false"
+      - "--log.level=WARN"
+      # ── Docker provider ──
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=ablox_network"
+      # ── Entrypoints ──
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # ── HTTP → HTTPS global redirect ──
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      # ── Let's Encrypt ──
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-info@mrco.live}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ablox_letsencrypt:/letsencrypt
+    networks:
+      - ablox_network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   # ── Ablox Application ──
   app:
     build:
@@ -20,15 +56,23 @@ services:
       CLUSTER_WORKERS: ${CLUSTER_WORKERS:-2}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ablox_admin}:${POSTGRES_PASSWORD:-AbL0x_S3cur3_2026!}@postgres:5432/${POSTGRES_DB:-ablox}
       REDIS_URL: redis://:${REDIS_PASSWORD:-AbL0x_R3d1s_2026!}@redis:6379
+      # ── Security secrets (REQUIRED for production) ──
+      SESSION_SECRET: ${SESSION_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://mrco.live}
+      # ── Admin ──
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # ── SMTP ──
       SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_SECURE: ${SMTP_SECURE:-true}
       SMTP_USER: ${SMTP_USER:-info@mrco.live}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-MRCO}
+      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Ablox}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@mrco.live}
-    ports:
-      - "${APP_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,24 +88,16 @@ services:
       - ablox_logs:/app/logs
     networks:
       - ablox_network
-      - traefik_net
     labels:
-      # ── Traefik reverse proxy ──
+      # ── Traefik routing ──
       - "traefik.enable=true"
-      - "traefik.docker.network=classitest_classify-network"
-      # HTTP router (port 80) — ACME challenge + redirect to HTTPS
-      - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`)"
-      - "traefik.http.routers.ablox-http.entrypoints=web"
-      - "traefik.http.routers.ablox-http.middlewares=ablox-redirect"
-      - "traefik.http.middlewares.ablox-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.ablox-redirect.redirectscheme.permanent=true"
-      # HTTPS router (port 443) — SSL via Let's Encrypt
+      # HTTPS router — main entry
       - "traefik.http.routers.ablox.rule=Host(`${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox.entrypoints=websecure"
       - "traefik.http.routers.ablox.tls=true"
       - "traefik.http.routers.ablox.tls.certresolver=letsencrypt"
       - "traefik.http.services.ablox.loadbalancer.server.port=3000"
-      # WebSocket support for Socket.io
+      # WebSocket + headers
       - "traefik.http.middlewares.ablox-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
       - "traefik.http.routers.ablox.middlewares=ablox-headers"
     deploy:
@@ -124,9 +160,6 @@ networks:
   ablox_network:
     name: ablox_network
     driver: bridge
-  traefik_net:
-    external: true
-    name: classitest_classify-network
 
 volumes:
   ablox_pgdata:
@@ -137,4 +170,7 @@ volumes:
     driver: local
   ablox_logs:
     name: ablox_logs
+    driver: local
+  ablox_letsencrypt:
+    name: ablox_letsencrypt
     driver: local
