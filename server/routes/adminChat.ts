@@ -617,6 +617,8 @@ router.get("/settings", requireAdmin, async (_req, res) => {
     stream_max_viewers: 10000,
     enable_profanity_filter: true,
     enable_spam_detection: true,
+    video_streaming_enabled: true,
+    audio_streaming_enabled: true,
   };
 
   if (!db) return res.json({ success: true, data: defaults });
@@ -1011,6 +1013,111 @@ router.delete("/chat-blocks/:id", requireAdmin, async (req, res) => {
     return res.json({ success: true, message: "تم إزالة الحظر" });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// STREAM PERMISSION & WHITELIST — إدارة صلاحيات البث
+// ════════════════════════════════════════════════════════
+
+// GET stream whitelist users (users who can stream even when globally disabled)
+router.get("/streams/whitelist", requireAdmin, async (req, res) => {
+  const db = getDb();
+  if (!db) return res.json({ success: true, data: [] });
+
+  try {
+    // Get all whitelist entries from systemSettings
+    const entries = await db.select().from(schema.systemSettings)
+      .where(sql`${schema.systemSettings.key} LIKE 'stream_whitelist_%' AND ${schema.systemSettings.value} = 'true'`);
+
+    if (!entries.length) return res.json({ success: true, data: [] });
+
+    const userIds = entries.map(e => e.key.replace('stream_whitelist_', ''));
+    const users = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+      canStream: schema.users.canStream,
+    }).from(schema.users).where(inArray(schema.users.id, userIds));
+
+    return res.json({ success: true, data: users });
+  } catch (err: any) {
+    return res.json({ success: true, data: [] });
+  }
+});
+
+// PUT add/remove user from stream whitelist
+router.put("/streams/whitelist/:userId", requireAdmin, async (req, res) => {
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB" });
+
+  const userId = p(req.params.userId);
+  const { allowed } = req.body; // true or false
+
+  try {
+    const key = `stream_whitelist_${userId}`;
+    const existing = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, key)).limit(1);
+
+    if (allowed) {
+      if (existing.length > 0) {
+        await db.update(schema.systemSettings).set({ value: "true", updatedAt: new Date() }).where(eq(schema.systemSettings.key, key));
+      } else {
+        await db.insert(schema.systemSettings).values({ key, value: "true", category: "streaming" });
+      }
+    } else {
+      if (existing.length > 0) {
+        await db.delete(schema.systemSettings).where(eq(schema.systemSettings.key, key));
+      }
+    }
+
+    await storage.addAdminLog(req.session.adminId!, allowed ? "whitelist_stream_user" : "remove_stream_whitelist", "user", userId, "");
+    return res.json({ success: true, message: allowed ? "تمت الإضافة للقائمة البيضاء" : "تمت الإزالة من القائمة البيضاء" });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// PUT toggle user's canStream permission
+router.put("/users/:userId/can-stream", requireAdmin, async (req, res) => {
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB" });
+
+  const userId = p(req.params.userId);
+  const { canStream } = req.body;
+
+  try {
+    await db.update(schema.users).set({ canStream: !!canStream }).where(eq(schema.users.id, userId));
+    await storage.addAdminLog(req.session.adminId!, canStream ? "enable_user_stream" : "disable_user_stream", "user", userId, "");
+    return res.json({ success: true, message: canStream ? "تم تفعيل البث للمستخدم" : "تم تعطيل البث للمستخدم" });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// GET search users for whitelist management
+router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
+  const db = getDb();
+  if (!db) return res.json({ success: true, data: [] });
+
+  const q = (req.query.q as string || "").trim();
+  if (!q || q.length < 2) return res.json({ success: true, data: [] });
+
+  try {
+    const users = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+      canStream: schema.users.canStream,
+    }).from(schema.users)
+      .where(sql`(${schema.users.username} ILIKE ${'%' + q + '%'} OR ${schema.users.displayName} ILIKE ${'%' + q + '%'})`)
+      .limit(20);
+    return res.json({ success: true, data: users });
+  } catch {
+    return res.json({ success: true, data: [] });
   }
 });
 

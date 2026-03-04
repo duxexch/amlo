@@ -1062,6 +1062,15 @@ function SettingsTab() {
         { key: "enable_spam_detection", label: t("admin.chatManagement.spamDetection"), type: "boolean" as const },
       ],
     },
+    {
+      title: t("admin.chatManagement.streamPermissions", "صلاحيات البث"),
+      icon: Radio,
+      color: "text-orange-400",
+      fields: [
+        { key: "video_streaming_enabled", label: t("admin.chatManagement.videoStreamEnabled", "البث المرئي متاح"), type: "boolean" as const },
+        { key: "audio_streaming_enabled", label: t("admin.chatManagement.audioStreamEnabled", "البث الصوتي متاح"), type: "boolean" as const },
+      ],
+    },
   ];
 
   return (
@@ -1120,6 +1129,124 @@ function SettingsTab() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Stream Whitelist Management */}
+      {(settings.video_streaming_enabled === false || settings.audio_streaming_enabled === false) && (
+        <StreamWhitelistSection />
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// Stream Whitelist Management (القائمة البيضاء للبث)
+// ════════════════════════════════════════════════════════
+
+function StreamWhitelistSection() {
+  const { t } = useTranslation();
+  const [whitelist, setWhitelist] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminChatManagement.getStreamWhitelist()
+      .then(res => { if (res.success) setWhitelist(res.data || []); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    if (searchQuery.trim().length < 2) { setSearchResults([]); return; }
+    setSearching(true);
+    try {
+      const res = await adminChatManagement.searchUsersForWhitelist(searchQuery.trim());
+      setSearchResults(res.data || []);
+    } catch { setSearchResults([]); }
+    setSearching(false);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const timer = setTimeout(handleSearch, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery, handleSearch]);
+
+  const addToWhitelist = async (user: any) => {
+    await adminChatManagement.updateStreamWhitelist(user.id, true);
+    setWhitelist(prev => [...prev.filter(u => u.id !== user.id), user]);
+    setSearchResults(prev => prev.filter(u => u.id !== user.id));
+  };
+
+  const removeFromWhitelist = async (userId: string) => {
+    await adminChatManagement.updateStreamWhitelist(userId, false);
+    setWhitelist(prev => prev.filter(u => u.id !== userId));
+  };
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+      <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+        <Shield className="w-5 h-5 text-orange-400" />
+        {t("admin.chatManagement.streamWhitelist", "القائمة البيضاء للبث")}
+      </h3>
+      <p className="text-white/40 text-xs mb-4">
+        {t("admin.chatManagement.streamWhitelistDesc", "هؤلاء المستخدمون يمكنهم البث حتى لو كان البث معطلاً عالمياً")}
+      </p>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder={t("admin.chatManagement.searchUserToWhitelist", "ابحث عن مستخدم لإضافته...")}
+          className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-orange-500/50 placeholder:text-white/20"
+        />
+        {searching && <div className="absolute left-3 top-3 w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />}
+      </div>
+
+      {/* Search Results */}
+      {searchResults.length > 0 && (
+        <div className="space-y-1 mb-4 max-h-40 overflow-y-auto">
+          {searchResults.filter(u => !whitelist.find(w => w.id === u.id)).map(user => (
+            <div key={user.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                {user.avatar && <img src={user.avatar} className="w-7 h-7 rounded-full" alt="" />}
+                <div>
+                  <p className="text-white text-sm font-medium">{user.displayName || user.username}</p>
+                  <p className="text-white/40 text-[10px]">@{user.username}</p>
+                </div>
+              </div>
+              <button onClick={() => addToWhitelist(user)} className="text-xs bg-orange-500/20 text-orange-400 px-3 py-1 rounded-lg hover:bg-orange-500/30 transition-colors">
+                {t("admin.chatManagement.addToWhitelist", "إضافة")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Current Whitelist */}
+      {loading ? (
+        <div className="text-center py-4"><div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>
+      ) : whitelist.length === 0 ? (
+        <p className="text-white/20 text-xs text-center py-4">{t("admin.chatManagement.noWhitelistedUsers", "لا يوجد مستخدمون في القائمة البيضاء")}</p>
+      ) : (
+        <div className="space-y-1">
+          {whitelist.map(user => (
+            <div key={user.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                {user.avatar && <img src={user.avatar} className="w-7 h-7 rounded-full" alt="" />}
+                <div>
+                  <p className="text-white text-sm font-medium">{user.displayName || user.username}</p>
+                  <p className="text-white/40 text-[10px]">@{user.username} · LV.{user.level}</p>
+                </div>
+              </div>
+              <button onClick={() => removeFromWhitelist(user.id)} className="text-xs bg-red-500/20 text-red-400 px-3 py-1 rounded-lg hover:bg-red-500/30 transition-colors">
+                {t("admin.chatManagement.removeFromWhitelist", "إزالة")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

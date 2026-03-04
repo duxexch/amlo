@@ -639,6 +639,15 @@ export const adminChatManagement = {
   forceEndStream: (id: string) =>
     chatReq(`/streams/${id}/end`, { method: "POST" }),
 
+  // Stream Whitelist
+  getStreamWhitelist: () => chatReq<any>("/streams/whitelist"),
+  searchUsersForWhitelist: (q: string) =>
+    chatReq<any>(`/streams/whitelist/search?q=${encodeURIComponent(q)}`),
+  updateStreamWhitelist: (userId: string, allowed: boolean) =>
+    chatReq(`/streams/whitelist/${userId}`, { method: "PUT", body: JSON.stringify({ allowed }) }),
+  toggleUserCanStream: (userId: string, canStream: boolean) =>
+    chatReq(`/users/${userId}/can-stream`, { method: "PUT", body: JSON.stringify({ canStream }) }),
+
   // ── Chat Settings (Feature Toggles) ──
   getChatSettings: () => chatReq<Record<string, string>>("/settings/chat"),
   updateChatSetting: (key: string, value: string) =>
@@ -655,4 +664,26 @@ export const adminChatManagement = {
   getChatBlocks: (page = 1) => chatReq<any>(`/chat-blocks?page=${page}`),
   removeChatBlock: (id: string) =>
     chatReq(`/chat-blocks/${id}`, { method: "DELETE" }),
+};
+
+// ── Pricing / Currencies ──────────────────────────────
+
+export const adminPricing = {
+  getAll: () => request<any>("/pricing/all"),
+  getCoinPackages: () => request<any[]>("/pricing/coin-packages"),
+  createCoinPackage: (data: { coins: number; bonusCoins?: number; priceUsd: string; isPopular?: boolean; sortOrder?: number }) =>
+    request("/pricing/coin-packages", { method: "POST", body: JSON.stringify(data) }),
+  updateCoinPackage: (id: string, data: Record<string, any>) =>
+    request(`/pricing/coin-packages/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteCoinPackage: (id: string) =>
+    request(`/pricing/coin-packages/${id}`, { method: "DELETE" }),
+  getFilters: () => request<any[]>("/pricing/filters"),
+  updateFilter: (id: string, data: { priceCoins: number }) =>
+    request(`/pricing/filters/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  bulkUpdateFilters: (filters: { filterType: string; priceCoins: number }[]) =>
+    request("/pricing/filters", { method: "PUT", body: JSON.stringify({ filters }) }),
+  updateCallRates: (data: { voiceCallRate: number; videoCallRate: number }) =>
+    request("/pricing/call-rates", { method: "PUT", body: JSON.stringify(data) }),
+  updateMessageCosts: (data: Record<string, any>) =>
+    request("/pricing/message-costs", { method: "PUT", body: JSON.stringify(data) }),
 };

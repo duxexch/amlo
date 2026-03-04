@@ -66,6 +66,8 @@ export const users = pgTable(
     status: text("status").notNull().default("offline"), // online | offline | in_stream | in_call
     referralCode: text("referral_code").unique(),
     referredByAgent: varchar("referred_by_agent"),
+    interests: text("interests"), // comma-separated interests e.g. "gaming,music,travel"
+    canStream: boolean("can_stream").notNull().default(true),
     miles: integer("miles").notNull().default(0),
     totalWorldSessions: integer("total_world_sessions").notNull().default(0),
     lastOnlineAt: timestamp("last_online_at"),
@@ -521,6 +523,7 @@ export const worldSessions = pgTable(
     ageMin: integer("age_min").notNull().default(18),
     ageMax: integer("age_max").notNull().default(60),
     countryFilter: text("country_filter"),
+    chatType: text("chat_type").notNull().default("text"), // text | voice | video
     coinsSpent: integer("coins_spent").notNull().default(0),
     milesEarned: integer("miles_earned").notNull().default(0),
     status: text("status").notNull().default("searching"), // searching | matched | chatting | ended | cancelled
@@ -772,6 +775,7 @@ export const worldSearchSchema = z.object({
   ageMin: z.number().int().min(18).max(100).default(18),
   ageMax: z.number().int().min(18).max(100).default(60),
   countryFilter: z.string().max(100).optional(),
+  chatType: z.enum(["text", "voice", "video"]).default("text"),
 });
 
 export const worldMessageSchema = z.object({

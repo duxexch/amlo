@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Phone, PhoneOff, Video, VideoOff, Mic, MicOff,
-  Volume2, VolumeX, Coins,
+  Volume2, VolumeX, Coins, SkipForward,
   WifiOff, Signal, SignalLow, SignalMedium, SignalHigh
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -113,6 +113,8 @@ export function CallScreen() {
   const params = new URLSearchParams(searchParams);
   const userId = params.get("user");
   const callType = (params.get("type") || "voice") as "voice" | "video";
+  const isRandomMatch = params.get("random") === "1";
+  const sessionId = params.get("session");
   const conn = useConnectionQuality();
 
   const [status, setStatus] = useState<CallState>("connecting");
@@ -120,24 +122,72 @@ export function CallScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(callType === "video");
   const [isSpeaker, setIsSpeaker] = useState(false);
-  const [callId, setCallId] = useState<string | null>(null);
+  const [callId, setCallId] = useState<string | null>(sessionId);
   const [pricing, setPricing] = useState<any>(null);
   const [callStats, setCallStats] = useState<CallStats | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [connectionQuality, setConnectionQuality] = useState(conn.quality);
+  const [otherUser, setOtherUser] = useState<{
+    id: string; username: string; displayName: string;
+    avatar: string | null; level: number; isVerified: boolean;
+  } | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
-  const otherUser = {
-    id: userId || "u1",
-    username: "sara_singer",
-    displayName: "سارة المغنية",
-    avatar: null,
-    level: 28,
-    isVerified: true,
-  };
+  // Load matched user info for random calls
+  useEffect(() => {
+    if (!userId) return;
+    // Try to get user info from socket event or fetch
+    const socket = getSocket();
+    const handleUserInfo = (data: any) => {
+      if (data.userId === userId) {
+        setOtherUser({
+          id: data.userId,
+          username: data.username || "user",
+          displayName: data.displayName || data.username || "مستخدم",
+          avatar: data.avatar || null,
+          level: data.level || 1,
+          isVerified: data.isVerified || false,
+        });
+      }
+    };
+    socket.on("call-user-info", handleUserInfo);
+
+    // Fallback: set basic info from URL
+    if (!otherUser) {
+      setOtherUser({
+        id: userId,
+        username: "user",
+        displayName: "مستخدم",
+        avatar: null,
+        level: 1,
+        isVerified: false,
+      });
+    }
+
+    // For random matches, listen for matched user info from the match event
+    if (isRandomMatch) {
+      const handleMatchedInfo = (data: any) => {
+        setOtherUser({
+          id: data.matchedUser?.id || userId,
+          username: data.matchedUser?.username || "user",
+          displayName: data.matchedUser?.displayName || "مستخدم",
+          avatar: data.matchedUser?.avatar || null,
+          level: data.matchedUser?.level || 1,
+          isVerified: false,
+        });
+      };
+      socket.on("random-match-found", handleMatchedInfo);
+      return () => {
+        socket.off("call-user-info", handleUserInfo);
+        socket.off("random-match-found", handleMatchedInfo);
+      };
+    }
+
+    return () => { socket.off("call-user-info", handleUserInfo); };
+  }, [userId, isRandomMatch]);
 
   const coinRate = callType === "video"
     ? (pricing?.video_call_rate || 10)
@@ -197,9 +247,21 @@ export function CallScreen() {
 
   const endCall = async () => {
     webrtcManager.endCall();
+    if (isRandomMatch) {
+      const socket = getSocket();
+      socket.emit("random-match-end");
+    }
     if (callId) {
       try { await callsApi.end(callId); } catch {}
     }
+  };
+
+  const handleNext = () => {
+    webrtcManager.endCall();
+    const socket = getSocket();
+    socket.emit("random-match-next");
+    // Navigate back to home, the matching screen will re-open
+    navigate("/");
   };
 
   const toggleMute = () => {
@@ -269,12 +331,12 @@ export function CallScreen() {
       {/* Main Content */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6">
         {!(callType === "video" && status === "active" && isVideoOn) && (
-          <CallerAvatar user={otherUser} />
+          <CallerAvatar user={otherUser || { displayName: "...", username: "..." }} />
         )}
 
         <div className="text-center">
-          <h2 className="text-white text-2xl font-black drop-shadow-lg">{otherUser.displayName}</h2>
-          <p className="text-white/40 text-sm mt-1">@{otherUser.username}</p>
+          <h2 className="text-white text-2xl font-black drop-shadow-lg">{otherUser?.displayName || "..."}</h2>
+          <p className="text-white/40 text-sm mt-1">@{otherUser?.username || "..."}</p>
         </div>
 
         <AnimatePresence mode="wait">
@@ -361,6 +423,18 @@ export function CallScreen() {
             >
               <PhoneOff className="w-7 h-7" />
             </motion.button>
+
+            {/* Next button for random matches */}
+            {isRandomMatch && (
+              <motion.button
+                onClick={handleNext}
+                whileTap={{ scale: 0.9 }}
+                className="w-14 h-14 rounded-2xl bg-primary/20 text-primary border border-primary/30 flex items-center justify-center hover:bg-primary/30 transition-all"
+                title={t("matching.nextPerson")}
+              >
+                <SkipForward className="w-6 h-6" />
+              </motion.button>
+            )}
           </div>
 
           {connectionQuality === "poor" && callType === "video" && (

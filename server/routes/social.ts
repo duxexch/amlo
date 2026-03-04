@@ -15,6 +15,15 @@ import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
 import { storage } from "../storage";
 import { encryptMessage, decryptMessages } from "../utils/encryption";
+import { getAllPricing } from "../pricingService";
+import {
+  generateLiveKitToken,
+  getLiveKitPublicUrl,
+  createLiveKitRoom,
+  deleteLiveKitRoom,
+  updateParticipantPermissions,
+  removeParticipant,
+} from "../utils/livekit";
 
 const router = Router();
 
@@ -1105,25 +1114,27 @@ router.get("/miles-pricing", async (_req, res) => {
 
 // Get pricing info (public)
 router.get("/pricing", async (_req, res) => {
-  const db = getDb();
-  const defaults = { voice_call_rate: 10, video_call_rate: 20, message_cost: 0 };
-  if (!db) return res.json({ success: true, data: defaults });
-
   try {
-    const settings = await db.select().from(schema.systemSettings)
-      .where(
-        or(
-          eq(schema.systemSettings.key, "voice_call_rate"),
-          eq(schema.systemSettings.key, "video_call_rate"),
-          eq(schema.systemSettings.key, "message_cost"),
-        )
-      );
-
-    const result: any = { ...defaults };
-    settings.forEach(s => { result[s.key] = parseInt(s.value) || 0; });
-    return res.json({ success: true, data: result });
+    const pricing = await getAllPricing();
+    return res.json({ success: true, data: {
+      voice_call_rate: pricing.calls.voice_call_rate,
+      video_call_rate: pricing.calls.video_call_rate,
+      message_cost: pricing.messages.message_cost,
+    } });
   } catch {
-    return res.json({ success: true, data: defaults });
+    return res.json({ success: true, data: { voice_call_rate: 5, video_call_rate: 10, message_cost: 0 } });
+  }
+});
+
+// Get all pricing (authenticated users)
+router.get("/pricing/all", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const pricing = await getAllPricing();
+    return res.json({ success: true, data: pricing });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في جلب الأسعار" });
   }
 });
 
@@ -1755,8 +1766,23 @@ router.get("/follow/status/:userId", async (req: Request, res: Response) => {
 });
 
 // ═══════════════════════════════════════
-// STREAMS — Public active stream listing
+// STREAMS — Live streaming endpoints
 // ═══════════════════════════════════════
+
+// Helper: enrich stream data with host info
+async function enrichStream(s: any) {
+  const db = getDb();
+  if (!db || !s) return s;
+  const [host] = await db.select().from(schema.users).where(eq(schema.users.id, s.userId)).limit(1);
+  return {
+    ...s,
+    hostName: host?.displayName || host?.username || "مجهول",
+    hostUsername: host?.username || "",
+    hostAvatar: host?.avatar || null,
+    hostLevel: host?.level || 1,
+    tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
+  };
+}
 
 // GET /social/streams/active — list active live streams with host info
 router.get("/streams/active", async (_req: Request, res: Response) => {
@@ -1764,7 +1790,6 @@ router.get("/streams/active", async (_req: Request, res: Response) => {
     const result = await storage.getActiveStreams(1, 50);
     if (!result || !result.data?.length) return res.json([]);
 
-    // Enrich with user info
     const db = getDb();
     if (!db) return res.json(result.data);
 
@@ -1779,10 +1804,10 @@ router.get("/streams/active", async (_req: Request, res: Response) => {
       const host = usersMap[s.userId];
       return {
         ...s,
-        host: host?.displayName || host?.username || "مجهول",
-        username: host?.username || "",
-        avatar: host?.avatar || null,
-        level: host?.level || 1,
+        hostName: host?.displayName || host?.username || "مجهول",
+        hostUsername: host?.username || "",
+        hostAvatar: host?.avatar || null,
+        hostLevel: host?.level || 1,
         tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
       };
     });
@@ -1791,6 +1816,463 @@ router.get("/streams/active", async (_req: Request, res: Response) => {
   } catch (err: any) {
     socialLog.error({ err }, "Active streams error");
     return res.json([]);
+  }
+});
+
+// GET /social/streams/my — get current user's active stream (if any)
+router.get("/streams/my", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const stream = await storage.getUserActiveStream(userId);
+    if (!stream) return res.json({ data: null });
+    const enriched = await enrichStream(stream);
+    return res.json({ data: enriched });
+  } catch (err: any) {
+    socialLog.error({ err }, "My stream error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// GET /social/streams/:id — get stream detail with host info
+router.get("/streams/:id", async (req: Request, res: Response) => {
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    const enriched = await enrichStream(stream);
+    return res.json({ data: enriched });
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream detail error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// POST /social/streams/create — start a new live stream
+router.post("/streams/create", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    // Permission check: canStream field + admin global toggle
+    const db = getDb();
+    if (db) {
+      const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!user) return res.status(401).json({ success: false, message: "المستخدم غير موجود" });
+
+      // Check per-user canStream flag
+      if (!user.canStream) {
+        return res.status(403).json({ success: false, message: "تم تعطيل البث لحسابك. تواصل مع الإدارة." });
+      }
+
+      // Check admin global streaming toggle
+      const { type: reqType } = req.body;
+      const settingKey = reqType === "audio" ? "audio_streaming_enabled" : "video_streaming_enabled";
+      const [globalSetting] = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, settingKey)).limit(1);
+      if (globalSetting && globalSetting.value === "false") {
+        // Global streaming disabled — only whitelisted users (canStream=true) with explicit override can bypass
+        // Check if user has explicit whitelist entry
+        const [whitelistSetting] = await db.select().from(schema.systemSettings)
+          .where(eq(schema.systemSettings.key, `stream_whitelist_${userId}`)).limit(1);
+        if (!whitelistSetting || whitelistSetting.value !== "true") {
+          const msg = reqType === "audio" ? "البث الصوتي معطل حالياً من الإدارة" : "البث المرئي معطل حالياً من الإدارة";
+          return res.status(403).json({ success: false, message: msg });
+        }
+      }
+    }
+
+    // Check if user already has an active stream
+    const existing = await storage.getUserActiveStream(userId);
+    if (existing) {
+      return res.status(400).json({ success: false, message: "لديك بث نشط بالفعل", data: existing });
+    }
+
+    const { title, type, tags } = req.body;
+    if (!title || typeof title !== "string" || title.trim().length < 1) {
+      return res.status(400).json({ success: false, message: "عنوان البث مطلوب" });
+    }
+
+    const streamType = ["live", "audio", "video_call"].includes(type) ? type : "live";
+    const streamTags = Array.isArray(tags) ? tags.filter((t: any) => typeof t === "string").join(",") : (typeof tags === "string" ? tags : "");
+
+    const stream = await storage.createStream({
+      userId,
+      title: title.trim().slice(0, 200),
+      type: streamType,
+      tags: streamTags,
+      status: "active",
+      viewerCount: 0,
+      peakViewers: 0,
+      totalGifts: 0,
+    });
+
+    if (!stream) {
+      return res.status(500).json({ success: false, message: "فشل في إنشاء البث" });
+    }
+
+    // Add host as viewer with host role
+    await storage.addStreamViewer(stream.id, userId, "host");
+
+    // Create LiveKit room for media streaming
+    try {
+      await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
+    } catch (lkErr: any) {
+      socialLog.warn({ err: lkErr }, "LiveKit room creation failed (non-blocking)");
+    }
+
+    const enriched = await enrichStream(stream);
+    socialLog.info({ streamId: stream.id, userId, type: streamType }, "Stream created");
+    return res.json({ success: true, data: enriched });
+  } catch (err: any) {
+    socialLog.error({ err }, "Create stream error");
+    return res.status(500).json({ success: false, message: "خطأ في إنشاء البث" });
+  }
+});
+
+// POST /social/streams/:id/end — end own stream
+router.post("/streams/:id/end", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "لا يمكنك إنهاء بث شخص آخر" });
+    if (stream.status !== "active") return res.status(400).json({ success: false, message: "البث منتهي بالفعل" });
+
+    const ended = await storage.endStream(streamId);
+
+    // Cleanup LiveKit room
+    try {
+      await deleteLiveKitRoom(`stream-${streamId}`);
+    } catch (lkErr: any) {
+      socialLog.warn({ err: lkErr }, "LiveKit room deletion failed (non-blocking)");
+    }
+
+    socialLog.info({ streamId, userId }, "Stream ended");
+    return res.json({ success: true, data: ended });
+  } catch (err: any) {
+    socialLog.error({ err }, "End stream error");
+    return res.status(500).json({ success: false, message: "خطأ في إنهاء البث" });
+  }
+});
+
+// POST /social/streams/:id/join — join stream as viewer
+router.post("/streams/:id/join", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.status !== "active") {
+      return res.status(404).json({ success: false, message: "البث غير متاح" });
+    }
+
+    await storage.addStreamViewer(streamId, userId, "viewer");
+
+    // Update peak viewers if needed
+    const db = getDb();
+    if (db) {
+      await db.update(schema.streams).set({
+        peakViewers: sql`GREATEST(${schema.streams.peakViewers}, ${schema.streams.viewerCount})`,
+      }).where(eq(schema.streams.id, streamId));
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Join stream error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// POST /social/streams/:id/leave — leave stream as viewer
+router.post("/streams/:id/leave", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    await storage.removeStreamViewer(streamId, userId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Leave stream error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// GET /social/streams/:id/viewers — list active viewers of a stream
+router.get("/streams/:id/viewers", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const viewers = await storage.getStreamViewers(streamId);
+    if (!viewers || !viewers.length) return res.json({ success: true, data: [] });
+
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: [] });
+
+    const viewerUserIds = viewers.map((v: any) => v.userId).filter(Boolean);
+    const users = viewerUserIds.length > 0
+      ? await db.select({
+          id: schema.users.id,
+          username: schema.users.username,
+          displayName: schema.users.displayName,
+          avatar: schema.users.avatar,
+          level: schema.users.level,
+        }).from(schema.users).where(inArray(schema.users.id, viewerUserIds))
+      : [];
+
+    const data = viewers.map((v: any) => {
+      const u = users.find((u: any) => u.id === v.userId);
+      return {
+        id: v.userId,
+        username: u?.username || "unknown",
+        displayName: u?.displayName || "مجهول",
+        avatar: u?.avatar || null,
+        level: u?.level || 1,
+        role: v.role || "viewer",
+        joinedAt: v.joinedAt,
+      };
+    });
+
+    return res.json({ success: true, data });
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream viewers error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── LiveKit — WebRTC Token Generation ──
+// ═══════════════════════════════════════════════════════
+
+/**
+ * POST /api/social/streams/:id/token
+ * Generate a LiveKit access token for joining a stream room
+ * Body: { role?: "host" | "speaker" | "viewer" }
+ * Returns: { token: string, wsUrl: string, roomName: string }
+ */
+router.post("/streams/:id/token", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.status !== "active") {
+      return res.status(404).json({ success: false, message: "البث غير متاح" });
+    }
+
+    // Determine role
+    const isHost = stream.userId === userId;
+    const requestedRole = req.body?.role;
+    const isSpeaker = !isHost && requestedRole === "speaker";
+
+    // Get user info for participant name
+    const db = getDb();
+    let displayName = "مستخدم";
+    if (db) {
+      const [user] = await db.select({
+        displayName: schema.users.displayName,
+        username: schema.users.username,
+      }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      displayName = user?.displayName || user?.username || "مستخدم";
+    }
+
+    // Room name = "stream-{streamId}" to namespace LiveKit rooms
+    const roomName = `stream-${streamId}`;
+
+    // Generate token
+    const token = await generateLiveKitToken(
+      roomName,
+      userId,
+      displayName,
+      isHost,
+      isSpeaker,
+      4 * 60 * 60 // 4 hours TTL
+    );
+
+    const wsUrl = getLiveKitPublicUrl();
+
+    socialLog.info({ streamId, userId, isHost, isSpeaker }, "LiveKit token generated");
+
+    return res.json({
+      success: true,
+      data: {
+        token,
+        wsUrl,
+        roomName,
+        role: isHost ? "host" : isSpeaker ? "speaker" : "viewer",
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "LiveKit token generation error");
+    return res.status(500).json({ success: false, message: "خطأ في إنشاء توكن البث" });
+  }
+});
+
+/**
+ * POST /api/social/streams/:id/promote
+ * Promote a viewer to speaker (host only)
+ * Body: { targetUserId: string }
+ */
+router.post("/streams/:id/promote", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) {
+      return res.status(403).json({ success: false, message: "فقط المضيف يمكنه ترقية المتحدثين" });
+    }
+
+    const { targetUserId } = req.body;
+    if (!targetUserId || typeof targetUserId !== "string") {
+      return res.status(400).json({ success: false, message: "معرف المستخدم مطلوب" });
+    }
+
+    const roomName = `stream-${streamId}`;
+    await updateParticipantPermissions(roomName, targetUserId, true);
+
+    socialLog.info({ streamId, targetUserId }, "Speaker promoted");
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Promote speaker error");
+    return res.status(500).json({ success: false, message: "خطأ في ترقية المتحدث" });
+  }
+});
+
+/**
+ * POST /api/social/streams/:id/demote
+ * Demote a speaker back to viewer (host only)
+ * Body: { targetUserId: string }
+ */
+router.post("/streams/:id/demote", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) {
+      return res.status(403).json({ success: false, message: "فقط المضيف يمكنه تخفيض المتحدثين" });
+    }
+
+    const { targetUserId } = req.body;
+    if (!targetUserId || typeof targetUserId !== "string") {
+      return res.status(400).json({ success: false, message: "معرف المستخدم مطلوب" });
+    }
+
+    const roomName = `stream-${streamId}`;
+    await updateParticipantPermissions(roomName, targetUserId, false);
+
+    socialLog.info({ streamId, targetUserId }, "Speaker demoted");
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Demote speaker error");
+    return res.status(500).json({ success: false, message: "خطأ في تخفيض المتحدث" });
+  }
+});
+
+/**
+ * POST /api/social/streams/:id/kick
+ * Kick a participant from the stream (host only)
+ * Body: { targetUserId: string }
+ */
+router.post("/streams/:id/kick", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) {
+      return res.status(403).json({ success: false, message: "فقط المضيف يمكنه طرد المشاركين" });
+    }
+
+    const { targetUserId } = req.body;
+    if (!targetUserId || typeof targetUserId !== "string") {
+      return res.status(400).json({ success: false, message: "معرف المستخدم مطلوب" });
+    }
+
+    const roomName = `stream-${streamId}`;
+    await removeParticipant(roomName, targetUserId);
+
+    socialLog.info({ streamId, targetUserId }, "Participant kicked");
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Kick participant error");
+    return res.status(500).json({ success: false, message: "خطأ في طرد المشارك" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Auto-Translation — الترجمة التلقائية ──
+// ═══════════════════════════════════════════════════════
+
+const SUPPORTED_LANGS = [
+  "ar", "en", "fr", "es", "de", "tr", "pt", "ru",
+  "hi", "ur", "fa", "zh", "ja", "ko", "id",
+];
+
+/**
+ * POST /api/social/translate
+ * Body: { text: string, targetLang: string, sourceLang?: string }
+ * Returns: { translatedText: string, detectedLang: string }
+ */
+router.post("/translate", async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).session?.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "غير مصرح" });
+
+    const { text, targetLang, sourceLang } = req.body || {};
+    if (!text || typeof text !== "string" || text.trim().length === 0) {
+      return res.status(400).json({ success: false, message: "النص مطلوب" });
+    }
+    if (!targetLang || !SUPPORTED_LANGS.includes(targetLang)) {
+      return res.status(400).json({ success: false, message: "لغة الهدف غير مدعومة" });
+    }
+    if (text.length > 5000) {
+      return res.status(400).json({ success: false, message: "النص طويل جداً" });
+    }
+
+    const sl = sourceLang && SUPPORTED_LANGS.includes(sourceLang) ? sourceLang : "auto";
+    // Map language codes to Google Translate codes
+    const langMap: Record<string, string> = { zh: "zh-CN", fa: "fa" };
+    const tl = langMap[targetLang] || targetLang;
+    const slMapped = sl === "auto" ? "auto" : (langMap[sl] || sl);
+
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(slMapped)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text.trim())}`;
+
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+
+    if (!resp.ok) {
+      socialLog.error(`Translation API error: ${resp.status}`);
+      return res.status(502).json({ success: false, message: "خطأ في خدمة الترجمة" });
+    }
+
+    const data = await resp.json() as any;
+    // Google returns [[["translated","original","","",...],...], null, "detected_lang"]
+    let translatedText = "";
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      for (const segment of data[0]) {
+        if (segment && segment[0]) translatedText += segment[0];
+      }
+    }
+    const detectedLang = Array.isArray(data) && data[2] ? String(data[2]) : sl;
+
+    if (!translatedText) {
+      return res.status(502).json({ success: false, message: "لم يتم الحصول على ترجمة" });
+    }
+
+    return res.json({
+      success: true,
+      data: { translatedText, detectedLang },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Translation error");
+    return res.status(500).json({ success: false, message: "خطأ في الترجمة" });
   }
 });
 

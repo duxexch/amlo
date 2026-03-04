@@ -1,0 +1,34 @@
+# ═══════════════════════════════════════════════════════
+# LiveKit Server Configuration — Ablox Live Streaming
+# ═══════════════════════════════════════════════════════
+
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 50100
+  # Use UDP for media (faster, less overhead)
+  use_external_ip: true
+  # Enable TCP fallback for restrictive firewalls
+  tcp_port: 7881
+
+# ── API Keys (overridden by env vars) ──
+keys:
+  ablox_livekit_key: ablox_livekit_secret_2026_secure
+
+# ── Room Settings ──
+room:
+  # Auto-close empty rooms after 5 minutes
+  empty_timeout: 300
+  # Max participants per room (host + viewers + speakers)
+  max_participants: 500
+
+# ── Logging ──
+logging:
+  level: info
+  # JSON for structured logging
+  json: true
+
+# ── WebRTC Codec Preferences ──
+# Prefer VP8 for broad compatibility, Opus for audio
+codec:
+  prefer_vp8: true

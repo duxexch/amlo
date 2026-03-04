@@ -1,15 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield } from "lucide-react";
+import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield, WifiOff, Loader2 } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
-import { walletApi, giftsApi, followApi } from "@/lib/socialApi";
+import { walletApi, giftsApi, followApi, streamsApi } from "@/lib/socialApi";
+import { livekitStreamManager, type StreamState } from "@/lib/livekitStreamManager";
 
-// ── Mock chat data ─────────────────────────────────────
 interface ChatMessage {
   id: number;
   type: 'message' | 'join' | 'gift' | 'follow';
@@ -32,6 +32,12 @@ interface ChatMessage {
 
 // ── User Profile Popup ─────────────────────────────────
 function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['user']; onClose: () => void; onFollow: (id: string) => void; t: any }) {
+  const [stats, setStats] = useState({ followers: 0, following: 0, gifts: 0 });
+  useEffect(() => {
+    if (user.id && user.id !== 'me' && user.id !== 'unknown') {
+      followApi.counts(user.id).then(c => setStats(prev => ({ ...prev, followers: c.followers || 0, following: c.following || 0 }))).catch(() => {});
+    }
+  }, [user.id]);
   return (
     <motion.div
       initial={{ opacity: 0, y: 100 }}
@@ -78,15 +84,15 @@ function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['u
         {/* Stats */}
         <div className="flex justify-center gap-8 mt-4 text-center">
           <div>
-            <p className="text-white font-bold text-base">12.5K</p>
+            <p className="text-white font-bold text-base">{stats.followers >= 1000 ? (stats.followers / 1000).toFixed(1) + "K" : stats.followers}</p>
             <p className="text-white/30 text-[10px]">{t("room.followers")}</p>
           </div>
           <div>
-            <p className="text-white font-bold text-base">234</p>
+            <p className="text-white font-bold text-base">{stats.following >= 1000 ? (stats.following / 1000).toFixed(1) + "K" : stats.following}</p>
             <p className="text-white/30 text-[10px]">{t("room.following")}</p>
           </div>
           <div>
-            <p className="text-white font-bold text-base">89</p>
+            <p className="text-white font-bold text-base">{stats.gifts}</p>
             <p className="text-white/30 text-[10px]">{t("room.gifts")}</p>
           </div>
         </div>
@@ -220,9 +226,17 @@ export function Room() {
   const [inputValue, setInputValue] = useState('');
   const [viewerCount, setViewerCount] = useState(0);
   const [giftCatalog, setGiftCatalog] = useState<any[]>([]);
+  const [streamInfo, setStreamInfo] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const conn = useConnectionQuality();
+
+  // ── LiveKit Video State ──
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const [lkState, setLkState] = useState<StreamState>("idle");
+  const [isHost, setIsHost] = useState(false);
+  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
 
   // Keep max 40 messages in buffer (prevents DOM bloat in long streams)
   const MAX_MESSAGES = conn.quality === 'poor' ? 20 : 40;
@@ -241,11 +255,61 @@ export function Room() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load coin balance and gift catalog
+  // Load stream info, coin balance, gift catalog, and join as viewer
   useEffect(() => {
     walletApi.balance().then(b => setCoinBalance(b?.coins || 0)).catch(() => {});
     giftsApi.list().then(g => setGiftCatalog(g || [])).catch(() => {});
-  }, []);
+    // Fetch stream details
+    streamsApi.detail(roomId).then(s => {
+      if (s) setStreamInfo(s);
+    }).catch(() => {});
+    // Track viewer join
+    streamsApi.join(roomId).catch(() => {});
+
+    // ── Connect to LiveKit for real video/audio ──
+    streamsApi.token(roomId).then(({ token, wsUrl, role }) => {
+      const hostMode = role === "host";
+      setIsHost(hostMode);
+      livekitStreamManager.connect(wsUrl, token, role as any, {
+        onStateChange: (state) => setLkState(state),
+        onRemoteVideoTrack: (track, _participantId) => {
+          if (remoteVideoRef.current) {
+            const stream = new MediaStream([track]);
+            remoteVideoRef.current.srcObject = stream;
+            remoteVideoRef.current.play().catch(() => {});
+            setHasRemoteVideo(true);
+          }
+        },
+        onRemoteVideoRemoved: () => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = null;
+            setHasRemoteVideo(false);
+          }
+        },
+        onLocalVideoTrack: (track) => {
+          if (localVideoRef.current) {
+            const stream = new MediaStream([track]);
+            localVideoRef.current.srcObject = stream;
+            localVideoRef.current.play().catch(() => {});
+          }
+        },
+        onParticipantCount: (count) => setViewerCount(count),
+        onError: (msg) => console.warn("[LiveKit Room]", msg),
+      }, {
+        publishVideo: hostMode,
+        publishAudio: hostMode,
+        videoQuality: "medium",
+      }).catch(() => {});
+    }).catch((err) => {
+      console.warn("[LiveKit] Token failed, room will be chat-only:", err);
+    });
+
+    return () => {
+      // Track viewer leave + disconnect LiveKit on unmount
+      streamsApi.leave(roomId).catch(() => {});
+      livekitStreamManager.disconnect();
+    };
+  }, [roomId]);
 
   // Socket: join room, listen for messages, viewer count, gifts
   useEffect(() => {
@@ -352,15 +416,49 @@ export function Room() {
 
   return (
     <div className="fixed inset-0 z-50 bg-black overflow-hidden" dir={dir}>
-      {/* Full-screen Video */}
+      {/* Full-screen Video — Real WebRTC via LiveKit */}
       <div className="absolute inset-0">
-        {videoOn ? (
-          <img src={avatarImg} alt="Video Stream" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+        {/* Remote video (host's camera for viewers) */}
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          muted={false}
+          className={`w-full h-full object-cover ${hasRemoteVideo && !isHost ? '' : 'hidden'}`}
+        />
+        {/* Local video (host sees their own camera) */}
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted={true}
+          className={`w-full h-full object-cover mirror ${isHost && videoOn ? '' : 'hidden'}`}
+          style={{ transform: 'scaleX(-1)' }}
+        />
+        {/* Fallback: no video — show avatar with status */}
+        {((!hasRemoteVideo && !isHost) || (isHost && !videoOn)) && (
+          <div className="w-full h-full bg-zinc-900 flex flex-col items-center justify-center gap-3">
             <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-primary/50 neon-border animate-pulse-ring">
-              <img src={avatarImg} alt="Avatar" className="w-full h-full object-cover" />
+              <img src={streamInfo?.hostAvatar || avatarImg} alt="Avatar" className="w-full h-full object-cover" />
             </div>
+            {lkState === "connecting" && (
+              <div className="flex items-center gap-2 text-white/60 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{t("room.connecting", "جاري الاتصال...")}</span>
+              </div>
+            )}
+            {lkState === "reconnecting" && (
+              <div className="flex items-center gap-2 text-yellow-400/80 text-sm">
+                <WifiOff className="w-4 h-4" />
+                <span>{t("room.reconnecting", "إعادة الاتصال...")}</span>
+              </div>
+            )}
+            {lkState === "failed" && (
+              <div className="flex items-center gap-2 text-red-400/80 text-sm">
+                <WifiOff className="w-4 h-4" />
+                <span>{t("room.connectionFailed", "فشل الاتصال")}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -373,9 +471,9 @@ export function Room() {
       <div className="absolute top-0 left-0 right-0 px-3 pt-[env(safe-area-inset-top,12px)] flex justify-between items-start z-30">
         <div className="flex flex-col gap-1.5 pt-2">
           <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl rounded-full pr-3 p-1 border border-white/10">
-            <img src={avatarImg} className="w-9 h-9 rounded-full border border-primary" alt="Host" />
+            <img src={streamInfo?.hostAvatar || avatarImg} className="w-9 h-9 rounded-full border border-primary" alt="Host" />
             <div>
-              <p className="text-white text-xs font-bold leading-tight">{t("room.hostName", "سارة أحمد")}</p>
+              <p className="text-white text-xs font-bold leading-tight">{streamInfo?.hostName || t("room.hostName", "المضيف")}</p>
               <div className="flex items-center gap-1 text-white/70 text-[10px]">
                 <Users className="w-2.5 h-2.5" />
                 <span>{viewerCount.toLocaleString()}</span>
@@ -437,20 +535,31 @@ export function Room() {
           <span className="text-white/60 text-[10px] font-bold">{t("room.gifts")}</span>
         </button>
 
-        {/* Camera toggle */}
+        {/* Camera toggle — Real LiveKit control */}
         <button 
-          onClick={() => setVideoOn(!videoOn)}
+          onClick={async () => {
+            if (!isHost) return;
+            try {
+              const isOff = await livekitStreamManager.toggleCamera();
+              setVideoOn(!isOff);
+            } catch { setVideoOn(v => !v); }
+          }}
           aria-label={videoOn ? t("room.cameraOff", "إيقاف الكاميرا") : t("room.cameraOn", "تشغيل الكاميرا")}
-          className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
+          className={`flex flex-col items-center gap-1 active:scale-90 transition-transform ${!isHost ? 'opacity-30 pointer-events-none' : ''}`}
         >
           <div className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${videoOn ? 'bg-black/30 border-white/10 text-white' : 'bg-destructive/50 border-destructive/40 text-white'}`}>
             {videoOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
           </div>
         </button>
 
-        {/* Mic toggle */}
+        {/* Mic toggle — Real LiveKit control */}
         <button 
-          onClick={() => setMicOn(!micOn)}
+          onClick={async () => {
+            try {
+              const isMuted = await livekitStreamManager.toggleMicrophone();
+              setMicOn(!isMuted);
+            } catch { setMicOn(m => !m); }
+          }}
           aria-label={micOn ? t("room.micOff", "إيقاف المايك") : t("room.micOn", "تشغيل المايك")}
           className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
         >
@@ -567,8 +676,15 @@ export function Room() {
                   <button
                     key={gift.id}
                     onClick={async () => {
-                      // TODO: need receiverId (host user id) — for now emit socket gift
-                      socketManager.emit('send-gift', { roomId, gift: { id: gift.id, name: gift.name || gift.nameAr, price: gift.price }, sender: { id: 'me', name: t("room.you", "أنت") } });
+                      const receiverId = streamInfo?.userId || roomId;
+                      try {
+                        const res = await giftsApi.send({ giftId: gift.id, receiverId, streamId: roomId });
+                        if (res?.newBalance !== undefined) setCoinBalance(res.newBalance);
+                        // Broadcast via socket so everyone sees it
+                        socketManager.emit('send-gift', { roomId, gift: { id: gift.id, name: gift.name || gift.nameAr, price: gift.price }, sender: { id: 'me', name: t("room.you", "أنت") } });
+                      } catch {
+                        // Insufficient balance or error — silently handled
+                      }
                       setShowGiftModal(false);
                     }}
                     className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1"

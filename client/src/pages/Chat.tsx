@@ -10,10 +10,11 @@ import {
   MessageCircle, Search, Send, ArrowRight, Phone, Video,
   Image, Mic, Smile, ChevronDown, Check, CheckCheck,
   Clock, Coins, Loader2, Plus, MoreVertical, Trash2, X,
-  Shield, ShieldCheck, Flag, Ban, AlertTriangle, Lock, Unlock
+  Shield, ShieldCheck, Flag, Ban, AlertTriangle, Lock, Unlock,
+  Languages
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { chatApi, callsApi, chatBlocksApi, messageReportsApi } from "@/lib/socialApi";
+import { chatApi, callsApi, chatBlocksApi, messageReportsApi, translateApi } from "@/lib/socialApi";
 import { useLocation } from "wouter";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
@@ -94,8 +95,30 @@ function MessageBubble({
   msg: any; isMe: boolean; showAvatar: boolean; otherUser: any;
   onReport: (msg: any) => void; settings: any;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [showMenu, setShowMenu] = useState(false);
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [showTranslation, setShowTranslation] = useState(false);
+
+  const handleTranslate = async () => {
+    if (translatedText) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+    if (!msg.content || isTranslating) return;
+    setIsTranslating(true);
+    try {
+      const targetLang = localStorage.getItem("ablox_translate_lang") || i18n.language || "ar";
+      const result = await translateApi.translate(msg.content, targetLang);
+      setTranslatedText(result.translatedText);
+      setShowTranslation(true);
+    } catch {
+      // silently fail
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   return (
     <motion.div
@@ -121,7 +144,27 @@ function MessageBubble({
             <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2" />
           )}
           {msg.content && <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>}
+          {/* Translated text */}
+          {showTranslation && translatedText && (
+            <div className="mt-1.5 pt-1.5 border-t border-white/10">
+              <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-80 italic">{translatedText}</p>
+            </div>
+          )}
           <div className={`flex items-center gap-1 mt-1 ${isMe ? "justify-start" : "justify-end"}`}>
+            {/* Translate button */}
+            {msg.content && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleTranslate(); }}
+                className={`hover:opacity-100 transition-opacity ${showTranslation ? "opacity-70" : "opacity-30"}`}
+                title={t("chat.translate")}
+              >
+                {isTranslating ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Languages className="w-3 h-3" />
+                )}
+              </button>
+            )}
             <span className="text-[10px] opacity-50">
               {formatTime(new Date(msg.createdAt))}
             </span>

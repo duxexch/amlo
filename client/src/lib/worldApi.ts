@@ -20,6 +20,7 @@ export interface WorldSearchFilters {
   ageMin: number;
   ageMax: number;
   countryFilter?: string;
+  chatType: "text" | "voice" | "video";
 }
 
 export const worldApi = {
@@ -51,6 +52,10 @@ export const worldApi = {
     request(`/sessions/${sessionId}/follow`, { method: "POST" }),
   friendRequest: (sessionId: string) =>
     request(`/sessions/${sessionId}/friend-request`, { method: "POST" }),
+
+  // Report
+  report: (sessionId: string, data: { type: string; reason?: string }) =>
+    request(`/sessions/${sessionId}/report`, { method: "POST", body: JSON.stringify(data) }),
 
   // Stats
   stats: () => request<any>("/stats"),

@@ -5,6 +5,8 @@ import avatarImg from "@/assets/images/avatar-3d.png";
 import heroBg from "@/assets/images/hero-bg.png";
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { RandomFiltersModal, type MatchFilters } from "@/components/RandomFiltersModal";
+import { MatchingScreen } from "@/components/MatchingScreen";
 
 // ── Featured Live Streams Marquee ──────────────────────
 function FeaturedStreamCard({ stream }: { stream: any }) {
@@ -145,6 +147,10 @@ export function Home() {
   const [activeTab, setActiveTab] = useState<'random' | 'live'>('random');
   const [followedAccounts, setFollowedAccounts] = useState<any[]>([]);
   const [liveFilter, setLiveFilter] = useState<'all' | 'videoLive' | 'audioLive' | 'offline'>('all');
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [filtersType, setFiltersType] = useState<"video" | "audio">("video");
+  const [showMatching, setShowMatching] = useState(false);
+  const [matchFilters, setMatchFilters] = useState<MatchFilters | null>(null);
 
   useEffect(() => {
     fetch("/api/followed-accounts")
@@ -211,11 +217,12 @@ export function Home() {
             </div>
             <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomVideoTitle")}</h3>
             <p className="text-muted-foreground mb-8 text-lg">{t("home.randomVideoDesc")}</p>
-            <Link href="/room/video">
-              <a className="bg-primary hover:bg-primary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all transform hover:scale-105 inline-block">
-                {t("common.startNow")}
-              </a>
-            </Link>
+            <button
+              onClick={() => { setFiltersType("video"); setShowFiltersModal(true); }}
+              className="bg-primary hover:bg-primary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all transform hover:scale-105 inline-block"
+            >
+              {t("common.startNow")}
+            </button>
           </div>
 
           <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
@@ -226,11 +233,12 @@ export function Home() {
             </div>
             <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomAudioTitle")}</h3>
             <p className="text-muted-foreground mb-8 text-lg">{t("home.randomAudioDesc")}</p>
-            <Link href="/room/audio">
-              <a className="bg-secondary hover:bg-secondary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all transform hover:scale-105 inline-block">
-                {t("common.startNow")}
-              </a>
-            </Link>
+            <button
+              onClick={() => { setFiltersType("audio"); setShowFiltersModal(true); }}
+              className="bg-secondary hover:bg-secondary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all transform hover:scale-105 inline-block"
+            >
+              {t("common.startNow")}
+            </button>
           </div>
         </motion.div>
       )}
@@ -398,6 +406,23 @@ export function Home() {
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
       </section>
       </div>
+
+      {/* Random Chat Modals */}
+      <RandomFiltersModal
+        isOpen={showFiltersModal}
+        onClose={() => setShowFiltersModal(false)}
+        initialType={filtersType}
+        onStart={(filters) => {
+          setShowFiltersModal(false);
+          setMatchFilters(filters);
+          setShowMatching(true);
+        }}
+      />
+      <MatchingScreen
+        isOpen={showMatching}
+        filters={matchFilters}
+        onClose={() => setShowMatching(false)}
+      />
     </div>
   );
 }

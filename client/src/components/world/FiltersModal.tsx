@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Coins, Plane, ChevronDown } from "lucide-react";
+import { X, Coins, Plane, ChevronDown, MessageSquare, Mic, Video, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { CountrySelector, COUNTRIES } from "./CountrySelector";
 
@@ -12,21 +12,48 @@ interface FiltersModalProps {
     ageMin: number;
     ageMax: number;
     countryFilter?: string;
+    chatType: "text" | "voice" | "video";
+  }) => void;
+  onSave?: (filters: {
+    genderFilter: "male" | "female" | "both";
+    ageMin: number;
+    ageMax: number;
+    countryFilter?: string;
+    chatType: "text" | "voice" | "video";
   }) => void;
   pricing: any[];
   userCoins: number;
   loading?: boolean;
+  savedFilters?: {
+    genderFilter: "male" | "female" | "both";
+    ageMin: number;
+    ageMax: number;
+    countryFilter?: string;
+    chatType: "text" | "voice" | "video";
+  };
 }
 
-export function FiltersModal({ isOpen, onClose, onStart, pricing, userCoins, loading }: FiltersModalProps) {
+export function FiltersModal({ isOpen, onClose, onStart, onSave, pricing, userCoins, loading, savedFilters }: FiltersModalProps) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.language === "ar";
 
-  const [gender, setGender] = useState<"male" | "female" | "both">("both");
-  const [ageMin, setAgeMin] = useState(18);
-  const [ageMax, setAgeMax] = useState(60);
-  const [country, setCountry] = useState<string | null>(null);
+  const [gender, setGender] = useState<"male" | "female" | "both">(savedFilters?.genderFilter || "both");
+  const [ageMin, setAgeMin] = useState(savedFilters?.ageMin || 18);
+  const [ageMax, setAgeMax] = useState(savedFilters?.ageMax || 60);
+  const [country, setCountry] = useState<string | null>(savedFilters?.countryFilter || null);
+  const [chatType, setChatType] = useState<"text" | "voice" | "video">(savedFilters?.chatType || "text");
   const [showCountryPicker, setShowCountryPicker] = useState(false);
+
+  // Sync with saved filters when modal opens
+  useEffect(() => {
+    if (isOpen && savedFilters) {
+      setGender(savedFilters.genderFilter || "both");
+      setAgeMin(savedFilters.ageMin || 18);
+      setAgeMax(savedFilters.ageMax || 60);
+      setCountry(savedFilters.countryFilter || null);
+      setChatType(savedFilters.chatType || "text");
+    }
+  }, [isOpen, savedFilters]);
 
   // Calculate cost
   const calculateCost = useCallback(() => {
@@ -180,6 +207,33 @@ export function FiltersModal({ isOpen, onClose, onStart, pricing, userCoins, loa
               </button>
             </div>
 
+            {/* Chat Type Selector */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-white/70">{t("world.filters.chatType")}</span>
+              </div>
+              <div className="flex gap-2">
+                {([
+                  { type: "text" as const, icon: MessageSquare, label: t("world.filters.chatText") },
+                  { type: "voice" as const, icon: Mic, label: t("world.filters.chatVoice") },
+                  { type: "video" as const, icon: Video, label: t("world.filters.chatVideo") },
+                ] as const).map(({ type: ct, icon: Icon, label }) => (
+                  <button
+                    key={ct}
+                    onClick={() => setChatType(ct)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      chatType === ct
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                        : "bg-white/5 text-white/40 border border-white/5 hover:bg-white/10"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Total Cost */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -197,25 +251,39 @@ export function FiltersModal({ isOpen, onClose, onStart, pricing, userCoins, loa
               </div>
             </div>
 
-            {/* Start Button */}
-            <button
-              onClick={() => onStart({ genderFilter: gender, ageMin, ageMax, countryFilter: country || undefined })}
-              disabled={!canAfford || loading}
-              className={`w-full py-4 rounded-2xl font-black text-lg transition-all flex items-center justify-center gap-2 ${
-                canAfford && !loading
-                  ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)] hover:shadow-[0_0_35px_rgba(16,185,129,0.6)] transform hover:scale-[1.02]"
-                  : "bg-white/5 text-white/20 cursor-not-allowed"
-              }`}
-            >
-              {loading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Plane className="w-5 h-5" />
-                  {canAfford ? t("world.filters.startExploring") : t("world.insufficientCoins")}
-                </>
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              {/* Save Settings */}
+              {onSave && (
+                <button
+                  onClick={() => onSave({ genderFilter: gender, ageMin, ageMax, countryFilter: country || undefined, chatType })}
+                  className="flex-1 py-4 rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 hover:bg-white/10"
+                >
+                  <Save className="w-4 h-4" />
+                  {t("world.filters.saveSettings")}
+                </button>
               )}
-            </button>
+
+              {/* Start Search */}
+              <button
+                onClick={() => onStart({ genderFilter: gender, ageMin, ageMax, countryFilter: country || undefined, chatType })}
+                disabled={!canAfford || loading}
+                className={`${onSave ? 'flex-1' : 'w-full'} py-4 rounded-2xl font-black text-lg transition-all flex items-center justify-center gap-2 ${
+                  canAfford && !loading
+                    ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)] hover:shadow-[0_0_35px_rgba(16,185,129,0.6)] transform hover:scale-[1.02]"
+                    : "bg-white/5 text-white/20 cursor-not-allowed"
+                }`}
+              >
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Plane className="w-5 h-5" />
+                    {canAfford ? t("world.filters.startSearch") : t("world.insufficientCoins")}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </motion.div>
       </motion.div>

@@ -184,6 +184,8 @@ async function seed() {
     { key: "chat_message_cost", value: "0" },
     { key: "chat_call_cost", value: "0" },
     { key: "chat_time_limit", value: "0" },
+    { key: "voice_call_rate", value: "5" },
+    { key: "video_call_rate", value: "10" },
   ];
   for (const s of chatDefaults) {
     await db.insert(schema.systemSettings).values(s).onConflictDoNothing({ target: schema.systemSettings.key });

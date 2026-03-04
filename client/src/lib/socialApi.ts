@@ -114,7 +114,7 @@ export const callsApi = {
   end: (callId: string) =>
     request(`/calls/${callId}/end`, { method: "POST" }),
   history: (page = 1) => request<any[]>(`/calls/history?page=${page}`),
-  pricing: () => request<{ voice_call_rate: number; video_call_rate: number; message_cost: number }>("/pricing"),
+  pricing: () => request<any>("/pricing/all"),
 };
 
 // ── Wallet ──
@@ -154,4 +154,36 @@ export const followApi = {
 // ── Streams ──
 export const streamsApi = {
   active: () => request<any[]>("/streams/active"),
+  detail: (id: string) => request<any>(`/streams/${id}`),
+  my: () => request<any>("/streams/my"),
+  create: (data: { title: string; type: "live" | "audio"; tags?: string[] }) =>
+    request<any>("/streams/create", { method: "POST", body: JSON.stringify(data) }),
+  end: (id: string) => request<any>(`/streams/${id}/end`, { method: "POST" }),
+  join: (id: string) => request("/streams/" + id + "/join", { method: "POST" }),
+  leave: (id: string) => request("/streams/" + id + "/leave", { method: "POST" }),
+  viewers: (id: string) => request<any[]>(`/streams/${id}/viewers`),
+  /** Get LiveKit token to join the media room */
+  token: (id: string, role?: "host" | "speaker" | "viewer") =>
+    request<{ token: string; wsUrl: string; roomName: string; role: string }>(
+      `/streams/${id}/token`,
+      { method: "POST", body: JSON.stringify({ role }) }
+    ),
+  /** Promote viewer to speaker (host only) */
+  promote: (streamId: string, targetUserId: string) =>
+    request(`/streams/${streamId}/promote`, { method: "POST", body: JSON.stringify({ targetUserId }) }),
+  /** Demote speaker to viewer (host only) */
+  demote: (streamId: string, targetUserId: string) =>
+    request(`/streams/${streamId}/demote`, { method: "POST", body: JSON.stringify({ targetUserId }) }),
+  /** Kick participant from stream (host only) */
+  kick: (streamId: string, targetUserId: string) =>
+    request(`/streams/${streamId}/kick`, { method: "POST", body: JSON.stringify({ targetUserId }) }),
+};
+
+// ── Auto-Translation — الترجمة التلقائية ──
+export const translateApi = {
+  translate: (text: string, targetLang: string, sourceLang?: string) =>
+    request<{ translatedText: string; detectedLang: string }>("/translate", {
+      method: "POST",
+      body: JSON.stringify({ text, targetLang, sourceLang }),
+    }),
 };

@@ -130,7 +130,7 @@ router.get("/pricing", async (req, res) => {
 // WORLD SEARCH & MATCHING
 // ════════════════════════════════════════════════════════════
 
-// Start a new search — deducts coins, creates session, finds match
+// Start a new search — deducts coins, creates session, finds best compatible match
 router.post("/search", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
@@ -167,6 +167,17 @@ router.post("/search", async (req, res) => {
       }
     }
 
+    // Fetch current user profile for compatibility scoring
+    const [currentUser] = await db.select({
+      id: schema.users.id,
+      country: schema.users.country,
+      gender: schema.users.gender,
+      bio: schema.users.bio,
+      interests: schema.users.interests,
+      level: schema.users.level,
+      birthDate: schema.users.birthDate,
+    }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
     // Build matching conditions
     const conditions: any[] = [
       ne(schema.users.id, userId),
@@ -176,13 +187,13 @@ router.post("/search", async (req, res) => {
     // Only match online users
     const onlineIds = await getOnlineUserIds();
     if (onlineIds.length === 0) {
-      // No one online — create session as searching, return no match
       const [session] = await db.insert(schema.worldSessions).values({
         userId,
         genderFilter: filters.genderFilter,
         ageMin: filters.ageMin,
         ageMax: filters.ageMax,
         countryFilter: filters.countryFilter || null,
+        chatType: filters.chatType || "text",
         coinsSpent: cost,
         status: "searching",
       }).returning();
@@ -233,8 +244,8 @@ router.post("/search", async (req, res) => {
       conditions.push(sql`${schema.users.id} NOT IN (${sql.join(recentIds.map(id => sql`${id}`), sql`, `)})`);
     }
 
-    // Random match
-    const [match] = await db.select({
+    // ── Smart Compatibility Match (fetch candidates & score) ──
+    const candidates = await db.select({
       id: schema.users.id,
       username: schema.users.username,
       displayName: schema.users.displayName,
@@ -243,20 +254,21 @@ router.post("/search", async (req, res) => {
       gender: schema.users.gender,
       level: schema.users.level,
       bio: schema.users.bio,
+      interests: schema.users.interests,
+      birthDate: schema.users.birthDate,
     })
       .from(schema.users)
       .where(and(...conditions))
-      .orderBy(sql`RANDOM()`)
-      .limit(1);
+      .limit(50); // fetch up to 50 candidates for scoring
 
-    if (!match) {
-      // No match found — create session as searching
+    if (candidates.length === 0) {
       const [session] = await db.insert(schema.worldSessions).values({
         userId,
         genderFilter: filters.genderFilter,
         ageMin: filters.ageMin,
         ageMax: filters.ageMax,
         countryFilter: filters.countryFilter || null,
+        chatType: filters.chatType || "text",
         coinsSpent: cost,
         status: "cancelled",
       }).returning();
@@ -267,6 +279,73 @@ router.post("/search", async (req, res) => {
       });
     }
 
+    // ── Compatibility Scoring Algorithm ──
+    const userInterests = (currentUser?.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
+    const userAge = currentUser?.birthDate ? Math.floor((Date.now() - new Date(currentUser.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
+
+    // Get successful session history for each candidate
+    const successfulSessions = await db.select({
+      matchedUserId: schema.worldSessions.matchedUserId,
+      avgDuration: sql<number>`COALESCE(AVG(EXTRACT(EPOCH FROM (${schema.worldSessions.endedAt} - ${schema.worldSessions.matchedAt}))), 0)`,
+    })
+      .from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.userId, userId),
+        eq(schema.worldSessions.status, "ended"),
+        sql`${schema.worldSessions.matchedUserId} IS NOT NULL`,
+        sql`${schema.worldSessions.endedAt} IS NOT NULL`,
+        sql`${schema.worldSessions.matchedAt} IS NOT NULL`,
+      ))
+      .groupBy(schema.worldSessions.matchedUserId);
+
+    const sessionHistory = new Map(successfulSessions.map(s => [s.matchedUserId, s.avgDuration]));
+
+    const scored = candidates.map(candidate => {
+      let score = 0;
+
+      // 1. Shared interests (+8 per shared interest, max +40)
+      const candidateInterests = (candidate.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
+      const sharedInterests = userInterests.filter(i => candidateInterests.includes(i));
+      score += Math.min(sharedInterests.length * 8, 40);
+
+      // 2. Same country (+15)
+      if (currentUser?.country && candidate.country && currentUser.country === candidate.country) {
+        score += 15;
+      }
+
+      // 3. Similar age (+20 for within 3 years, +10 for within 7 years)
+      if (userAge && candidate.birthDate) {
+        const candAge = Math.floor((Date.now() - new Date(candidate.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        const ageDiff = Math.abs(userAge - candAge);
+        if (ageDiff <= 3) score += 20;
+        else if (ageDiff <= 7) score += 10;
+        else if (ageDiff <= 12) score += 5;
+      }
+
+      // 4. Has bio (+5) — shows engaged user
+      if (candidate.bio && candidate.bio.length > 10) score += 5;
+
+      // 5. Similar level (+10 for within 3 levels)
+      if (currentUser?.level && candidate.level) {
+        const levelDiff = Math.abs(currentUser.level - candidate.level);
+        if (levelDiff <= 3) score += 10;
+        else if (levelDiff <= 8) score += 5;
+      }
+
+      // 6. Previous successful long chat (+10) — indicates good chemistry
+      const prevDuration = sessionHistory.get(candidate.id);
+      if (prevDuration && prevDuration > 300) score += 10; // >5 min = good chat history
+
+      // 7. Random factor (+0-5) to prevent deterministic results
+      score += Math.random() * 5;
+
+      return { ...candidate, compatibilityScore: score };
+    });
+
+    // Sort by score descending, pick the best match
+    scored.sort((a, b) => b.compatibilityScore - a.compatibilityScore);
+    const match = scored[0];
+
     // Match found — create session
     const [session] = await db.insert(schema.worldSessions).values({
       userId,
@@ -275,6 +354,7 @@ router.post("/search", async (req, res) => {
       ageMin: filters.ageMin,
       ageMax: filters.ageMax,
       countryFilter: filters.countryFilter || null,
+      chatType: filters.chatType || "text",
       coinsSpent: cost,
       status: "matched",
       matchedAt: new Date(),
@@ -708,6 +788,70 @@ router.get("/stats", async (req, res) => {
     res.json({ success: true, data: user || { miles: 0, totalWorldSessions: 0, coins: 0 } });
   } catch (err) {
     log(`World stats error: ${err}`, "world");
+    res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// WORLD REPORT USER
+// ════════════════════════════════════════════════════════════
+
+router.post("/sessions/:id/report", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+
+  try {
+    const [session] = await db.select().from(schema.worldSessions)
+      .where(eq(schema.worldSessions.id, req.params.id))
+      .limit(1);
+
+    if (!session) return res.status(404).json({ success: false, message: "الجلسة غير موجودة" });
+    const targetId = session.userId === userId ? session.matchedUserId : session.userId;
+    if (!targetId) return res.status(400).json({ success: false, message: "لا يوجد مستخدم للإبلاغ عنه" });
+
+    const { type, reason } = req.body;
+    if (!type || typeof type !== "string") {
+      return res.status(400).json({ success: false, message: "يرجى تحديد نوع البلاغ" });
+    }
+
+    const validTypes = ["harassment", "spam", "inappropriate", "scam", "other"];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ success: false, message: "نوع البلاغ غير صحيح" });
+    }
+
+    // Check if already reported in this session
+    const [existing] = await db.select().from(schema.userReports)
+      .where(and(
+        eq(schema.userReports.reporterId, userId),
+        eq(schema.userReports.reportedId, targetId),
+        sql`${schema.userReports.createdAt} > NOW() - INTERVAL '1 hour'`
+      ))
+      .limit(1);
+
+    if (existing) {
+      return res.json({ success: true, data: { message: "تم إرسال البلاغ مسبقاً" } });
+    }
+
+    await db.insert(schema.userReports).values({
+      reporterId: userId,
+      reportedId: targetId,
+      streamId: session.id, // store world session ID
+      type,
+      reason: typeof reason === "string" ? reason.slice(0, 500) : `World session report`,
+      status: "pending",
+    });
+
+    // End the session after reporting
+    await db.update(schema.worldSessions).set({
+      status: "ended",
+      endedAt: new Date(),
+    }).where(eq(schema.worldSessions.id, session.id));
+
+    res.json({ success: true, data: { message: "تم إرسال البلاغ بنجاح" } });
+  } catch (err) {
+    log(`World report error: ${err}`, "world");
     res.status(500).json({ success: false, message: "خطأ" });
   }
 });

@@ -125,6 +125,9 @@ setInterval(() => {
 // Online users — Redis-backed (shared across nodes)
 import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline, getOnlineUsersCount } from "./onlineUsers";
 
+// Matching engine — random chat queue
+import { joinQueue, leaveQueue, findMatch, endRandomCall, startMatchingLoop, startQueueCleanup, type MatchFilters } from "./matchingEngine";
+
 // ── Viewer-count debounce (prevents 50K broadcasts per join in popular rooms) ──
 const viewerCountDebounce = new Map<string, NodeJS.Timeout>();
 function scheduleViewerCountBroadcast(roomId: string) {
@@ -252,6 +255,59 @@ io.on("connection", (socket) => {
     io.to(`room:${roomId}`).emit("gift-received", { roomId, gift: safeGift, sender: safeSender });
   });
 
+  // ── Speaker Invitation (Audio Rooms) ──
+  socket.on("invite-speaker", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { roomId, targetUserId, hostName } = data as Record<string, unknown>;
+    if (!isStr(roomId, 100) || !isStr(targetUserId, 100)) return;
+    // Only host (room creator) can invite — verify socket is in room
+    if (!socket.rooms.has(`room:${roomId}`)) return;
+    const targetSocketId = getUserSocketIdSync(targetUserId);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("speaker-invite", {
+        roomId,
+        hostId: socket.data.userId,
+        hostName: typeof hostName === "string" ? hostName : "المضيف",
+      });
+    }
+  });
+
+  socket.on("accept-speaker-invite", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { roomId, userName } = data as Record<string, unknown>;
+    if (!isStr(roomId, 100)) return;
+    // Broadcast to the room that a new speaker joined
+    io.to(`room:${roomId}`).emit("speaker-joined", {
+      roomId,
+      userId: socket.data.userId,
+      userName: typeof userName === "string" ? userName : "مستخدم",
+    });
+  });
+
+  socket.on("decline-speaker-invite", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { roomId, hostId } = data as Record<string, unknown>;
+    if (!isStr(roomId, 100) || !isStr(hostId, 100)) return;
+    const hostSocketId = getUserSocketIdSync(hostId);
+    if (hostSocketId) {
+      io.to(hostSocketId).emit("speaker-declined", {
+        roomId,
+        userId: socket.data.userId,
+      });
+    }
+  });
+
+  socket.on("remove-speaker", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { roomId, targetUserId } = data as Record<string, unknown>;
+    if (!isStr(roomId, 100) || !isStr(targetUserId, 100)) return;
+    if (!socket.rooms.has(`room:${roomId}`)) return;
+    io.to(`room:${roomId}`).emit("speaker-removed", {
+      roomId,
+      userId: targetUserId,
+    });
+  });
+
   // ── Private Chat (typing indicator) — throttled to save bandwidth ──
   socket.on("typing", (data: unknown) => {
     if (!data || typeof data !== "object") return;
@@ -313,11 +369,129 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Random Chat Matching ──
+  socket.on("random-match-start", async (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const userId = socket.data.userId;
+    if (!userId) {
+      socket.emit("random-match-error", { message: "يرجى تسجيل الدخول" });
+      return;
+    }
+    const { type, genderFilter, ageMin, ageMax, countryFilter } = data as Record<string, unknown>;
+    if (!isStr(type as string, 10)) return;
+    const filters: MatchFilters = {
+      type: (type === "video" ? "video" : "audio") as "video" | "audio",
+      genderFilter: (["both", "male", "female"].includes(genderFilter as string) ? genderFilter : "both") as "both" | "male" | "female",
+      ageMin: typeof ageMin === "number" ? Math.max(18, Math.min(100, ageMin)) : 18,
+      ageMax: typeof ageMax === "number" ? Math.max(18, Math.min(100, ageMax)) : 60,
+      countryFilter: isStr(countryFilter as string, 10) ? (countryFilter as string) : undefined,
+    };
+    const { queued, cost } = await joinQueue(userId, socket.id, filters);
+    if (!queued) {
+      socket.emit("random-match-error", { message: "رصيد غير كافي", required: cost });
+      return;
+    }
+    socket.emit("random-queue-joined", { cost });
+    // Try to find a match immediately
+    const result = await findMatch(userId);
+    // If match found, events are emitted by findMatch()
+    // If not found, user stays in queue and matching loop will retry
+  });
+
+  socket.on("random-match-cancel", async () => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+    await leaveQueue(userId);
+    socket.emit("random-queue-left");
+  });
+
+  socket.on("random-match-next", async (data: unknown) => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+    // End current call
+    await endRandomCall(userId);
+    // Re-join queue with same filters
+    if (data && typeof data === "object") {
+      const { type, genderFilter, ageMin, ageMax, countryFilter } = data as Record<string, unknown>;
+      const filters: MatchFilters = {
+        type: (type === "video" ? "video" : "audio") as "video" | "audio",
+        genderFilter: (["both", "male", "female"].includes(genderFilter as string) ? genderFilter : "both") as "both" | "male" | "female",
+        ageMin: typeof ageMin === "number" ? ageMin : 18,
+        ageMax: typeof ageMax === "number" ? ageMax : 60,
+        countryFilter: isStr(countryFilter as string, 10) ? (countryFilter as string) : undefined,
+      };
+      const { queued, cost } = await joinQueue(userId, socket.id, filters);
+      if (queued) {
+        socket.emit("random-queue-joined", { cost });
+        await findMatch(userId);
+      } else {
+        socket.emit("random-match-error", { message: "رصيد غير كافي", required: cost });
+      }
+    }
+  });
+
+  socket.on("random-match-end", async () => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+    await endRandomCall(userId);
+  });
+
   // ── World (حول العالم) ──
+
+  // Join world session room (for real-time messaging)
+  socket.on("world-join-session", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { sessionId } = data as Record<string, unknown>;
+    if (!isStr(sessionId, 100)) return;
+    socket.join(`world:${sessionId}`);
+  });
+
+  socket.on("world-leave-session", (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { sessionId } = data as Record<string, unknown>;
+    if (!isStr(sessionId, 100)) return;
+    socket.leave(`world:${sessionId}`);
+  });
+
+  // Real-time world chat message — persist to DB and broadcast
+  socket.on("world-chat-send", async (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { sessionId, content, type } = data as Record<string, unknown>;
+    if (!isStr(sessionId, 100) || !isStr(content as string, 5000)) return;
+    const userId = socket.data.userId;
+    if (!userId) return;
+    // Rate limiting
+    if (isChatRateLimited(userId)) {
+      socket.emit("world-error", { type: "rate_limited", message: "أنت ترسل بسرعة كبيرة" });
+      return;
+    }
+    try {
+      // Persist to DB using pool directly
+      const pool = getPool();
+      if (pool) {
+        const msgType = isStr(type as string, 20) ? type : "text";
+        const msgContent = (content as string).slice(0, 2000);
+        const result = await pool.query(
+          `INSERT INTO world_messages (session_id, sender_id, content, type) VALUES ($1, $2, $3, $4) RETURNING id, session_id as "sessionId", sender_id as "senderId", content, type, created_at as "createdAt"`,
+          [sessionId, userId, msgContent, msgType]
+        );
+        const msg = result.rows[0];
+        // Broadcast to both users in the session room
+        io.to(`world:${sessionId}`).emit("world-chat-message", { sessionId, message: msg });
+      }
+    } catch (err) {
+      socket.emit("world-error", { type: "send_failed", message: "فشل إرسال الرسالة" });
+    }
+  });
+
   socket.on("world-typing", (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { sessionId, receiverId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100) || !isStr(receiverId, 100)) return;
+    const uid = socket.data.userId || socket.id;
+    const lastTyping = typingThrottle.get(`world:${uid}`) || 0;
+    if (Date.now() - lastTyping < TYPING_THROTTLE_MS) return;
+    typingThrottle.set(`world:${uid}`, Date.now());
     const receiverSocketId = getUserSocketIdSync(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("world-chat-typing", {
@@ -344,7 +518,18 @@ io.on("connection", (socket) => {
   socket.on("disconnect", async () => {
     const userId = socket.data.userId;
     if (userId) {
+      await leaveQueue(userId);
+      await endRandomCall(userId);
       await removeUserOnline(userId);
+
+      // ── World session disconnect notification ──
+      // Notify any world session partner that this user disconnected
+      for (const room of socket.rooms) {
+        if (room.startsWith("world:")) {
+          const sessionId = room.slice(6);
+          io.to(room).emit("world-partner-disconnected", { sessionId, userId });
+        }
+      }
     }
     // Also update viewer-count for all rooms this socket was in
     for (const room of socket.rooms) {
@@ -358,6 +543,10 @@ io.on("connection", (socket) => {
 
 // Start zombie cleanup for online users
 startOnlineUsersCleanup(io);
+
+// Start matching engine loop + queue cleanup
+startMatchingLoop();
+startQueueCleanup();
 
 // Step 23: Periodic room cleanup — clear debounce timers for rooms that no longer exist
 setInterval(() => {

@@ -33,6 +33,11 @@ import {
   releaseBalanceSchema,
   milesPricingSchema,
 } from "../../shared/schema";
+import { getDb } from "../db";
+import { eq, asc, desc, count } from "drizzle-orm";
+import * as schema from "../../shared/schema";
+import { getAllPricing, invalidatePricingCache } from "../pricingService";
+import { getQueueStats } from "../matchingEngine";
 
 const router = Router();
 
@@ -1673,6 +1678,204 @@ router.post("/users/:id/set-level", requireAdmin, async (req, res) => {
     );
 
     return res.json({ success: true, data: updated });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// CURRENCIES / PRICING — إدارة العملات والأسعار
+// ══════════════════════════════════════════════════════════
+
+// Get all pricing data (unified)
+router.get("/pricing/all", requireAdmin, async (_req, res) => {
+  try {
+    const pricing = await getAllPricing();
+    const stats = await getQueueStats();
+    return res.json({ success: true, data: { ...pricing, matchingStats: stats } });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في جلب الأسعار" });
+  }
+});
+
+// ── Coin Packages CRUD ──
+
+// List all coin packages
+router.get("/pricing/coin-packages", requireAdmin, async (_req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const packages = await db.select().from(schema.coinPackages).orderBy(asc(schema.coinPackages.sortOrder));
+    return res.json({ success: true, data: packages });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// Create coin package
+router.post("/pricing/coin-packages", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const { coins, bonusCoins, priceUsd, isPopular, sortOrder } = req.body;
+    if (!coins || !priceUsd) return res.status(400).json({ success: false, message: "بيانات ناقصة" });
+    const [pkg] = await db.insert(schema.coinPackages).values({
+      coins: parseInt(coins),
+      bonusCoins: parseInt(bonusCoins || 0),
+      priceUsd: String(priceUsd),
+      isPopular: !!isPopular,
+      isActive: true,
+      sortOrder: parseInt(sortOrder || 0),
+    }).returning();
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "create_coin_package", "coin_package", pkg.id, `${coins} coins @ $${priceUsd}`);
+    return res.json({ success: true, data: pkg });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// Update coin package
+router.patch("/pricing/coin-packages/:id", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const id = paramStr(req.params.id);
+    const { coins, bonusCoins, priceUsd, isPopular, isActive, sortOrder } = req.body;
+    const updates: any = {};
+    if (coins !== undefined) updates.coins = parseInt(coins);
+    if (bonusCoins !== undefined) updates.bonusCoins = parseInt(bonusCoins);
+    if (priceUsd !== undefined) updates.priceUsd = String(priceUsd);
+    if (isPopular !== undefined) updates.isPopular = !!isPopular;
+    if (isActive !== undefined) updates.isActive = !!isActive;
+    if (sortOrder !== undefined) updates.sortOrder = parseInt(sortOrder);
+    const [updated] = await db.update(schema.coinPackages).set(updates).where(eq(schema.coinPackages.id, id)).returning();
+    if (!updated) return res.status(404).json({ success: false, message: "غير موجود" });
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "update_coin_package", "coin_package", id, JSON.stringify(updates));
+    return res.json({ success: true, data: updated });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// Delete coin package
+router.delete("/pricing/coin-packages/:id", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const id = paramStr(req.params.id);
+    await db.delete(schema.coinPackages).where(eq(schema.coinPackages.id, id));
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "delete_coin_package", "coin_package", id, "deleted");
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ── Call Rates ──
+
+// Update call rates
+router.put("/pricing/call-rates", requireAdmin, async (req, res) => {
+  try {
+    const { voiceCallRate, videoCallRate } = req.body;
+    if (voiceCallRate !== undefined) {
+      await storage.upsertSetting("voice_call_rate", String(voiceCallRate), "pricing", "Voice call rate (coins/min)");
+    }
+    if (videoCallRate !== undefined) {
+      await storage.upsertSetting("video_call_rate", String(videoCallRate), "pricing", "Video call rate (coins/min)");
+    }
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "update_call_rates", "setting", "call-rates", `voice: ${voiceCallRate}, video: ${videoCallRate}`);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ── Filter Pricing (World/Random) ──
+
+// Get filter pricing
+router.get("/pricing/filters", requireAdmin, async (_req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const pricing = await db.select().from(schema.worldPricing).orderBy(asc(schema.worldPricing.filterType));
+    return res.json({ success: true, data: pricing });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// Update filter pricing (single)
+router.patch("/pricing/filters/:id", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const id = paramStr(req.params.id);
+    const { priceCoins, isActive, description, descriptionAr } = req.body;
+    const updates: any = { updatedAt: new Date() };
+    if (priceCoins !== undefined) updates.priceCoins = parseInt(priceCoins);
+    if (isActive !== undefined) updates.isActive = !!isActive;
+    if (description !== undefined) updates.description = description;
+    if (descriptionAr !== undefined) updates.descriptionAr = descriptionAr;
+    const [updated] = await db.update(schema.worldPricing).set(updates).where(eq(schema.worldPricing.id, id)).returning();
+    if (!updated) return res.status(404).json({ success: false, message: "غير موجود" });
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "update_filter_pricing", "world_pricing", id, JSON.stringify(updates));
+    return res.json({ success: true, data: updated });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// Bulk update filter pricing
+router.put("/pricing/filters", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "خطأ" });
+    const { prices } = req.body;
+    if (!Array.isArray(prices)) return res.status(400).json({ success: false, message: "بيانات غير صحيحة" });
+    for (const p of prices) {
+      await db.update(schema.worldPricing)
+        .set({ priceCoins: parseInt(p.priceCoins), updatedAt: new Date() })
+        .where(eq(schema.worldPricing.filterType, p.filterType));
+    }
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "bulk_update_filter_pricing", "world_pricing", "bulk", `${prices.length} filters updated`);
+    const allPricing = await db.select().from(schema.worldPricing).orderBy(asc(schema.worldPricing.filterType));
+    return res.json({ success: true, data: allPricing });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ── Message Costs ──
+
+// Update message/chat costs
+router.put("/pricing/message-costs", requireAdmin, async (req, res) => {
+  try {
+    const { messageCost, mediaEnabled, voiceCallEnabled, videoCallEnabled, timeLimit } = req.body;
+    if (messageCost !== undefined) {
+      await storage.upsertSetting("chat_message_cost", String(messageCost), "pricing", "Message cost (coins)");
+    }
+    if (mediaEnabled !== undefined) {
+      await storage.upsertSetting("chat_media_enabled", String(!!mediaEnabled), "chat", "Enable media messages");
+    }
+    if (voiceCallEnabled !== undefined) {
+      await storage.upsertSetting("chat_voice_call_enabled", String(!!voiceCallEnabled), "chat", "Enable voice calls");
+    }
+    if (videoCallEnabled !== undefined) {
+      await storage.upsertSetting("chat_video_call_enabled", String(!!videoCallEnabled), "chat", "Enable video calls");
+    }
+    if (timeLimit !== undefined) {
+      await storage.upsertSetting("chat_time_limit", String(timeLimit), "chat", "Chat time limit (minutes, 0 = unlimited)");
+    }
+    await invalidatePricingCache();
+    await storage.addAdminLog(req.session.adminId!, "update_message_costs", "setting", "message-costs",
+      `msg: ${messageCost}, media: ${mediaEnabled}, voice: ${voiceCallEnabled}, video: ${videoCallEnabled}, limit: ${timeLimit}`);
+    return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }

@@ -37,6 +37,11 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Ablox}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@mrco.live}
+      # ── LiveKit (WebRTC Live Streaming) ──
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-ablox_livekit_key}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-ablox_livekit_secret_2026_secure}
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://lk.mrco.live}
       # ── TWA / Android App ──
       TWA_SHA256_FINGERPRINT: ${TWA_SHA256_FINGERPRINT:-}
       PLAY_SHA256_FINGERPRINT: ${PLAY_SHA256_FINGERPRINT:-}
@@ -112,6 +117,47 @@ services:
       resources:
         limits:
           memory: 1G
+
+  # ── LiveKit Media Server (WebRTC SFU for live streaming) ──
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: ablox_livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./config/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"   # HTTP API + WebSocket signaling
+      - "7881:7881"   # RTC (WebRTC)
+      - "7882:7882/udp" # UDP for WebRTC media
+      - "50000-50100:50000-50100/udp" # ICE UDP port range
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-ablox_livekit_key}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-ablox_livekit_secret_2026_secure}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7880"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    networks:
+      - ablox_network
+      - traefik_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=classitest_classify-network"
+      # LiveKit WebSocket route
+      - "traefik.http.routers.livekit.rule=Host(`lk.${DOMAIN:-mrco.live}`)"
+      - "traefik.http.routers.livekit.entrypoints=websecure"
+      - "traefik.http.routers.livekit.tls=true"
+      - "traefik.http.routers.livekit.tls.certresolver=letsencrypt"
+      - "traefik.http.services.livekit.loadbalancer.server.port=7880"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ── Redis Cache & Sessions ──
   redis:

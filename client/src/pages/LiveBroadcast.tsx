@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Video, Mic, MicOff, Headphones, Radio, Users, Eye, Crown, Shield, Flame, Play, UserPlus, X, Send, Heart, Gift, Share2, VideoOff, Phone, PhoneOff, UserCheck, MessageCircle } from "lucide-react";
+import { Video, Mic, MicOff, Headphones, Radio, Users, Eye, Crown, Shield, Flame, Play, UserPlus, X, Send, Heart, Gift, Share2, VideoOff, Phone, PhoneOff, UserCheck, MessageCircle, Plus, Languages, Loader2, WifiOff } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
 import { useTranslation } from "react-i18next";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
-import { streamsApi, walletApi, giftsApi } from "@/lib/socialApi";
+import { streamsApi, walletApi, giftsApi, translateApi } from "@/lib/socialApi";
+import { authApi } from "@/lib/authApi";
+import { livekitStreamManager, type StreamState } from "@/lib/livekitStreamManager";
 
 // ══════════════════════════════════════════════════════════
 // Stream Types
@@ -15,6 +17,7 @@ import { streamsApi, walletApi, giftsApi } from "@/lib/socialApi";
 
 interface StreamItem {
   id: string;
+  userId?: string;
   type: string;
   host: string;
   username: string;
@@ -192,18 +195,65 @@ interface ChatMsg {
   timestamp: number;
 }
 
+// ── Live Chat Message with inline translation ──
+function LiveChatMsg({ msg }: { msg: ChatMsg }) {
+  const { t, i18n } = useTranslation();
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [show, setShow] = useState(false);
+
+  const handleTranslate = async () => {
+    if (translated) { setShow(!show); return; }
+    if (!msg.text || loading) return;
+    setLoading(true);
+    try {
+      const targetLang = localStorage.getItem("ablox_translate_lang") || i18n.language || "ar";
+      const result = await translateApi.translate(msg.text, targetLang);
+      setTranslated(result.translatedText);
+      setShow(true);
+    } catch { /* silent */ } finally { setLoading(false); }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="flex items-start gap-2 py-0.5">
+      <img src={msg.user.avatar} alt={msg.user.name} className="w-7 h-7 rounded-full object-cover border border-white/15 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className={`text-xs font-bold ${msg.color}`}>{msg.user.name}</span>
+          {msg.user.badge === 'vip' && <Crown className="w-3 h-3 text-yellow-400 inline" />}
+          <button onClick={handleTranslate} className={`opacity-40 hover:opacity-80 transition-opacity ${show ? "!opacity-70" : ""}`} title={t("chat.translate")}>
+            {loading ? <Loader2 className="w-3 h-3 animate-spin text-white/50" /> : <Languages className="w-3 h-3 text-white/50" />}
+          </button>
+        </div>
+        <p className="text-white/85 text-sm">{msg.text}</p>
+        {show && translated && (
+          <p className="text-white/60 text-xs italic mt-0.5">{translated}</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () => void }) {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [inputValue, setInputValue] = useState('');
   const [hearts, setHearts] = useState<{id: number; x: number}[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [speakers, setSpeakers] = useState(stream.speakers || []);
-  const [isHost] = useState(false); // determined by real auth
+  const [speakers, setSpeakers] = useState<{ id: string; name: string; avatar: string }[]>([]);
+  const [isHost, setIsHost] = useState(false);
+  const [isSpeaker, setIsSpeaker] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState('');
+  const [roomViewers, setRoomViewers] = useState<any[]>([]);
+  const [loadingViewers, setLoadingViewers] = useState(false);
+  const [pendingInvite, setPendingInvite] = useState<{ roomId: string; hostId: string; hostName: string } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [showGiftModal, setShowGiftModal] = useState(false);
   const conn = useConnectionQuality();
   const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
+  const [lkState, setLkState] = useState<StreamState>('idle');
+  const [activeSpeakerIds, setActiveSpeakerIds] = useState<Set<string>>(new Set());
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
 
@@ -211,7 +261,58 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Socket-based chat + fallback simulation
+  // Determine if current user is host + connect LiveKit audio
+  useEffect(() => {
+    let cancelled = false;
+
+    const initLiveKit = async () => {
+      try {
+        const res = await authApi.me();
+        const userId = res?.data?.id || '';
+        if (cancelled) return;
+        setCurrentUserId(userId);
+        const hostMode = !!(userId && stream.userId && userId === stream.userId);
+        setIsHost(hostMode);
+
+        // Fetch LiveKit token
+        setLkState('connecting');
+        const tokenRes = await streamsApi.token(stream.id);
+        if (cancelled) return;
+
+        const { token, wsUrl, role } = tokenRes;
+        if (!token || !wsUrl) {
+          setLkState('failed');
+          return;
+        }
+
+        // Connect to LiveKit — audio only (no video for audio rooms)
+        await livekitStreamManager.connect(wsUrl, token, role, {
+          onStateChange: (state: StreamState) => {
+            if (!cancelled) setLkState(state);
+          },
+          onActiveSpeakers: (speakerIdentities: string[]) => {
+            if (!cancelled) setActiveSpeakerIds(new Set(speakerIdentities));
+          },
+          onError: (err: Error) => {
+            console.error('[AudioRoom] LiveKit error:', err);
+            if (!cancelled) setLkState('failed');
+          },
+        }, { publishVideo: false, publishAudio: hostMode });
+      } catch (err) {
+        console.error('[AudioRoom] Init error:', err);
+        if (!cancelled) setLkState('failed');
+      }
+    };
+
+    initLiveKit();
+
+    return () => {
+      cancelled = true;
+      livekitStreamManager.disconnect();
+    };
+  }, [stream.id, stream.userId]);
+
+  // Socket-based chat + speaker events
   useEffect(() => {
     const socket = getSocket();
     const roomId = stream.id;
@@ -231,13 +332,75 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
         timestamp: data.ts || Date.now(),
       }]);
     };
+
+    const handleSpeakerJoined = (data: any) => {
+      if (data?.roomId === roomId && data?.userId) {
+        setSpeakers(prev => {
+          if (prev.find(s => s.id === data.userId)) return prev;
+          return [...prev, { id: data.userId, name: data.userName || 'مستخدم', avatar: avatarImg }];
+        });
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          type: 'invite',
+          user: { id: data.userId, name: data.userName || 'مستخدم', avatar: avatarImg, level: 1 },
+          text: t("live.joinedSpeakers"),
+          color: 'text-emerald-400',
+          timestamp: Date.now(),
+        }]);
+      }
+    };
+
+    const handleSpeakerRemoved = (data: any) => {
+      if (data?.roomId === roomId && data?.userId) {
+        setSpeakers(prev => prev.filter(s => s.id !== data.userId));
+      }
+    };
+
+    const handleSpeakerInvite = (data: any) => {
+      if (data?.roomId === roomId) {
+        setPendingInvite({ roomId: data.roomId, hostId: data.hostId, hostName: data.hostName || 'المضيف' });
+      }
+    };
+
+    const handleSpeakerDeclined = (data: any) => {
+      if (data?.roomId === roomId) {
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          type: 'leave',
+          user: { id: data.userId, name: 'مستخدم', avatar: avatarImg, level: 1 },
+          text: t("live.declinedInvite", "رفض الدعوة"),
+          color: 'text-red-400',
+          timestamp: Date.now(),
+        }]);
+      }
+    };
+
     socket.on('chat-message', handleChatMessage);
+    socket.on('speaker-joined', handleSpeakerJoined);
+    socket.on('speaker-removed', handleSpeakerRemoved);
+    socket.on('speaker-invite', handleSpeakerInvite);
+    socket.on('speaker-declined', handleSpeakerDeclined);
 
     return () => {
       socket.emit('leave-room', roomId);
       socket.off('chat-message', handleChatMessage);
+      socket.off('speaker-joined', handleSpeakerJoined);
+      socket.off('speaker-removed', handleSpeakerRemoved);
+      socket.off('speaker-invite', handleSpeakerInvite);
+      socket.off('speaker-declined', handleSpeakerDeclined);
     };
   }, []);
+
+  // Fetch viewers when invite modal opens
+  useEffect(() => {
+    if (showInviteModal) {
+      setLoadingViewers(true);
+      streamsApi.viewers(stream.id)
+        .then((data: any) => setRoomViewers(Array.isArray(data) ? data : (data?.data || [])))
+        .catch(() => setRoomViewers([]))
+        .finally(() => setLoadingViewers(false));
+    }
+  }, [showInviteModal, stream.id]);
 
   const addHeart = () => {
     const id = Date.now();
@@ -247,17 +410,15 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    // Send via socket
     socketManager.emit('chat-message', {
       roomId: stream.id,
       message: inputValue.trim(),
-      user: { id: 'me', name: 'أنت' },
+      user: { id: currentUserId || 'me', name: 'أنت' },
     });
-    // Optimistic local add
     setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
       id: Date.now(),
       type: 'message',
-      user: { id: 'me', name: 'أنت', avatar: avatarImg, level: 10 },
+      user: { id: currentUserId || 'me', name: 'أنت', avatar: avatarImg, level: 10 },
       text: inputValue,
       color: 'text-primary',
       timestamp: Date.now(),
@@ -265,17 +426,63 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     setInputValue('');
   };
 
-  const inviteSpeaker = (user: { id: string; name: string; username?: string; avatar: string; level: number; badge?: string }) => {
-    setSpeakers(prev => [...prev, user.name]);
+  const inviteSpeaker = (user: any) => {
+    const socket = getSocket();
+    socket.emit('invite-speaker', {
+      roomId: stream.id,
+      targetUserId: user.id,
+      hostName: stream.host,
+    });
+    // Pre-promote in LiveKit so they can publish when they accept
+    streamsApi.promote(stream.id, user.id).catch(() => {});
     setMessages(prev => [...prev, {
       id: Date.now(),
       type: 'invite',
-      user,
-      text: t("live.joinedSpeakers"),
-      color: 'text-emerald-400',
+      user: { id: user.id, name: user.displayName || user.username || 'مستخدم', avatar: user.avatar || avatarImg, level: user.level || 1 },
+      text: t("live.inviteSent", "تم إرسال دعوة"),
+      color: 'text-yellow-400',
       timestamp: Date.now(),
     }]);
     setShowInviteModal(false);
+  };
+
+  const removeSpeaker = (speakerId: string) => {
+    const socket = getSocket();
+    socket.emit('remove-speaker', { roomId: stream.id, targetUserId: speakerId });
+    // Also revoke LiveKit publish permission
+    streamsApi.demote(stream.id, speakerId).catch(() => {});
+  };
+
+  const acceptInvite = async () => {
+    if (!pendingInvite) return;
+    const socket = getSocket();
+    socket.emit('accept-speaker-invite', { roomId: pendingInvite.roomId, userName: 'أنت' });
+    setPendingInvite(null);
+    setIsSpeaker(true);
+
+    // Promote in LiveKit — request new token with speaker role and start publishing audio
+    try {
+      await streamsApi.promote(stream.id, currentUserId);
+      // Reconnect with speaker permissions to start publishing audio
+      const tokenRes = await streamsApi.token(stream.id);
+      if (tokenRes?.token && tokenRes?.wsUrl) {
+        livekitStreamManager.disconnect();
+        await livekitStreamManager.connect(tokenRes.wsUrl, tokenRes.token, 'speaker', {
+          onStateChange: (state: StreamState) => setLkState(state),
+          onActiveSpeakers: (ids: string[]) => setActiveSpeakerIds(new Set(ids)),
+          onError: (err: Error) => console.error('[AudioRoom] LiveKit error:', err),
+        }, { publishVideo: false, publishAudio: true });
+      }
+    } catch (err) {
+      console.error('[AudioRoom] Failed to start speaker audio:', err);
+    }
+  };
+
+  const declineInvite = () => {
+    if (!pendingInvite) return;
+    const socket = getSocket();
+    socket.emit('decline-speaker-invite', { roomId: pendingInvite.roomId, hostId: pendingInvite.hostId });
+    setPendingInvite(null);
   };
 
   return (
@@ -360,40 +567,49 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
             {/* Host */}
             <div className="flex flex-col items-center gap-1.5">
               <div className="relative">
-                <div className="w-16 h-16 rounded-full border-2 border-emerald-500 overflow-hidden ring-4 ring-emerald-500/20">
+                <div className={`w-16 h-16 rounded-full border-2 overflow-hidden ring-4 transition-all ${activeSpeakerIds.has(stream.userId || '') ? 'border-emerald-400 ring-emerald-400/30' : 'border-emerald-500 ring-emerald-500/20'}`}>
                   <img src={stream.avatar || avatarImg} alt={stream.host} className="w-full h-full object-cover" />
                 </div>
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                   <Crown className="w-2 h-2" />
                   {t("live.host")}
                 </div>
-                {/* Sound wave indicator */}
-                <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
-                  {[1,2,3].map(i => (
-                    <motion.div key={i} className="w-[2px] bg-emerald-400 rounded-full" animate={{ height: [2, 8 + Math.random() * 4, 3] }} transition={{ duration: 0.6 + i * 0.1, repeat: Infinity }} />
-                  ))}
-                </div>
+                {/* Sound wave indicator — active when speaking via LiveKit */}
+                {activeSpeakerIds.has(stream.userId || '') && (
+                  <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
+                    {[1,2,3].map(i => (
+                      <motion.div key={i} className="w-[2px] bg-emerald-400 rounded-full" animate={{ height: [2, 8 + Math.random() * 4, 3] }} transition={{ duration: 0.6 + i * 0.1, repeat: Infinity }} />
+                    ))}
+                  </div>
+                )}
               </div>
               <span className="text-white text-[10px] font-bold">{stream.host}</span>
             </div>
 
             {/* Co-speakers */}
-            {speakers.map((name, i) => (
-              <div key={i} className="flex flex-col items-center gap-1.5">
+            {speakers.map((speaker) => (
+              <div key={speaker.id} className="flex flex-col items-center gap-1.5 relative">
                 <div className="relative">
-                  <div className="w-14 h-14 rounded-full border-2 border-cyan-500/50 overflow-hidden ring-2 ring-cyan-500/15">
-                    <img src={avatarImg} alt={name} className="w-full h-full object-cover" />
+                  <div className={`w-14 h-14 rounded-full border-2 overflow-hidden ring-2 transition-all ${activeSpeakerIds.has(speaker.id) ? 'border-cyan-400 ring-cyan-400/25' : 'border-cyan-500/50 ring-cyan-500/15'}`}>
+                    <img src={speaker.avatar || avatarImg} alt={speaker.name} className="w-full h-full object-cover" />
                   </div>
                   <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-cyan-500/80 text-white text-[7px] font-bold px-1.5 py-0.5 rounded-full">
                     <Mic className="w-2 h-2 inline" />
                   </div>
-                  <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
-                    {[1,2].map(j => (
-                      <motion.div key={j} className="w-[2px] bg-cyan-400/60 rounded-full" animate={{ height: [2, 6 + Math.random() * 3, 2] }} transition={{ duration: 0.8 + j * 0.15, repeat: Infinity }} />
-                    ))}
-                  </div>
+                  {activeSpeakerIds.has(speaker.id) && (
+                    <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
+                      {[1,2].map(j => (
+                        <motion.div key={j} className="w-[2px] bg-cyan-400/60 rounded-full" animate={{ height: [2, 6 + Math.random() * 3, 2] }} transition={{ duration: 0.8 + j * 0.15, repeat: Infinity }} />
+                      ))}
+                    </div>
+                  )}
+                  {isHost && (
+                    <button onClick={() => removeSpeaker(speaker.id)} className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-red-500/80 flex items-center justify-center">
+                      <X className="w-2.5 h-2.5 text-white" />
+                    </button>
+                  )}
                 </div>
-                <span className="text-white/70 text-[10px] font-medium">{name}</span>
+                <span className="text-white/70 text-[10px] font-medium">{speaker.name}</span>
               </div>
             ))}
 
@@ -436,14 +652,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
               );
             }
             return (
-              <motion.div key={msg.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="flex items-start gap-2 py-0.5">
-                <img src={msg.user.avatar} alt={msg.user.name} className="w-7 h-7 rounded-full object-cover border border-white/15 shrink-0" />
-                <div className="min-w-0">
-                  <span className={`text-xs font-bold ${msg.color}`}>{msg.user.name}</span>
-                  {msg.user.badge === 'vip' && <Crown className="w-3 h-3 text-yellow-400 inline mr-1 ml-1" />}
-                  <p className="text-white/85 text-sm">{msg.text}</p>
-                </div>
-              </motion.div>
+              <LiveChatMsg key={msg.id} msg={msg} />
             );
           })}
           <div ref={chatEndRef} />
@@ -452,6 +661,33 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
 
       {/* Right side actions */}
       <div className="absolute right-3 bottom-[140px] flex flex-col items-center gap-4 z-30">
+        {/* Mic toggle for host/speakers */}
+        {(isHost || isSpeaker) && (
+          <button
+            onClick={async () => {
+              try {
+                const isMuted = await livekitStreamManager.toggleMicrophone();
+                setMicOn(!isMuted);
+              } catch { setMicOn(m => !m); }
+            }}
+            className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
+          >
+            <div className={`w-11 h-11 rounded-full backdrop-blur-md flex items-center justify-center border transition-all ${micOn ? 'bg-emerald-500/30 border-emerald-500/40 text-emerald-400' : 'bg-destructive/50 border-destructive/40 text-white'}`}>
+              {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+            </div>
+          </button>
+        )}
+        {/* Connection status indicator */}
+        {(lkState === 'connecting' || lkState === 'reconnecting') && (
+          <div className="w-11 h-11 rounded-full bg-yellow-500/20 backdrop-blur-md flex items-center justify-center border border-yellow-500/30">
+            <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
+          </div>
+        )}
+        {lkState === 'failed' && (
+          <div className="w-11 h-11 rounded-full bg-red-500/20 backdrop-blur-md flex items-center justify-center border border-red-500/30">
+            <WifiOff className="w-5 h-5 text-red-400" />
+          </div>
+        )}
         <button onClick={addHeart} className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
           <div className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center border border-white/10">
             <Heart className="w-5 h-5 fill-current text-primary" />
@@ -503,10 +739,63 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
               </h3>
               <p className="text-white/40 text-xs mb-4">{t("live.inviteDesc")}</p>
               <div className="space-y-2 max-h-[40vh] overflow-y-auto">
-                <p className="text-white/30 text-xs text-center py-8">{t("live.noViewersToInvite")}</p>
+                {loadingViewers ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : roomViewers.filter(v => v.role === 'viewer' && v.id !== currentUserId && !speakers.find(s => s.id === v.id)).length === 0 ? (
+                  <p className="text-white/30 text-xs text-center py-8">{t("live.noViewersToInvite")}</p>
+                ) : (
+                  roomViewers.filter(v => v.role === 'viewer' && v.id !== currentUserId && !speakers.find(s => s.id === v.id)).map(viewer => (
+                    <button
+                      key={viewer.id}
+                      onClick={() => inviteSpeaker(viewer)}
+                      className="w-full flex items-center gap-3 bg-white/5 hover:bg-emerald-500/10 rounded-xl p-3 transition-colors border border-transparent hover:border-emerald-500/20"
+                    >
+                      <img src={viewer.avatar || avatarImg} alt={viewer.displayName} className="w-10 h-10 rounded-full border border-white/10" />
+                      <div className="flex-1 text-right">
+                        <p className="text-white text-sm font-bold">{viewer.displayName || viewer.username}</p>
+                        <p className="text-white/40 text-[10px]">@{viewer.username} · LV.{viewer.level}</p>
+                      </div>
+                      <div className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-full border border-emerald-500/30">
+                        {t("live.invite", "دعوة")}
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Speaker Invite Notification */}
+      <AnimatePresence>
+        {pendingInvite && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-20 left-4 right-4 z-[110] bg-emerald-500/20 backdrop-blur-xl border border-emerald-500/40 rounded-2xl p-4 shadow-[0_0_30px_rgba(16,185,129,0.3)]"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/30 flex items-center justify-center shrink-0">
+                <Mic className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div className="flex-1">
+                <p className="text-white text-sm font-bold">{t("live.speakerInviteTitle", "دعوة للتحدث")}</p>
+                <p className="text-white/60 text-xs">{t("live.speakerInviteDesc", "{{host}} يدعوك للتحدث في البث", { host: pendingInvite.hostName })}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={acceptInvite} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-colors">
+                {t("live.acceptInvite", "قبول")}
+              </button>
+              <button onClick={declineInvite} className="flex-1 py-2 rounded-xl bg-white/10 text-white/60 text-sm font-bold hover:bg-white/20 transition-colors">
+                {t("live.declineInvite", "رفض")}
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -591,6 +880,11 @@ export function LiveBroadcast() {
   const [videoStreams, setVideoStreams] = useState<StreamItem[]>([]);
   const [audioStreams, setAudioStreams] = useState<StreamItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createType, setCreateType] = useState<"live" | "audio">("live");
+  const [createTags, setCreateTags] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -601,6 +895,7 @@ export function LiveBroadcast() {
         for (const s of streams) {
           const item: StreamItem = {
             id: String(s.id),
+            userId: s.userId || undefined,
             type: s.type || 'video',
             host: s.hostName || s.host || 'مجهول',
             username: s.hostUsername || '',
@@ -624,6 +919,47 @@ export function LiveBroadcast() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const handleCreateStream = async () => {
+    if (!createTitle.trim() || creating) return;
+    setCreating(true);
+    try {
+      const tags = createTags.split(",").map(t => t.trim()).filter(Boolean);
+      const res = await streamsApi.create({ title: createTitle.trim(), type: createType, tags });
+      if (res?.id) {
+        setShowCreateModal(false);
+        setCreateTitle("");
+        setCreateTags("");
+        if (createType === "audio") {
+          // Navigate to audio room view by selecting it
+          const item: StreamItem = {
+            id: String(res.id),
+            userId: res.userId || undefined,
+            type: "audio",
+            host: res.hostName || "أنت",
+            username: res.hostUsername || "",
+            avatar: res.hostAvatar || null,
+            viewers: 0,
+            viewerCount: 0,
+            title: res.title || createTitle,
+            tags: res.tags || tags,
+            isLive: true,
+            level: res.hostLevel || 1,
+            speakers: [],
+            maxSpeakers: 4,
+            status: "active",
+          };
+          setSelectedAudioRoom(item);
+        } else {
+          setLocation(`/room/${res.id}`);
+        }
+      }
+    } catch {
+      // handled silently
+    } finally {
+      setCreating(false);
+    }
+  };
 
   // If audio room is selected, show full-screen audio room
   if (selectedAudioRoom) {
@@ -746,6 +1082,113 @@ export function LiveBroadcast() {
           )}
         </AnimatePresence>
       )}
+
+      {/* Go Live Floating Button */}
+      <motion.button
+        onClick={() => setShowCreateModal(true)}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        className="fixed bottom-24 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-red-500 to-primary flex items-center justify-center shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_40px_rgba(239,68,68,0.6)] transition-shadow"
+      >
+        <Plus className="w-7 h-7 text-white" />
+      </motion.button>
+
+      {/* Create Stream Modal */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <div className="fixed inset-0 z-[100] flex items-end justify-center">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowCreateModal(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-lg bg-[#0c0c1d]/95 backdrop-blur-2xl rounded-t-[32px] p-6 border-t border-white/10"
+              dir={dir}
+            >
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-white/20 rounded-full" />
+
+              <h3 className="text-xl font-black text-white flex items-center gap-2 mt-4 mb-6">
+                <Radio className="w-5 h-5 text-red-400" />
+                {t("live.goLive", "بدء البث المباشر")}
+              </h3>
+
+              {/* Stream Type Selector */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setCreateType("live")}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
+                    createType === "live"
+                      ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30"
+                      : "text-white/40 bg-white/5 border border-white/5"
+                  }`}
+                >
+                  <Video className="w-4 h-4" />
+                  {t("live.videoLive", "بث فيديو")}
+                </button>
+                <button
+                  onClick={() => setCreateType("audio")}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
+                    createType === "audio"
+                      ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30"
+                      : "text-white/40 bg-white/5 border border-white/5"
+                  }`}
+                >
+                  <Headphones className="w-4 h-4" />
+                  {t("live.audioLive", "غرفة صوتية")}
+                </button>
+              </div>
+
+              {/* Title */}
+              <div className="mb-4">
+                <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.streamTitle", "عنوان البث")}</label>
+                <input
+                  type="text"
+                  value={createTitle}
+                  onChange={e => setCreateTitle(e.target.value)}
+                  placeholder={t("live.streamTitlePlaceholder", "اكتب عنوان البث...")}
+                  maxLength={200}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="mb-6">
+                <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.streamTags", "الوسوم (اختياري)")}</label>
+                <input
+                  type="text"
+                  value={createTags}
+                  onChange={e => setCreateTags(e.target.value)}
+                  placeholder={t("live.streamTagsPlaceholder", "دردشة, ألعاب, موسيقى")}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                />
+              </div>
+
+              {/* Start Button */}
+              <button
+                onClick={handleCreateStream}
+                disabled={!createTitle.trim() || creating}
+                className="w-full py-4 rounded-2xl font-black text-white text-base transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-gradient-to-r from-red-500 to-primary shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] flex items-center justify-center gap-2"
+              >
+                {creating ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Radio className="w-5 h-5" />
+                    {t("live.startStream", "بدء البث")}
+                  </>
+                )}
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
