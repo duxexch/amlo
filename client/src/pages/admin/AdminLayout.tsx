@@ -130,11 +130,28 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
 // ── Admin Layout Shell ────────────────────────────────────
 export function AdminLayout({ children }: { children: React.ReactNode }) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { admin, logout } = useAdmin();
+  const { admin, isLoading, logout } = useAdmin();
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
+
+  // ── Auth Guard: redirect to login if not authenticated ──
+  useEffect(() => {
+    if (!isLoading && !admin) {
+      setLocation("/admin");
+    }
+  }, [isLoading, admin, setLocation]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#06060f] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!admin) return null;
 
   return (
     <div className="min-h-screen bg-[#06060f] text-white flex" dir={dir}>

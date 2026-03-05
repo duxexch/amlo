@@ -130,6 +130,11 @@ export const walletApi = {
     request("/wallet/recharge", { method: "POST", body: JSON.stringify(data) }),
   withdraw: (data: { amount: number; paymentMethodId?: string; paymentDetails?: string }) =>
     request("/wallet/withdraw", { method: "POST", body: JSON.stringify(data) }),
+  withdrawalRequests: (page = 1) => request<any>(`/wallet/withdrawal-requests?page=${page}`),
+  incomeChart: (days = 30) => request<any>(`/wallet/income-chart?days=${days}`),
+  cancelWithdrawal: (withdrawalId: string) =>
+    request("/wallet/cancel-withdrawal", { method: "POST", body: JSON.stringify({ withdrawalId }) }),
+  totalSpent: () => request<{ totalSpent: number }>("/wallet/total-spent"),
 };
 
 // ── Gifts ──
@@ -153,10 +158,13 @@ export const followApi = {
 
 // ── Streams ──
 export const streamsApi = {
-  active: () => request<any[]>("/streams/active"),
+  active: (category?: string) => request<any[]>(`/streams/active${category ? `?category=${category}` : ""}`),
+  scheduled: () => request<any[]>("/streams/scheduled"),
+  search: (q: string) => request<any[]>(`/streams/search?q=${encodeURIComponent(q)}`),
   detail: (id: string) => request<any>(`/streams/${id}`),
   my: () => request<any>("/streams/my"),
-  create: (data: { title: string; type: "live" | "audio"; tags?: string[] }) =>
+  stats: (id: string) => request<any>(`/streams/${id}/stats`),
+  create: (data: { title: string; type: "live" | "audio"; tags?: string[]; category?: string; scheduledAt?: string }) =>
     request<any>("/streams/create", { method: "POST", body: JSON.stringify(data) }),
   end: (id: string) => request<any>(`/streams/${id}/end`, { method: "POST" }),
   join: (id: string) => request("/streams/" + id + "/join", { method: "POST" }),
@@ -177,6 +185,36 @@ export const streamsApi = {
   /** Kick participant from stream (host only) */
   kick: (streamId: string, targetUserId: string) =>
     request(`/streams/${streamId}/kick`, { method: "POST", body: JSON.stringify({ targetUserId }) }),
+  /** Pin a message in stream chat (host only) */
+  pin: (streamId: string, message: string) =>
+    request(`/streams/${streamId}/pin`, { method: "POST", body: JSON.stringify({ message }) }),
+  unpin: (streamId: string) =>
+    request(`/streams/${streamId}/pin`, { method: "DELETE" }),
+  /** Polls */
+  createPoll: (streamId: string, question: string, options: string[]) =>
+    request(`/streams/${streamId}/poll`, { method: "POST", body: JSON.stringify({ question, options }) }),
+  votePoll: (streamId: string, pollId: string, option: string) =>
+    request(`/streams/${streamId}/poll/${pollId}/vote`, { method: "POST", body: JSON.stringify({ option }) }),
+  endPoll: (streamId: string, pollId: string) =>
+    request(`/streams/${streamId}/poll/${pollId}/end`, { method: "POST" }),
+  getActivePoll: (streamId: string) =>
+    request<any>(`/streams/${streamId}/poll`),
+  /** Chat moderation */
+  muteUser: (streamId: string, targetUserId: string, reason?: string) =>
+    request(`/streams/${streamId}/mute`, { method: "POST", body: JSON.stringify({ targetUserId, reason }) }),
+  unmuteUser: (streamId: string, targetUserId: string) =>
+    request(`/streams/${streamId}/mute/${targetUserId}`, { method: "DELETE" }),
+  addBannedWord: (streamId: string, word: string) =>
+    request(`/streams/${streamId}/banned-words`, { method: "POST", body: JSON.stringify({ word }) }),
+  removeBannedWord: (streamId: string, wordId: string) =>
+    request(`/streams/${streamId}/banned-words/${wordId}`, { method: "DELETE" }),
+  getBannedWords: (streamId: string) =>
+    request<any[]>(`/streams/${streamId}/banned-words`),
+  /** Recording */
+  startRecording: (streamId: string) =>
+    request(`/streams/${streamId}/record/start`, { method: "POST" }),
+  stopRecording: (streamId: string) =>
+    request(`/streams/${streamId}/record/stop`, { method: "POST" }),
 };
 
 // ── Auto-Translation — الترجمة التلقائية ──

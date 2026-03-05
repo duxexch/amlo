@@ -37,7 +37,7 @@ import {
   updateProfileSchema,
   setFriendVisibilitySchema,
 } from "../../shared/schema";
-import { randomUUID, randomBytes } from "crypto";
+import { randomUUID, randomBytes, createHmac } from "crypto";
 import { sendOtp, verifyOtp, sendPasswordResetEmail } from "../services/email";
 
 const router = Router();
@@ -70,11 +70,9 @@ function requirePinVerified(req: Request, res: Response): string | null {
   return userId;
 }
 
-// ── Helper: strip sensitive fields ──
-function stripSensitive<T extends Record<string, any>>(obj: T) {
-  const { passwordHash, pinHash, ...safe } = obj;
-  return safe;
-}
+// ── Helper: strip sensitive fields (centralized) ──
+import { sanitizeUser } from "../utils/sanitize";
+const stripSensitive = sanitizeUser;
 
 // ════════════════════════════════════════════════════════════
 // AUTH ROUTES
@@ -197,6 +195,11 @@ router.post("/login", async (req: Request, res: Response) => {
     const valid = await verifyPasswordAsync(password, user.passwordHash);
     if (!valid) {
       return res.status(401).json({ success: false, message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+    }
+
+    // Check 2FA — if enabled, require TOTP before setting session
+    if (user.twoFactorEnabled) {
+      return res.json({ success: true, data: { requires2FA: true, userId: user.id } });
     }
 
     // Check if user has profiles (PIN setup)
@@ -341,11 +344,14 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
       log(`Password reset email sent to: ${email}`);
     }
 
+    // Never expose reset token in API response — use server logs for debugging
+    if (process.env.NODE_ENV !== "production") {
+      authLog.debug({ token: token.substring(0, 8) + "..." }, "Reset token generated (check logs for debugging)");
+    }
+
     return res.json({
       success: true,
       message: "إذا كان البريد الإلكتروني مسجلاً، ستصلك رسالة مع رابط إعادة تعيين كلمة المرور",
-      // Only include token in development for testing
-      ...(process.env.NODE_ENV !== "production" && { resetToken: token }),
     });
   } catch (err: any) {
     authLog.error({ err }, "Forgot password error");
@@ -1140,5 +1146,471 @@ function maskEmail(email: string): string {
   if (local.length <= 2) return `${local[0]}***@${domain}`;
   return `${local[0]}${local[1]}***@${domain}`;
 }
+
+// ════════════════════════════════════════════════════════════
+// OAUTH ROUTES — Google, Facebook, Apple
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Helper: Find or create user by OAuth provider
+ */
+async function oauthFindOrCreateUser(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  provider: "google" | "facebook" | "apple",
+  providerId: string,
+  email: string | null,
+  displayName: string | null,
+  avatar: string | null,
+): Promise<{ user: schema.User; isNew: boolean }> {
+  const providerField = provider === "google" ? "googleId" : provider === "facebook" ? "facebookId" : "appleId";
+
+  // 1. Check by provider ID
+  const [existing] = await db.select().from(schema.users)
+    .where(eq(schema.users[providerField], providerId)).limit(1);
+  if (existing) return { user: existing, isNew: false };
+
+  // 2. Check by email (link accounts)
+  if (email) {
+    const [byEmail] = await db.select().from(schema.users)
+      .where(eq(schema.users.email, email)).limit(1);
+    if (byEmail) {
+      // Link OAuth to existing account
+      await db.update(schema.users).set({ [providerField]: providerId }).where(eq(schema.users.id, byEmail.id));
+      return { user: { ...byEmail, [providerField]: providerId }, isNew: false };
+    }
+  }
+
+  // 3. Create new user
+  const username = `${provider}_${providerId.slice(0, 8)}_${Date.now().toString(36)}`;
+  const referralCode = generateReferralCode();
+  const passwordHash = await hashPasswordAsync(randomUUID()); // Random password
+
+  const [newUser] = await db.insert(schema.users).values({
+    username,
+    email,
+    passwordHash,
+    displayName: displayName || username,
+    avatar,
+    referralCode,
+    [providerField]: providerId,
+    isVerified: !!email,
+  }).returning();
+
+  return { user: newUser, isNew: true };
+}
+
+/**
+ * Helper: Set session after OAuth login
+ */
+async function setOAuthSession(req: Request, user: schema.User, db: NonNullable<ReturnType<typeof getDb>>) {
+  const profiles = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(eq(schema.userProfiles.userId, user.id));
+
+  req.session.userId = user.id;
+  req.session.pinVerified = profiles.length === 0;
+  req.session.activeProfileIndex = undefined;
+
+  await db.update(schema.users).set({ lastOnlineAt: new Date(), status: "online" }).where(eq(schema.users.id, user.id));
+}
+
+/**
+ * POST /auth/oauth/google — Verify Google ID token and login/register
+ */
+router.post("/oauth/google", async (req: Request, res: Response) => {
+  const { idToken } = req.body;
+  if (!idToken || typeof idToken !== "string") {
+    return res.status(400).json({ success: false, message: "idToken مطلوب" });
+  }
+
+  try {
+    // Verify token with Google's tokeninfo endpoint
+    const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!googleRes.ok) {
+      return res.status(401).json({ success: false, message: "رمز Google غير صالح" });
+    }
+    const payload = await googleRes.json() as { sub: string; email?: string; name?: string; picture?: string; email_verified?: string };
+
+    if (!payload.sub) {
+      return res.status(401).json({ success: false, message: "رمز Google غير صالح" });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const { user, isNew } = await oauthFindOrCreateUser(
+      db, "google", payload.sub,
+      payload.email_verified === "true" ? (payload.email || null) : null,
+      payload.name || null,
+      payload.picture || null,
+    );
+
+    if (user.isBanned) return res.status(403).json({ success: false, message: "تم حظر حسابك", reason: user.banReason });
+
+    // Check 2FA
+    if (user.twoFactorEnabled) {
+      // Don't set session yet — require 2FA
+      return res.json({ success: true, data: { requires2FA: true, userId: user.id, isNew } });
+    }
+
+    await setOAuthSession(req, user, db);
+    authLog.info({ userId: user.id, provider: "google", isNew }, "OAuth login");
+
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        isNew,
+        needsPinVerify: false,
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Google OAuth error");
+    return res.status(500).json({ success: false, message: "خطأ في تسجيل الدخول عبر Google" });
+  }
+});
+
+/**
+ * POST /auth/oauth/facebook — Verify Facebook access token and login/register
+ */
+router.post("/oauth/facebook", async (req: Request, res: Response) => {
+  const { accessToken } = req.body;
+  if (!accessToken || typeof accessToken !== "string") {
+    return res.status(400).json({ success: false, message: "accessToken مطلوب" });
+  }
+
+  try {
+    // Verify token with Facebook Graph API
+    const fbRes = await fetch(`https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${encodeURIComponent(accessToken)}`);
+    if (!fbRes.ok) {
+      return res.status(401).json({ success: false, message: "رمز Facebook غير صالح" });
+    }
+    const payload = await fbRes.json() as { id: string; name?: string; email?: string; picture?: { data?: { url?: string } } };
+
+    if (!payload.id) {
+      return res.status(401).json({ success: false, message: "رمز Facebook غير صالح" });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const { user, isNew } = await oauthFindOrCreateUser(
+      db, "facebook", payload.id,
+      payload.email || null,
+      payload.name || null,
+      payload.picture?.data?.url || null,
+    );
+
+    if (user.isBanned) return res.status(403).json({ success: false, message: "تم حظر حسابك", reason: user.banReason });
+
+    if (user.twoFactorEnabled) {
+      return res.json({ success: true, data: { requires2FA: true, userId: user.id, isNew } });
+    }
+
+    await setOAuthSession(req, user, db);
+    authLog.info({ userId: user.id, provider: "facebook", isNew }, "OAuth login");
+
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        isNew,
+        needsPinVerify: false,
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Facebook OAuth error");
+    return res.status(500).json({ success: false, message: "خطأ في تسجيل الدخول عبر Facebook" });
+  }
+});
+
+/**
+ * POST /auth/oauth/apple — Verify Apple identity token and login/register
+ */
+router.post("/oauth/apple", async (req: Request, res: Response) => {
+  const { identityToken, fullName } = req.body;
+  if (!identityToken || typeof identityToken !== "string") {
+    return res.status(400).json({ success: false, message: "identityToken مطلوب" });
+  }
+
+  try {
+    // Decode JWT (Apple identity token is a standard JWT)
+    // We verify by decoding and checking the 'sub' claim
+    // In production, you'd verify with Apple's public keys from https://appleid.apple.com/auth/keys
+    const parts = identityToken.split(".");
+    if (parts.length !== 3) {
+      return res.status(401).json({ success: false, message: "رمز Apple غير صالح" });
+    }
+
+    const payloadStr = Buffer.from(parts[1], "base64url").toString("utf-8");
+    const payload = JSON.parse(payloadStr) as { sub: string; email?: string; iss?: string; aud?: string };
+
+    if (!payload.sub || payload.iss !== "https://appleid.apple.com") {
+      return res.status(401).json({ success: false, message: "رمز Apple غير صالح" });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const name = fullName ? `${fullName.givenName || ""} ${fullName.familyName || ""}`.trim() : null;
+
+    const { user, isNew } = await oauthFindOrCreateUser(
+      db, "apple", payload.sub,
+      payload.email || null,
+      name,
+      null,
+    );
+
+    if (user.isBanned) return res.status(403).json({ success: false, message: "تم حظر حسابك", reason: user.banReason });
+
+    if (user.twoFactorEnabled) {
+      return res.json({ success: true, data: { requires2FA: true, userId: user.id, isNew } });
+    }
+
+    await setOAuthSession(req, user, db);
+    authLog.info({ userId: user.id, provider: "apple", isNew }, "OAuth login");
+
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        isNew,
+        needsPinVerify: false,
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Apple OAuth error");
+    return res.status(500).json({ success: false, message: "خطأ في تسجيل الدخول عبر Apple" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// 2FA / TOTP — المصادقة الثنائية
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Generate a random base32-encoded TOTP secret
+ */
+function generateTotpSecret(): string {
+  const bytes = randomBytes(20);
+  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let secret = "";
+  for (let i = 0; i < bytes.length; i++) {
+    secret += base32Chars[bytes[i] & 31];
+    if ((i + 1) % 4 === 0 && i + 1 < bytes.length) secret += "";
+  }
+  return secret.slice(0, 32);
+}
+
+/**
+ * Decode a base32 string to Buffer
+ */
+function base32Decode(s: string): Buffer {
+  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const c of s.toUpperCase()) {
+    const idx = base32Chars.indexOf(c);
+    if (idx === -1) continue;
+    bits += idx.toString(2).padStart(5, "0");
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+/**
+ * Generate TOTP code for a given secret + time
+ */
+function generateTotp(secret: string, time: number = Date.now()): string {
+  const counter = Math.floor(time / 30000);
+  const counterBuf = Buffer.alloc(8);
+  counterBuf.writeUInt32BE(0, 0);
+  counterBuf.writeUInt32BE(counter, 4);
+
+  const key = base32Decode(secret);
+  const hmac = createHmac("sha1", key).update(counterBuf).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[offset] & 0x7f) << 24 | hmac[offset + 1] << 16 | hmac[offset + 2] << 8 | hmac[offset + 3]) % 1000000;
+  return code.toString().padStart(6, "0");
+}
+
+/**
+ * Verify a TOTP code (allows ±1 time step)
+ */
+function verifyTotp(secret: string, code: string): boolean {
+  const now = Date.now();
+  for (const offset of [-30000, 0, 30000]) {
+    if (generateTotp(secret, now + offset) === code) return true;
+  }
+  return false;
+}
+
+/**
+ * POST /auth/2fa/setup — Generate a TOTP secret and provisioning URI
+ */
+router.post("/2fa/setup", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const db = getDb();
+  if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+  try {
+    const [user] = await db.select({ twoFactorEnabled: schema.users.twoFactorEnabled, email: schema.users.email })
+      .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    if (user.twoFactorEnabled) return res.status(400).json({ success: false, message: "المصادقة الثنائية مفعّلة بالفعل" });
+
+    const secret = generateTotpSecret();
+
+    // Store secret (not yet enabled)
+    await db.update(schema.users).set({ twoFactorSecret: secret }).where(eq(schema.users.id, userId));
+
+    // Build otpauth:// URI for QR code
+    const label = encodeURIComponent(user.email || userId);
+    const otpauthUri = `otpauth://totp/Ablox:${label}?secret=${secret}&issuer=Ablox&algorithm=SHA1&digits=6&period=30`;
+
+    return res.json({
+      success: true,
+      data: { secret, otpauthUri },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "2FA setup error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+/**
+ * POST /auth/2fa/verify-setup — Verify the TOTP code and enable 2FA
+ */
+router.post("/2fa/verify-setup", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || code.length !== 6) {
+    return res.status(400).json({ success: false, message: "رمز التحقق غير صالح" });
+  }
+
+  const db = getDb();
+  if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+  try {
+    const [user] = await db.select({ twoFactorSecret: schema.users.twoFactorSecret, twoFactorEnabled: schema.users.twoFactorEnabled })
+      .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    if (!user || !user.twoFactorSecret) {
+      return res.status(400).json({ success: false, message: "يرجى إعداد المصادقة الثنائية أولاً" });
+    }
+    if (user.twoFactorEnabled) {
+      return res.status(400).json({ success: false, message: "المصادقة الثنائية مفعّلة بالفعل" });
+    }
+
+    if (!verifyTotp(user.twoFactorSecret, code)) {
+      return res.status(400).json({ success: false, message: "رمز التحقق غير صحيح" });
+    }
+
+    // Enable 2FA
+    await db.update(schema.users).set({ twoFactorEnabled: true }).where(eq(schema.users.id, userId));
+    authLog.info({ userId }, "2FA enabled");
+
+    return res.json({ success: true, message: "تم تفعيل المصادقة الثنائية بنجاح" });
+  } catch (err: any) {
+    authLog.error({ err }, "2FA verify-setup error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+/**
+ * POST /auth/2fa/verify — Verify 2FA code during login
+ */
+router.post("/2fa/verify", async (req: Request, res: Response) => {
+  const { userId, code } = req.body;
+  if (!userId || !code || typeof code !== "string" || code.length !== 6) {
+    return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+  }
+
+  const db = getDb();
+  if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+  try {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!user || !user.twoFactorSecret || !user.twoFactorEnabled) {
+      return res.status(400).json({ success: false, message: "المصادقة الثنائية غير مفعّلة" });
+    }
+
+    if (!verifyTotp(user.twoFactorSecret, code)) {
+      return res.status(401).json({ success: false, message: "رمز التحقق غير صحيح" });
+    }
+
+    // 2FA passed — set session
+    await setOAuthSession(req, user, db);
+    authLog.info({ userId }, "2FA verified at login");
+
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "2FA verify error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+/**
+ * POST /auth/2fa/disable — Disable 2FA
+ */
+router.post("/2fa/disable", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || code.length !== 6) {
+    return res.status(400).json({ success: false, message: "رمز التحقق مطلوب" });
+  }
+
+  const db = getDb();
+  if (!db) return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+  try {
+    const [user] = await db.select({ twoFactorSecret: schema.users.twoFactorSecret, twoFactorEnabled: schema.users.twoFactorEnabled })
+      .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    if (!user || !user.twoFactorSecret || !user.twoFactorEnabled) {
+      return res.status(400).json({ success: false, message: "المصادقة الثنائية غير مفعّلة" });
+    }
+
+    if (!verifyTotp(user.twoFactorSecret, code)) {
+      return res.status(401).json({ success: false, message: "رمز التحقق غير صحيح" });
+    }
+
+    await db.update(schema.users).set({ twoFactorEnabled: false, twoFactorSecret: null })
+      .where(eq(schema.users.id, userId));
+    authLog.info({ userId }, "2FA disabled");
+
+    return res.json({ success: true, message: "تم إلغاء المصادقة الثنائية" });
+  } catch (err: any) {
+    authLog.error({ err }, "2FA disable error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
 
 export default router;

@@ -12,6 +12,7 @@ import compression from "compression";
 import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
+import { applyCdnConfig } from "./cdn";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
@@ -74,15 +75,57 @@ export const io = new SocketIOServer(httpServer, {
 
 // Redis adapter is set up inside the main async startup below
 
-// ── Socket.io authentication middleware ──
+// ── Socket.io authentication middleware (session-based) ──
+// Instead of trusting client-provided userId, we verify the session cookie
+// This prevents any client from impersonating another user
 io.use((socket, next) => {
-  const userId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
-  if (!userId || typeof userId !== "string" || userId.length > 100) {
-    // Allow connection but without user context (will need to emit user-online)
+  // Parse session cookie from the handshake headers
+  const cookieHeader = socket.handshake.headers.cookie;
+  if (!cookieHeader) {
+    // Allow connection without user context (public/guest)
     return next();
   }
-  socket.data.userId = userId;
-  next();
+
+  // Create a minimal req/res pair to run express-session parsing
+  // The sessionMiddleware is set up later, so we do manual cookie parsing here.
+  // Extract the connect.sid cookie value
+  const sidMatch = cookieHeader.match(/connect\.sid=s%3A([^.]+)\./);
+  if (!sidMatch) {
+    return next(); // No valid session cookie — allow as guest
+  }
+
+  const sessionId = sidMatch[1];
+  if (!sessionId) return next();
+
+  // Look up session in Redis store
+  const redis = getRedis();
+  if (redis) {
+    const sessionKey = `ablox:sess:${sessionId}`;
+    redis.get(sessionKey).then((data) => {
+      if (data) {
+        try {
+          const sess = JSON.parse(data);
+          if (sess.userId && typeof sess.userId === "string") {
+            socket.data.userId = sess.userId;
+            socket.data.sessionVerified = true;
+          }
+        } catch {
+          // Invalid session data — continue as guest
+        }
+      }
+      next();
+    }).catch(() => {
+      // Redis error — allow connection as guest
+      next();
+    });
+  } else {
+    // No Redis — fall back to trusting handshake auth (dev only)
+    const userId = socket.handshake.auth?.userId;
+    if (userId && typeof userId === "string" && userId.length <= 100) {
+      socket.data.userId = userId;
+    }
+    next();
+  }
 });
 
 // ── Socket.io connection rate limiting ──
@@ -613,12 +656,21 @@ app.use((req, res, next) => {
   const cached = _responseCache.get(req.path);
   if (cached && now - cached.ts < ttl) {
     // Serve from memory — bypasses ALL middleware below
+    // IMPORTANT: Include all security headers since Helmet is bypassed
     res.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": req.headers.origin || "*",
       "Access-Control-Allow-Credentials": "true",
       "X-Cache": "HIT",
       "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=self, microphone=self, geolocation=()",
+      ...(process.env.NODE_ENV === "production" ? {
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+        "Content-Security-Policy": "default-src 'self'",
+      } : {}),
     });
     return res.end(cached.body);
   }
@@ -653,14 +705,16 @@ if (process.env.NODE_ENV !== "production") {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "wss:", "ws:", process.env.CORS_ORIGIN || "https://mrco.live"],
         mediaSrc: ["'self'", "blob:"],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
         upgradeInsecureRequests: [],
       },
     },
@@ -745,6 +799,12 @@ const writeLimiter = rateLimit({
 });
 app.use("/api/social", writeLimiter);
 
+// ── Stripe webhook: raw body parser MUST come BEFORE express.json() ──
+// Stripe signature verification requires the raw request body (Buffer),
+// not the parsed JSON object. This middleware captures it for the webhook route.
+app.use("/api/v1/payments/webhook", express.raw({ type: "application/json" }));
+app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
+
 app.use(
   express.json({
     limit: "1mb",
@@ -762,6 +822,56 @@ app.use((_req, res, next) => {
   res.setHeader("Permissions-Policy", "camera=self, microphone=self, geolocation=()");
   // Fast monotonic request ID (no crypto overhead)
   res.setHeader("X-Request-Id", `${Date.now().toString(36)}-${(reqIdCounter++).toString(36)}`);
+  next();
+});
+
+// ── CSRF Protection (Origin-based) ──
+// Validates Origin/Referer for state-changing requests (POST/PUT/PATCH/DELETE).
+// Combined with SameSite=lax cookies, this prevents CSRF attacks without tokens.
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const CSRF_SKIP_PATHS = new Set([
+  "/api/v1/payments/webhook",
+  "/api/payments/webhook",
+]);
+
+app.use((req, res, next) => {
+  // Skip safe methods
+  if (CSRF_SAFE_METHODS.has(req.method)) return next();
+
+  // Skip webhook routes (they use their own signature verification)
+  if (CSRF_SKIP_PATHS.has(req.path)) return next();
+
+  // Only enforce on API routes
+  if (!req.path.startsWith("/api")) return next();
+
+  // In production, verify the Origin header matches our domain
+  if (process.env.NODE_ENV === "production") {
+    const origin = req.headers.origin || req.headers.referer;
+    const allowedOrigin = process.env.CORS_ORIGIN || "https://mrco.live";
+
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        const allowedUrl = new URL(allowedOrigin);
+        if (originUrl.origin !== allowedUrl.origin) {
+          serverLog.warn(`CSRF blocked: origin ${origin} does not match ${allowedOrigin} — ${req.method} ${req.path}`);
+          return res.status(403).json({
+            success: false,
+            message: "طلب غير مصرح — CSRF protection",
+          });
+        }
+      } catch {
+        // Invalid URL format — block
+        return res.status(403).json({
+          success: false,
+          message: "طلب غير مصرح — invalid origin",
+        });
+      }
+    }
+    // If no Origin header at all on a state-changing request, still allow
+    // because some clients/proxies strip it. SameSite cookies provide backup protection.
+  }
+
   next();
 });
 
@@ -992,6 +1102,10 @@ app.use((req, res, next) => {
   const { initEmailService } = await import("./services/email");
   initEmailService();
 
+  // Initialize push notification service
+  const { initPushService } = await import("./services/pushNotification");
+  initPushService();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -1016,6 +1130,7 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
+  applyCdnConfig(app); // CDN headers + security headers
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {

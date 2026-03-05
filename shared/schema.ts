@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, relations } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -9,6 +9,7 @@ import {
   numeric,
   index,
   date,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -65,11 +66,18 @@ export const users = pgTable(
     banReason: text("ban_reason"),
     status: text("status").notNull().default("offline"), // online | offline | in_stream | in_call
     referralCode: text("referral_code").unique(),
-    referredByAgent: varchar("referred_by_agent"),
+    referredByAgent: varchar("referred_by_agent").references(() => agents.id, { onDelete: "set null" }),
     interests: text("interests"), // comma-separated interests e.g. "gaming,music,travel"
     canStream: boolean("can_stream").notNull().default(true),
     miles: integer("miles").notNull().default(0),
     totalWorldSessions: integer("total_world_sessions").notNull().default(0),
+    // OAuth
+    googleId: text("google_id"),
+    facebookId: text("facebook_id"),
+    appleId: text("apple_id"),
+    // 2FA
+    twoFactorSecret: text("two_factor_secret"),
+    twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
     lastOnlineAt: timestamp("last_online_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -167,10 +175,10 @@ export const giftTransactions = pgTable(
   "gift_transactions",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    senderId: varchar("sender_id").notNull(),
-    receiverId: varchar("receiver_id").notNull(),
-    giftId: varchar("gift_id").notNull(),
-    streamId: varchar("stream_id"),
+    senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    receiverId: varchar("receiver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    giftId: varchar("gift_id").notNull().references(() => gifts.id, { onDelete: "restrict" }),
+    streamId: varchar("stream_id").references(() => streams.id, { onDelete: "set null" }),
     quantity: integer("quantity").notNull().default(1),
     totalPrice: integer("total_price").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -196,7 +204,9 @@ export const coinPackages = pgTable("coin_packages", {
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("coin_packages_active_sort_idx").on(table.isActive, table.sortOrder),
+]);
 
 export type CoinPackage = typeof coinPackages.$inferSelect;
 
@@ -207,7 +217,7 @@ export const walletTransactions = pgTable(
   "wallet_transactions",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull(), // purchase | gift_sent | gift_received | withdrawal | refund | bonus
     amount: integer("amount").notNull(),
     balanceAfter: integer("balance_after").notNull(),
@@ -234,14 +244,18 @@ export const streams = pgTable(
   "streams",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     title: text("title"),
     type: text("type").notNull().default("live"), // live | audio | video_call
-    status: text("status").notNull().default("active"), // active | ended | banned
+    status: text("status").notNull().default("active"), // active | ended | banned | scheduled
+    category: text("category"), // chat | gaming | music | education | sports | cooking | art | other
     viewerCount: integer("viewer_count").notNull().default(0),
     peakViewers: integer("peak_viewers").notNull().default(0),
     totalGifts: integer("total_gifts").notNull().default(0),
     tags: text("tags"),
+    pinnedMessage: text("pinned_message"),
+    recordingUrl: text("recording_url"),
+    scheduledAt: timestamp("scheduled_at"), // null = live now, set = scheduled
     startedAt: timestamp("started_at").notNull().defaultNow(),
     endedAt: timestamp("ended_at"),
   },
@@ -249,10 +263,55 @@ export const streams = pgTable(
     index("streams_user_idx").on(table.userId),
     index("streams_status_idx").on(table.status),
     index("streams_started_idx").on(table.startedAt),
+    index("streams_category_idx").on(table.category),
+    index("streams_scheduled_idx").on(table.scheduledAt),
   ],
 );
 
 export type Stream = typeof streams.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 8b. STREAM_POLLS — استطلاعات البث المباشر
+// ════════════════════════════════════════════════════════════
+export const streamPolls = pgTable("stream_polls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  question: text("question").notNull(),
+  options: text("options").notNull(), // JSON array: ["opt1","opt2","opt3"]
+  votes: text("votes").notNull().default("{}"), // JSON: { "opt1": 5, "opt2": 3 }
+  voterIds: text("voter_ids").notNull().default("[]"), // JSON array of user IDs who voted
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stream_polls_stream_idx").on(table.streamId),
+]);
+
+export type StreamPoll = typeof streamPolls.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 8c. STREAM_BANNED_WORDS — الكلمات المحظورة في البث
+// ════════════════════════════════════════════════════════════
+export const streamBannedWords = pgTable("stream_banned_words", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  word: text("word").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stream_banned_words_stream_idx").on(table.streamId),
+]);
+
+// 8d. STREAM_MUTED_USERS — المستخدمين المكتومين في البث
+export const streamMutedUsers = pgTable("stream_muted_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  mutedBy: varchar("muted_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stream_muted_users_stream_idx").on(table.streamId),
+  index("stream_muted_users_user_idx").on(table.userId),
+]);
 
 // ════════════════════════════════════════════════════════════
 // 9. USER_REPORTS - بلاغات المستخدمين
@@ -261,14 +320,14 @@ export const userReports = pgTable(
   "user_reports",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    reporterId: varchar("reporter_id").notNull(),
-    reportedId: varchar("reported_id").notNull(),
-    streamId: varchar("stream_id"),
+    reporterId: varchar("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    reportedId: varchar("reported_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    streamId: varchar("stream_id").references(() => streams.id, { onDelete: "set null" }),
     type: text("type").notNull(), // harassment | spam | inappropriate | scam | other
     reason: text("reason").notNull(),
     status: text("status").notNull().default("pending"), // pending | reviewed | resolved | dismissed
     adminNotes: text("admin_notes"),
-    reviewedBy: varchar("reviewed_by"),
+    reviewedBy: varchar("reviewed_by").references(() => admins.id, { onDelete: "set null" }),
     reviewedAt: timestamp("reviewed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -287,13 +346,14 @@ export const userFollows = pgTable(
   "user_follows",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    followerId: varchar("follower_id").notNull(),
-    followingId: varchar("following_id").notNull(),
+    followerId: varchar("follower_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    followingId: varchar("following_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
     index("follows_follower_idx").on(table.followerId),
     index("follows_following_idx").on(table.followingId),
+    unique("uq_user_follows").on(table.followerId, table.followingId),
   ],
 );
 
@@ -320,7 +380,7 @@ export const adminLogs = pgTable(
   "admin_logs",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    adminId: varchar("admin_id").notNull(),
+    adminId: varchar("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
     action: text("action").notNull(),
     targetType: text("target_type"), // user | agent | gift | stream | setting | report
     targetId: varchar("target_id"),
@@ -343,8 +403,8 @@ export const friendships = pgTable(
   "friendships",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    senderId: varchar("sender_id").notNull(),
-    receiverId: varchar("receiver_id").notNull(),
+    senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    receiverId: varchar("receiver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"), // pending | accepted | rejected | blocked
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -353,6 +413,7 @@ export const friendships = pgTable(
     index("friendships_sender_idx").on(table.senderId),
     index("friendships_receiver_idx").on(table.receiverId),
     index("friendships_status_idx").on(table.status),
+    unique("uq_friendships").on(table.senderId, table.receiverId),
   ],
 );
 
@@ -365,8 +426,8 @@ export const conversations = pgTable(
   "conversations",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    participant1Id: varchar("participant1_id").notNull(),
-    participant2Id: varchar("participant2_id").notNull(),
+    participant1Id: varchar("participant1_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    participant2Id: varchar("participant2_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     lastMessageId: varchar("last_message_id"),
     lastMessageAt: timestamp("last_message_at"),
     participant1Unread: integer("participant1_unread").notNull().default(0),
@@ -390,13 +451,14 @@ export const messages = pgTable(
   "messages",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    conversationId: varchar("conversation_id").notNull(),
-    senderId: varchar("sender_id").notNull(),
+    conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     content: text("content"),
     type: text("type").notNull().default("text"), // text | image | voice | gift | system
     mediaUrl: text("media_url"),
-    giftId: varchar("gift_id"),
+    giftId: varchar("gift_id").references(() => gifts.id, { onDelete: "set null" }),
     isRead: boolean("is_read").notNull().default(false),
+    readAt: timestamp("read_at"),
     isDeleted: boolean("is_deleted").notNull().default(false),
     coinsCost: integer("coins_cost").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -417,8 +479,8 @@ export const calls = pgTable(
   "calls",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    callerId: varchar("caller_id").notNull(),
-    receiverId: varchar("receiver_id").notNull(),
+    callerId: varchar("caller_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    receiverId: varchar("receiver_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull(), // voice | video
     status: text("status").notNull().default("ringing"), // ringing | active | ended | missed | rejected | busy
     startedAt: timestamp("started_at"),
@@ -517,8 +579,8 @@ export const worldSessions = pgTable(
   "world_sessions",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(),
-    matchedUserId: varchar("matched_user_id"),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    matchedUserId: varchar("matched_user_id").references(() => users.id, { onDelete: "set null" }),
     genderFilter: text("gender_filter"), // male | female | both
     ageMin: integer("age_min").notNull().default(18),
     ageMax: integer("age_max").notNull().default(60),
@@ -547,12 +609,12 @@ export const worldMessages = pgTable(
   "world_messages",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    sessionId: varchar("session_id").notNull(),
-    senderId: varchar("sender_id").notNull(),
+    sessionId: varchar("session_id").notNull().references(() => worldSessions.id, { onDelete: "cascade" }),
+    senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     content: text("content"),
     type: text("type").notNull().default("text"), // text | image | voice | gift | system
     mediaUrl: text("media_url"),
-    giftId: varchar("gift_id"),
+    giftId: varchar("gift_id").references(() => gifts.id, { onDelete: "set null" }),
     coinsCost: integer("coins_cost").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -594,13 +656,14 @@ export const chatBlocks = pgTable(
   "chat_blocks",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    blockerId: varchar("blocker_id").notNull(),
-    blockedId: varchar("blocked_id").notNull(),
+    blockerId: varchar("blocker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    blockedId: varchar("blocked_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
     index("chat_blocks_blocker_idx").on(table.blockerId),
     index("chat_blocks_blocked_idx").on(table.blockedId),
+    unique("uq_chat_blocks").on(table.blockerId, table.blockedId),
   ],
 );
 
@@ -613,15 +676,15 @@ export const messageReports = pgTable(
   "message_reports",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    reporterId: varchar("reporter_id").notNull(),
-    messageId: varchar("message_id").notNull(),
-    conversationId: varchar("conversation_id").notNull(),
-    reportedUserId: varchar("reported_user_id").notNull(),
+    reporterId: varchar("reporter_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    messageId: varchar("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    reportedUserId: varchar("reported_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     category: text("category").notNull().default("other"), // harassment | spam | inappropriate | scam | threat | other
     reason: text("reason"),
     status: text("status").notNull().default("pending"), // pending | reviewed | resolved | dismissed
     adminNotes: text("admin_notes"),
-    reviewedBy: varchar("reviewed_by"),
+    reviewedBy: varchar("reviewed_by").references(() => admins.id, { onDelete: "set null" }),
     reviewedAt: timestamp("reviewed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -656,12 +719,12 @@ export const upgradeRequests = pgTable(
   "upgrade_requests",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     currentLevel: integer("current_level").notNull(),
     requestedLevel: integer("requested_level").notNull(),
     status: text("status").notNull().default("pending"), // pending | approved | rejected
     adminNotes: text("admin_notes"),
-    reviewedBy: varchar("reviewed_by"),
+    reviewedBy: varchar("reviewed_by").references(() => admins.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     reviewedAt: timestamp("reviewed_at"),
   },
@@ -792,7 +855,7 @@ export const userProfiles = pgTable(
   "user_profiles",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     profileIndex: integer("profile_index").notNull(), // 1 or 2
     pinHash: text("pin_hash").notNull(), // bcrypt hash of 4-digit PIN
     displayName: text("display_name"),
@@ -808,6 +871,7 @@ export const userProfiles = pgTable(
   (table) => [
     index("user_profiles_user_idx").on(table.userId),
     index("user_profiles_user_index_idx").on(table.userId, table.profileIndex),
+    unique("uq_user_profiles").on(table.userId, table.profileIndex),
   ],
 );
 
@@ -820,8 +884,8 @@ export const friendProfileVisibility = pgTable(
   "friend_profile_visibility",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: varchar("user_id").notNull(), // owner
-    friendId: varchar("friend_id").notNull(), // friend who sees this profile
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), // owner
+    friendId: varchar("friend_id").notNull().references(() => users.id, { onDelete: "cascade" }), // friend who sees this profile
     visibleProfileIndex: integer("visible_profile_index").notNull().default(1), // 1 or 2
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -830,6 +894,7 @@ export const friendProfileVisibility = pgTable(
     index("fpv_user_idx").on(table.userId),
     index("fpv_friend_idx").on(table.friendId),
     index("fpv_user_friend_idx").on(table.userId, table.friendId),
+    unique("uq_friend_profile_vis").on(table.userId, table.friendId),
   ],
 );
 
@@ -915,7 +980,7 @@ export const featuredStreamsConfig = pgTable("featured_streams_config", {
   titleAr: text("title_ar"),
   streamerName: text("streamer_name").notNull(),
   image: text("image").notNull(),
-  streamId: varchar("stream_id"),
+  streamId: varchar("stream_id").references(() => streams.id, { onDelete: "set null" }),
   viewerCount: integer("viewer_count").notNull().default(0),
   isLive: boolean("is_live").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -971,15 +1036,15 @@ export type PaymentMethod = typeof paymentMethods.$inferSelect;
 // ════════════════════════════════════════════════════════════
 export const fraudAlerts = pgTable("fraud_alerts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id"),
-  agentId: varchar("agent_id"),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  agentId: varchar("agent_id").references(() => agents.id, { onDelete: "set null" }),
   type: text("type").notNull(), // suspicious_login | unusual_transaction | multiple_accounts | rapid_gifting | bot_behavior
   severity: text("severity").notNull().default("medium"), // low | medium | high | critical
   description: text("description").notNull(),
   details: text("details"), // JSON with additional context
   status: text("status").notNull().default("pending"), // pending | investigating | resolved | dismissed
   adminNotes: text("admin_notes"),
-  reviewedBy: varchar("reviewed_by"),
+  reviewedBy: varchar("reviewed_by").references(() => admins.id, { onDelete: "set null" }),
   reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
@@ -1062,7 +1127,7 @@ export type AccountApplication = typeof accountApplications.$inferSelect;
 // ════════════════════════════════════════════════════════════
 export const notificationPreferences = pgTable("notification_preferences", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().unique(),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   messages: boolean("messages").notNull().default(true),
   calls: boolean("calls").notNull().default(true),
   friendRequests: boolean("friend_requests").notNull().default(true),
@@ -1082,14 +1147,14 @@ export type NotificationPreference = typeof notificationPreferences.$inferSelect
 // ════════════════════════════════════════════════════════════
 export const withdrawalRequests = pgTable("withdrawal_requests", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   amount: integer("amount").notNull(), // in coins
   amountUsd: numeric("amount_usd", { precision: 12, scale: 2 }),
-  paymentMethodId: varchar("payment_method_id"),
+  paymentMethodId: varchar("payment_method_id").references(() => paymentMethods.id, { onDelete: "set null" }),
   paymentDetails: text("payment_details"), // JSON with user's payment info
   status: text("status").notNull().default("pending"), // pending | processing | completed | rejected
   adminNotes: text("admin_notes"),
-  processedBy: varchar("processed_by"),
+  processedBy: varchar("processed_by").references(() => admins.id, { onDelete: "set null" }),
   processedAt: timestamp("processed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
@@ -1105,14 +1170,15 @@ export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;
 // ════════════════════════════════════════════════════════════
 export const streamViewers = pgTable("stream_viewers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  streamId: varchar("stream_id").notNull(),
-  userId: varchar("user_id").notNull(),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("viewer"), // viewer | speaker | moderator | host
   joinedAt: timestamp("joined_at").notNull().defaultNow(),
   leftAt: timestamp("left_at"),
 }, (table) => [
   index("stream_viewers_stream_idx").on(table.streamId),
   index("stream_viewers_user_idx").on(table.userId),
+  unique("uq_stream_viewers").on(table.streamId, table.userId),
 ]);
 
 export type StreamViewer = typeof streamViewers.$inferSelect;
@@ -1146,4 +1212,325 @@ export const updateNotificationPrefsSchema = z.object({
   streams: z.boolean().optional(),
   systemUpdates: z.boolean().optional(),
   marketing: z.boolean().optional(),
+});
+
+// ════════════════════════════════════════════════════════════
+// DRIZZLE RELATIONS — العلاقات بين الجداول
+// ════════════════════════════════════════════════════════════
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  agent: one(agents, { fields: [users.referredByAgent], references: [agents.id] }),
+  profiles: many(userProfiles),
+  notificationPrefs: one(notificationPreferences, { fields: [users.id], references: [notificationPreferences.userId] }),
+  giftsSent: many(giftTransactions, { relationName: "giftSender" }),
+  giftsReceived: many(giftTransactions, { relationName: "giftReceiver" }),
+  walletTransactions: many(walletTransactions),
+  streams: many(streams),
+  friendshipsSent: many(friendships, { relationName: "friendSender" }),
+  friendshipsReceived: many(friendships, { relationName: "friendReceiver" }),
+  following: many(userFollows, { relationName: "follower" }),
+  followers: many(userFollows, { relationName: "following" }),
+  messagesSent: many(messages),
+  callsMade: many(calls, { relationName: "caller" }),
+  callsReceived: many(calls, { relationName: "receiver" }),
+  worldSessions: many(worldSessions),
+  blocksCreated: many(chatBlocks, { relationName: "blocker" }),
+  upgradeRequests: many(upgradeRequests),
+  withdrawalRequests: many(withdrawalRequests),
+  reports: many(userReports, { relationName: "reporter" }),
+}));
+
+export const agentsRelations = relations(agents, ({ many }) => ({
+  referredUsers: many(users),
+  fraudAlerts: many(fraudAlerts),
+}));
+
+export const adminsRelations = relations(admins, ({ many }) => ({
+  logs: many(adminLogs),
+}));
+
+export const giftsRelations = relations(gifts, ({ many }) => ({
+  transactions: many(giftTransactions),
+}));
+
+export const giftTransactionsRelations = relations(giftTransactions, ({ one }) => ({
+  sender: one(users, { fields: [giftTransactions.senderId], references: [users.id], relationName: "giftSender" }),
+  receiver: one(users, { fields: [giftTransactions.receiverId], references: [users.id], relationName: "giftReceiver" }),
+  gift: one(gifts, { fields: [giftTransactions.giftId], references: [gifts.id] }),
+  stream: one(streams, { fields: [giftTransactions.streamId], references: [streams.id] }),
+}));
+
+export const walletTransactionsRelations = relations(walletTransactions, ({ one }) => ({
+  user: one(users, { fields: [walletTransactions.userId], references: [users.id] }),
+}));
+
+export const streamsRelations = relations(streams, ({ one, many }) => ({
+  user: one(users, { fields: [streams.userId], references: [users.id] }),
+  polls: many(streamPolls),
+  bannedWords: many(streamBannedWords),
+  mutedUsers: many(streamMutedUsers),
+  viewers: many(streamViewers),
+  giftTransactions: many(giftTransactions),
+}));
+
+export const streamPollsRelations = relations(streamPolls, ({ one }) => ({
+  stream: one(streams, { fields: [streamPolls.streamId], references: [streams.id] }),
+}));
+
+export const streamBannedWordsRelations = relations(streamBannedWords, ({ one }) => ({
+  stream: one(streams, { fields: [streamBannedWords.streamId], references: [streams.id] }),
+}));
+
+export const streamMutedUsersRelations = relations(streamMutedUsers, ({ one }) => ({
+  stream: one(streams, { fields: [streamMutedUsers.streamId], references: [streams.id] }),
+  user: one(users, { fields: [streamMutedUsers.userId], references: [users.id] }),
+}));
+
+export const userReportsRelations = relations(userReports, ({ one }) => ({
+  reporter: one(users, { fields: [userReports.reporterId], references: [users.id], relationName: "reporter" }),
+  reported: one(users, { fields: [userReports.reportedId], references: [users.id] }),
+  stream: one(streams, { fields: [userReports.streamId], references: [streams.id] }),
+  reviewedByAdmin: one(admins, { fields: [userReports.reviewedBy], references: [admins.id] }),
+}));
+
+export const userFollowsRelations = relations(userFollows, ({ one }) => ({
+  follower: one(users, { fields: [userFollows.followerId], references: [users.id], relationName: "follower" }),
+  following: one(users, { fields: [userFollows.followingId], references: [users.id], relationName: "following" }),
+}));
+
+export const adminLogsRelations = relations(adminLogs, ({ one }) => ({
+  admin: one(admins, { fields: [adminLogs.adminId], references: [admins.id] }),
+}));
+
+export const friendshipsRelations = relations(friendships, ({ one }) => ({
+  sender: one(users, { fields: [friendships.senderId], references: [users.id], relationName: "friendSender" }),
+  receiver: one(users, { fields: [friendships.receiverId], references: [users.id], relationName: "friendReceiver" }),
+}));
+
+export const conversationsRelations = relations(conversations, ({ one, many }) => ({
+  participant1: one(users, { fields: [conversations.participant1Id], references: [users.id] }),
+  participant2: one(users, { fields: [conversations.participant2Id], references: [users.id] }),
+  messages: many(messages),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  conversation: one(conversations, { fields: [messages.conversationId], references: [conversations.id] }),
+  sender: one(users, { fields: [messages.senderId], references: [users.id] }),
+  gift: one(gifts, { fields: [messages.giftId], references: [gifts.id] }),
+}));
+
+export const callsRelations = relations(calls, ({ one }) => ({
+  caller: one(users, { fields: [calls.callerId], references: [users.id], relationName: "caller" }),
+  receiver: one(users, { fields: [calls.receiverId], references: [users.id], relationName: "receiver" }),
+}));
+
+export const worldSessionsRelations = relations(worldSessions, ({ one, many }) => ({
+  user: one(users, { fields: [worldSessions.userId], references: [users.id] }),
+  matchedUser: one(users, { fields: [worldSessions.matchedUserId], references: [users.id] }),
+  messages: many(worldMessages),
+}));
+
+export const worldMessagesRelations = relations(worldMessages, ({ one }) => ({
+  session: one(worldSessions, { fields: [worldMessages.sessionId], references: [worldSessions.id] }),
+  sender: one(users, { fields: [worldMessages.senderId], references: [users.id] }),
+  gift: one(gifts, { fields: [worldMessages.giftId], references: [gifts.id] }),
+}));
+
+export const chatBlocksRelations = relations(chatBlocks, ({ one }) => ({
+  blocker: one(users, { fields: [chatBlocks.blockerId], references: [users.id], relationName: "blocker" }),
+  blocked: one(users, { fields: [chatBlocks.blockedId], references: [users.id] }),
+}));
+
+export const messageReportsRelations = relations(messageReports, ({ one }) => ({
+  reporter: one(users, { fields: [messageReports.reporterId], references: [users.id] }),
+  message: one(messages, { fields: [messageReports.messageId], references: [messages.id] }),
+  conversation: one(conversations, { fields: [messageReports.conversationId], references: [conversations.id] }),
+  reportedUser: one(users, { fields: [messageReports.reportedUserId], references: [users.id] }),
+  reviewedByAdmin: one(admins, { fields: [messageReports.reviewedBy], references: [admins.id] }),
+}));
+
+export const upgradeRequestsRelations = relations(upgradeRequests, ({ one }) => ({
+  user: one(users, { fields: [upgradeRequests.userId], references: [users.id] }),
+  reviewedByAdmin: one(admins, { fields: [upgradeRequests.reviewedBy], references: [admins.id] }),
+}));
+
+export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
+  user: one(users, { fields: [userProfiles.userId], references: [users.id] }),
+}));
+
+export const friendProfileVisibilityRelations = relations(friendProfileVisibility, ({ one }) => ({
+  user: one(users, { fields: [friendProfileVisibility.userId], references: [users.id] }),
+  friend: one(users, { fields: [friendProfileVisibility.friendId], references: [users.id] }),
+}));
+
+export const fraudAlertsRelations = relations(fraudAlerts, ({ one }) => ({
+  user: one(users, { fields: [fraudAlerts.userId], references: [users.id] }),
+  agent: one(agents, { fields: [fraudAlerts.agentId], references: [agents.id] }),
+  reviewedByAdmin: one(admins, { fields: [fraudAlerts.reviewedBy], references: [admins.id] }),
+}));
+
+export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({
+  user: one(users, { fields: [notificationPreferences.userId], references: [users.id] }),
+}));
+
+export const withdrawalRequestsRelations = relations(withdrawalRequests, ({ one }) => ({
+  user: one(users, { fields: [withdrawalRequests.userId], references: [users.id] }),
+  paymentMethod: one(paymentMethods, { fields: [withdrawalRequests.paymentMethodId], references: [paymentMethods.id] }),
+  processedByAdmin: one(admins, { fields: [withdrawalRequests.processedBy], references: [admins.id] }),
+}));
+
+export const streamViewersRelations = relations(streamViewers, ({ one }) => ({
+  stream: one(streams, { fields: [streamViewers.streamId], references: [streams.id] }),
+  user: one(users, { fields: [streamViewers.userId], references: [users.id] }),
+}));
+
+// ════════════════════════════════════════════════════════════
+// 36. STORIES — القصص / اللحظات (24 ساعة)
+// ════════════════════════════════════════════════════════════
+export const stories = pgTable("stories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull().default("image"), // image | video | text
+  mediaUrl: text("media_url"),
+  textContent: text("text_content"),
+  bgColor: text("bg_color"), // for text stories
+  caption: text("caption"),
+  viewCount: integer("view_count").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stories_user_idx").on(table.userId),
+  index("stories_expires_idx").on(table.expiresAt),
+  index("stories_active_idx").on(table.isActive),
+]);
+
+export type Story = typeof stories.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 37. STORY_VIEWS — مشاهدات القصص
+// ════════════════════════════════════════════════════════════
+export const storyViews = pgTable("story_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
+  viewerId: varchar("viewer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  viewedAt: timestamp("viewed_at").notNull().defaultNow(),
+}, (table) => [
+  index("story_views_story_idx").on(table.storyId),
+  index("story_views_viewer_idx").on(table.viewerId),
+  unique("uq_story_views").on(table.storyId, table.viewerId),
+]);
+
+export type StoryView = typeof storyViews.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 38. GROUP_CONVERSATIONS — المحادثات الجماعية
+// ════════════════════════════════════════════════════════════
+export const groupConversations = pgTable("group_conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  avatar: text("avatar"),
+  description: text("description"),
+  creatorId: varchar("creator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  maxMembers: integer("max_members").notNull().default(200),
+  isActive: boolean("is_active").notNull().default(true),
+  lastMessageAt: timestamp("last_message_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("group_conv_creator_idx").on(table.creatorId),
+  index("group_conv_last_msg_idx").on(table.lastMessageAt),
+]);
+
+export type GroupConversation = typeof groupConversations.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 39. GROUP_MEMBERS — أعضاء المجموعة
+// ════════════════════════════════════════════════════════════
+export const groupMembers = pgTable("group_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull().references(() => groupConversations.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"), // admin | moderator | member
+  joinedAt: timestamp("joined_at").notNull().defaultNow(),
+  mutedUntil: timestamp("muted_until"),
+}, (table) => [
+  index("group_members_group_idx").on(table.groupId),
+  index("group_members_user_idx").on(table.userId),
+  unique("uq_group_members").on(table.groupId, table.userId),
+]);
+
+export type GroupMember = typeof groupMembers.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 40. GROUP_MESSAGES — رسائل المجموعة
+// ════════════════════════════════════════════════════════════
+export const groupMessages = pgTable("group_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull().references(() => groupConversations.id, { onDelete: "cascade" }),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  content: text("content"),
+  type: text("type").notNull().default("text"), // text | image | voice | gift | system
+  mediaUrl: text("media_url"),
+  giftId: varchar("gift_id").references(() => gifts.id, { onDelete: "set null" }),
+  isDeleted: boolean("is_deleted").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("group_msg_group_idx").on(table.groupId),
+  index("group_msg_sender_idx").on(table.senderId),
+  index("group_msg_created_idx").on(table.createdAt),
+]);
+
+export type GroupMessage = typeof groupMessages.$inferSelect;
+
+// ── Stories + Groups Relations ──
+export const storiesRelations = relations(stories, ({ one, many }) => ({
+  user: one(users, { fields: [stories.userId], references: [users.id] }),
+  views: many(storyViews),
+}));
+
+export const storyViewsRelations = relations(storyViews, ({ one }) => ({
+  story: one(stories, { fields: [storyViews.storyId], references: [stories.id] }),
+  viewer: one(users, { fields: [storyViews.viewerId], references: [users.id] }),
+}));
+
+export const groupConversationsRelations = relations(groupConversations, ({ one, many }) => ({
+  creator: one(users, { fields: [groupConversations.creatorId], references: [users.id] }),
+  members: many(groupMembers),
+  messages: many(groupMessages),
+}));
+
+export const groupMembersRelations = relations(groupMembers, ({ one }) => ({
+  group: one(groupConversations, { fields: [groupMembers.groupId], references: [groupConversations.id] }),
+  user: one(users, { fields: [groupMembers.userId], references: [users.id] }),
+}));
+
+export const groupMessagesRelations = relations(groupMessages, ({ one }) => ({
+  group: one(groupConversations, { fields: [groupMessages.groupId], references: [groupConversations.id] }),
+  sender: one(users, { fields: [groupMessages.senderId], references: [users.id] }),
+  gift: one(gifts, { fields: [groupMessages.giftId], references: [gifts.id] }),
+}));
+
+// ── Stories Schemas ──
+export const createStorySchema = z.object({
+  type: z.enum(["image", "video", "text"]).default("image"),
+  mediaUrl: z.string().url().max(2048).optional(),
+  textContent: z.string().max(500).optional(),
+  bgColor: z.string().max(20).optional(),
+  caption: z.string().max(500).optional(),
+});
+
+// ── Group Chat Schemas ──
+export const createGroupSchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+  description: z.string().max(500).optional(),
+  avatar: z.string().max(2048).optional(),
+  memberIds: z.array(z.string().max(100)).min(1).max(199),
+});
+
+export const sendGroupMessageSchema = z.object({
+  content: z.string().min(1).max(5000).optional(),
+  type: z.enum(["text", "image", "voice", "gift"]).default("text"),
+  mediaUrl: z.string().url().max(2048).optional(),
+  giftId: z.string().max(100).optional(),
 });

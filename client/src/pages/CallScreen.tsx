@@ -63,6 +63,7 @@ function formatDuration(seconds: number): string {
 }
 
 function CoinCounter({ rate, duration }: { rate: number; duration: number }) {
+  const { t } = useTranslation();
   const totalCoins = Math.ceil((duration / 60) * rate);
   return (
     <motion.div
@@ -72,7 +73,7 @@ function CoinCounter({ rate, duration }: { rate: number; duration: number }) {
     >
       <Coins className="w-4 h-4 text-amber-400" />
       <span className="text-amber-400 text-sm font-bold">{totalCoins}</span>
-      <span className="text-amber-400/50 text-[10px] font-medium">({rate}/ دقيقة)</span>
+      <span className="text-amber-400/50 text-[10px] font-medium">({rate}/ {t("common.perMinute", "دقيقة")})</span>
     </motion.div>
   );
 }

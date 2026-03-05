@@ -10,8 +10,24 @@ export function serveStatic(app: Express) {
     );
   }
 
+  // Serve uploaded files (avatars, media)
+  const uploadsPath = path.resolve(process.cwd(), "uploads");
+  if (fs.existsSync(uploadsPath)) {
+    app.use("/uploads", express.static(uploadsPath, {
+      dotfiles: "ignore",
+      maxAge: "7d",
+      immutable: false,
+    }));
+  }
+
+  // Explicitly serve .well-known directory (TWA assetlinks, etc.)
+  app.use("/.well-known", express.static(path.join(distPath, ".well-known"), {
+    dotfiles: "allow",
+    maxAge: "1d",
+  }));
+
   app.use(express.static(distPath, {
-    dotfiles: "allow",           // serve .well-known/assetlinks.json
+    dotfiles: "ignore",           // block dotfiles — .well-known served explicitly above
     maxAge: "1d",                // 24h for most files (was 1h)
     immutable: false,            // only hashed files get immutable below
     etag: true,

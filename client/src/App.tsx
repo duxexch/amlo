@@ -2,95 +2,116 @@ import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Home } from "@/pages/Home";
-import { Room } from "@/pages/Room";
-import { Wallet } from "@/pages/Wallet";
-import { UserAuth } from "@/pages/UserAuth";
-import { PinEntry } from "@/pages/PinEntry";
-import { PinSetup } from "@/pages/PinSetup";
-import { Profile } from "@/pages/Profile";
-import { Policy } from "@/pages/Policy";
-import { ResetPassword } from "@/pages/ResetPassword";
-import { DownloadPage } from "@/pages/Download";
-import { AgentApply } from "@/pages/AgentApply";
-import { AccountApply } from "@/pages/AccountApply";
-import { Friends } from "@/pages/Friends";
-import { CallScreen } from "@/pages/CallScreen";
-import { WorldExplore } from "@/pages/WorldExplore";
-import { LiveBroadcast } from "@/pages/LiveBroadcast";
 import { CallPopup } from "@/components/ui/CallPopup";
 import { AnnouncementPopup } from "@/components/ui/AnnouncementPopup";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
-import { useState, useEffect } from "react";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
+import { useState, lazy, Suspense } from "react";
 
-// Admin Pages (separated module)
-import { AdminProvider, AdminLayout } from "@/pages/admin/AdminLayout";
-import { AdminLoginPage } from "@/pages/admin/Login";
-import { DashboardPage } from "@/pages/admin/Dashboard";
-import { UsersManagementPage } from "@/pages/admin/UsersManagement";
-import { AgentsManagementPage } from "@/pages/admin/AgentsManagement";
-import { GiftsManagementPage } from "@/pages/admin/GiftsManagement";
-import { FinancesPage } from "@/pages/admin/Finances";
-import { ReportsPage } from "@/pages/admin/Reports";
-import { SettingsPage } from "@/pages/admin/Settings";
-import { FraudDetectionPage } from "@/pages/admin/FraudDetection";
-import { ChatManagementPage } from "@/pages/admin/ChatManagement";
+// ── Lazy-loaded pages (code splitting) ──
+const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })));
+const Room = lazy(() => import("@/pages/Room").then(m => ({ default: m.Room })));
+const Wallet = lazy(() => import("@/pages/Wallet").then(m => ({ default: m.Wallet })));
+const UserAuth = lazy(() => import("@/pages/UserAuth").then(m => ({ default: m.UserAuth })));
+const PinEntry = lazy(() => import("@/pages/PinEntry").then(m => ({ default: m.PinEntry })));
+const PinSetup = lazy(() => import("@/pages/PinSetup").then(m => ({ default: m.PinSetup })));
+const Profile = lazy(() => import("@/pages/Profile").then(m => ({ default: m.Profile })));
+const Policy = lazy(() => import("@/pages/Policy").then(m => ({ default: m.Policy })));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
+const DownloadPage = lazy(() => import("@/pages/Download").then(m => ({ default: m.DownloadPage })));
+const AgentApply = lazy(() => import("@/pages/AgentApply").then(m => ({ default: m.AgentApply })));
+const AccountApply = lazy(() => import("@/pages/AccountApply").then(m => ({ default: m.AccountApply })));
+const Friends = lazy(() => import("@/pages/Friends").then(m => ({ default: m.Friends })));
+const CallScreen = lazy(() => import("@/pages/CallScreen").then(m => ({ default: m.CallScreen })));
+const WorldExplore = lazy(() => import("@/pages/WorldExplore").then(m => ({ default: m.WorldExplore })));
+const LiveBroadcast = lazy(() => import("@/pages/LiveBroadcast").then(m => ({ default: m.LiveBroadcast })));
 
-// Agent Pages
-import { AgentProvider, AgentLoginPage, AgentDashboardPage } from "@/pages/agent/AgentPanel";
+// Admin Pages (separate chunk)
+const AdminProvider = lazy(() => import("@/pages/admin/AdminLayout").then(m => ({ default: m.AdminProvider })));
+const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout").then(m => ({ default: m.AdminLayout })));
+const AdminLoginPage = lazy(() => import("@/pages/admin/Login").then(m => ({ default: m.AdminLoginPage })));
+const DashboardPage = lazy(() => import("@/pages/admin/Dashboard").then(m => ({ default: m.DashboardPage })));
+const UsersManagementPage = lazy(() => import("@/pages/admin/UsersManagement").then(m => ({ default: m.UsersManagementPage })));
+const AgentsManagementPage = lazy(() => import("@/pages/admin/AgentsManagement").then(m => ({ default: m.AgentsManagementPage })));
+const GiftsManagementPage = lazy(() => import("@/pages/admin/GiftsManagement").then(m => ({ default: m.GiftsManagementPage })));
+const FinancesPage = lazy(() => import("@/pages/admin/Finances").then(m => ({ default: m.FinancesPage })));
+const ReportsPage = lazy(() => import("@/pages/admin/Reports").then(m => ({ default: m.ReportsPage })));
+const SettingsPage = lazy(() => import("@/pages/admin/Settings").then(m => ({ default: m.SettingsPage })));
+const FraudDetectionPage = lazy(() => import("@/pages/admin/FraudDetection").then(m => ({ default: m.FraudDetectionPage })));
+const ChatManagementPage = lazy(() => import("@/pages/admin/ChatManagement").then(m => ({ default: m.ChatManagementPage })));
+
+// Agent Pages (separate chunk)
+const AgentProvider = lazy(() => import("@/pages/agent/AgentPanel").then(m => ({ default: m.AgentProvider })));
+const AgentLoginPage = lazy(() => import("@/pages/agent/AgentPanel").then(m => ({ default: m.AgentLoginPage })));
+const AgentDashboardPage = lazy(() => import("@/pages/agent/AgentPanel").then(m => ({ default: m.AgentDashboardPage })));
+
+// ── Loading fallback ──
+function PageLoader() {
+  return (
+    <div className="min-h-screen bg-[#06060f] flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+    </div>
+  );
+}
 
 /** Admin Panel — completely separate layout and auth */
 function AdminRouter() {
   return (
-    <AdminProvider>
-      <Switch>
-        <Route path="/admin" component={AdminLoginPage} />
-        <Route path="/admin/dashboard">
-          <AdminLayout><DashboardPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/users">
-          <AdminLayout><UsersManagementPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/agents">
-          <AdminLayout><AgentsManagementPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/chat-management">
-          <AdminLayout><ChatManagementPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/gifts">
-          <AdminLayout><GiftsManagementPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/finances">
-          <AdminLayout><FinancesPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/reports">
-          <AdminLayout><ReportsPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/fraud">
-          <AdminLayout><FraudDetectionPage /></AdminLayout>
-        </Route>
-        <Route path="/admin/settings">
-          <AdminLayout><SettingsPage /></AdminLayout>
-        </Route>
-        <Route component={NotFound} />
-      </Switch>
-    </AdminProvider>
+    <Suspense fallback={<PageLoader />}>
+      <AdminProvider>
+        <Switch>
+          <Route path="/admin" component={AdminLoginPage} />
+          <Route path="/admin/dashboard">
+            <AdminLayout><DashboardPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/users">
+            <AdminLayout><UsersManagementPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/agents">
+            <AdminLayout><AgentsManagementPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/chat-management">
+            <AdminLayout><ChatManagementPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/gifts">
+            <AdminLayout><GiftsManagementPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/finances">
+            <AdminLayout><FinancesPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/reports">
+            <AdminLayout><ReportsPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/fraud">
+            <AdminLayout><FraudDetectionPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/settings">
+            <AdminLayout><SettingsPage /></AdminLayout>
+          </Route>
+          <Route component={NotFound} />
+        </Switch>
+      </AdminProvider>
+    </Suspense>
   );
 }
 
 /** Agent Panel — separate layout and auth */
 function AgentRouter() {
   return (
-    <AgentProvider>
-      <Switch>
-        <Route path="/agent" component={AgentLoginPage} />
-        <Route path="/agent/dashboard" component={AgentDashboardPage} />
-        <Route component={NotFound} />
-      </Switch>
-    </AgentProvider>
+    <Suspense fallback={<PageLoader />}>
+      <AgentProvider>
+        <Switch>
+          <Route path="/agent" component={AgentLoginPage} />
+          <Route path="/agent/dashboard" component={AgentDashboardPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </AgentProvider>
+    </Suspense>
   );
 }
 
@@ -98,21 +119,23 @@ function AgentRouter() {
 function UserRouter() {
   return (
     <AppLayout>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/live" component={LiveBroadcast} />
-        <Route path="/room" component={Room} />
-        <Route path="/room/:id" component={Room} />
-        <Route path="/wallet" component={Wallet} />
-        <Route path="/profile" component={Profile} />
-        <Route path="/profile/:id" component={Profile} />
-        <Route path="/friends" component={Friends} />
-        <Route path="/chat" component={Friends} />
-        <Route path="/world" component={WorldExplore} />
-        <Route path="/privacy" >{() => <Policy type="privacy" />}</Route>
-        <Route path="/terms" >{() => <Policy type="terms" />}</Route>
-        <Route component={NotFound} />
-      </Switch>
+      <Suspense fallback={<PageLoader />}>
+        <Switch>
+          <Route path="/" component={Home} />
+          <Route path="/live" component={LiveBroadcast} />
+          <Route path="/room" component={Room} />
+          <Route path="/room/:id" component={Room} />
+          <Route path="/wallet" component={Wallet} />
+          <Route path="/profile" component={Profile} />
+          <Route path="/profile/:id" component={Profile} />
+          <Route path="/friends" component={Friends} />
+          <Route path="/chat" component={Friends} />
+          <Route path="/world" component={WorldExplore} />
+          <Route path="/privacy" >{() => <Policy type="privacy" />}</Route>
+          <Route path="/terms" >{() => <Policy type="terms" />}</Route>
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
     </AppLayout>
   );
 }
@@ -123,14 +146,14 @@ function Router() {
   const isAgent = location.startsWith("/agent");
   const isAgentApply = location.startsWith("/agent-apply");
   const isAccountApply = location.startsWith("/account-apply");
-  if (isAgentApply) return <Route path="/agent-apply" component={AgentApply} />;
-  if (isAccountApply) return <Route path="/account-apply" component={AccountApply} />;
-  if (location === "/call") return <CallScreen />;
-  if (location === "/auth") return <UserAuth />;
-  if (location === "/pin") return <PinEntry />;
-  if (location === "/pin-setup") return <PinSetup />;
-  if (location.startsWith("/reset-password")) return <ResetPassword />;
-  if (location === "/download") return <DownloadPage />;
+  if (isAgentApply) return <Suspense fallback={<PageLoader />}><Route path="/agent-apply" component={AgentApply} /></Suspense>;
+  if (isAccountApply) return <Suspense fallback={<PageLoader />}><Route path="/account-apply" component={AccountApply} /></Suspense>;
+  if (location === "/call") return <Suspense fallback={<PageLoader />}><CallScreen /></Suspense>;
+  if (location === "/auth") return <Suspense fallback={<PageLoader />}><UserAuth /></Suspense>;
+  if (location === "/pin") return <Suspense fallback={<PageLoader />}><PinEntry /></Suspense>;
+  if (location === "/pin-setup") return <Suspense fallback={<PageLoader />}><PinSetup /></Suspense>;
+  if (location.startsWith("/reset-password")) return <Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>;
+  if (location === "/download") return <Suspense fallback={<PageLoader />}><DownloadPage /></Suspense>;
   return isAdmin ? <AdminRouter /> : isAgent ? <AgentRouter /> : <UserRouter />;
 }
 
@@ -140,19 +163,23 @@ function App() {
   const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-        <CallPopup 
-          isOpen={incomingCall} 
-          onAccept={() => setIncomingCall(false)} 
-          onDecline={() => setIncomingCall(false)} 
-        />
-        {isAppPage && <AnnouncementPopup />}
-        {isAppPage && <PWAInstallBanner />}
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <ConnectionStatus />
+          <Toaster />
+          <SonnerToaster position="top-center" richColors theme="dark" />
+          <Router />
+          <CallPopup 
+            isOpen={incomingCall} 
+            onAccept={() => setIncomingCall(false)} 
+            onDecline={() => setIncomingCall(false)} 
+          />
+          {isAppPage && <AnnouncementPopup />}
+          {isAppPage && <PWAInstallBanner />}
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

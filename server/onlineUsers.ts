@@ -6,8 +6,12 @@
  * This gives us fast local reads with multi-node consistency.
  */
 import { getRedis } from "./redis";
+import { createLogger } from "./logger";
 
 const REDIS_KEY = "ablox:online_users";
+const REDIS_TTL = 3600; // 1 hour TTL on the hash — prevents permanent zombie entries
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const onlineLog = createLogger("onlineUsers");
 
 // ── Primary in-memory store (always fast, always available) ──
 const localMap = new Map<string, string>();
@@ -19,8 +23,13 @@ export async function setUserOnline(userId: string, socketId: string): Promise<v
   localMap.set(userId, socketId);
   const redis = getRedis();
   if (redis) {
-    // Fire-and-forget Redis sync — don't block on network
-    redis.hset(REDIS_KEY, userId, socketId).catch(() => {});
+    try {
+      await redis.hset(REDIS_KEY, userId, socketId);
+      // Refresh TTL on each online event to keep the hash alive
+      await redis.expire(REDIS_KEY, REDIS_TTL);
+    } catch (err) {
+      onlineLog.warn(`Redis setUserOnline failed for ${userId}: ${err}`);
+    }
   }
 }
 
@@ -46,7 +55,11 @@ export async function removeUserOnline(userId: string): Promise<void> {
   localMap.delete(userId);
   const redis = getRedis();
   if (redis) {
-    redis.hdel(REDIS_KEY, userId).catch(() => {});
+    try {
+      await redis.hdel(REDIS_KEY, userId);
+    } catch (err) {
+      onlineLog.warn(`Redis removeUserOnline failed for ${userId}: ${err}`);
+    }
   }
 }
 
@@ -77,6 +90,42 @@ export async function isUserOnline(userId: string): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Batch check multiple users' online status — single HMGET instead of N HEXISTS */
+export async function areUsersOnline(userIds: string[]): Promise<Map<string, boolean>> {
+  const result = new Map<string, boolean>();
+  if (userIds.length === 0) return result;
+
+  // Start with local checks
+  const needRedis: string[] = [];
+  for (const uid of userIds) {
+    if (localMap.has(uid)) {
+      result.set(uid, true);
+    } else {
+      needRedis.push(uid);
+      result.set(uid, false); // default false
+    }
+  }
+
+  // Batch Redis lookup for remaining
+  if (needRedis.length > 0) {
+    const redis = getRedis();
+    if (redis) {
+      try {
+        const values = await redis.hmget(REDIS_KEY, ...needRedis);
+        for (let i = 0; i < needRedis.length; i++) {
+          if (values[i] !== null) {
+            result.set(needRedis[i], true);
+          }
+        }
+      } catch {
+        // already defaulted to false
+      }
+    }
+  }
+
+  return result;
 }
 
 /** Synchronous local-only lookup — for same-node socket handlers (zero overhead) */
@@ -139,7 +188,7 @@ export function startOnlineUsersCleanup(io: { sockets: { sockets: Map<string, un
     } catch (err) {
       console.error("[onlineUsers] Cleanup error:", err);
     }
-  }, 5 * 60 * 1000); // Every 5 minutes (reduced frequency for less overhead)
+  }, CLEANUP_INTERVAL_MS); // Every 5 minutes (reduced frequency for less overhead)
   _cleanupTimer.unref();
 }
 

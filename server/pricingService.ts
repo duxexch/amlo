@@ -79,7 +79,7 @@ export async function getAllPricing(): Promise<AllPricing> {
         memCache = { data, ts: Date.now() };
         return data;
       }
-    } catch {}
+    } catch (e: any) { log.warn(`Redis pricing cache parse error: ${e.message}`); }
   }
 
   // 3. Build from DB

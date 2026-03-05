@@ -18,6 +18,7 @@ import { eq, and, ne, sql, gte } from "drizzle-orm";
 import * as schema from "../shared/schema";
 import { io } from "./index";
 import { getUserSocketId, getOnlineUserIds, isUserOnline } from "./onlineUsers";
+import { getAllPricing } from "./pricingService";
 import { createLogger } from "./logger";
 
 const log = createLogger("matching");
@@ -65,6 +66,11 @@ const localQueue = new Map<string, QueueEntry>();
 const localActive = new Map<string, string>();        // userId -> sessionId
 const localRecent = new Map<string, number>();         // `u1:u2` -> timestamp
 
+// Memory leak protection: max sizes for in-memory maps
+const MAX_LOCAL_RECENT = 10_000;
+const MAX_LOCAL_QUEUE = 10_000;
+const MAX_LOCAL_ACTIVE = 10_000;
+
 // ── Queue Management ──
 
 /** Add user to the matching queue */
@@ -79,6 +85,7 @@ export async function joinQueue(userId: string, socketId: string, filters: Match
   if (db && cost > 0) {
     const [user] = await db.select({ coins: schema.users.coins }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
     if (!user || user.coins < cost) {
+      log.warn({ userId, cost, coins: user?.coins }, "Queue join rejected — insufficient coins");
       return { queued: false, cost };
     }
   }
@@ -86,6 +93,7 @@ export async function joinQueue(userId: string, socketId: string, filters: Match
   const redis = getRedis();
   if (redis) {
     await redis.hset(QUEUE_KEY, userId, JSON.stringify(entry));
+    await redis.expire(QUEUE_KEY, 600); // 10 min TTL — stale queue entries cleaned
   }
   localQueue.set(userId, entry);
 
@@ -118,6 +126,7 @@ export async function setActiveCall(userId: string, sessionId: string): Promise<
   const redis = getRedis();
   if (redis) {
     await redis.hset(ACTIVE_KEY, userId, sessionId).catch(() => {});
+    await redis.expire(ACTIVE_KEY, 3600).catch(() => {}); // 1 hour TTL — prevents permanent stale entries
   }
   localActive.set(userId, sessionId);
 }
@@ -206,7 +215,7 @@ export async function findMatch(userId: string): Promise<MatchResult> {
     const all = await redis.hgetall(QUEUE_KEY);
     for (const [uid, raw] of Object.entries(all)) {
       if (uid !== userId) {
-        try { allEntries.push(JSON.parse(raw)); } catch {}
+        try { allEntries.push(JSON.parse(raw)); } catch (e: any) { log.warn(`Skipping unparseable queue entry for ${uid}`); }
       }
     }
   } else {
@@ -421,7 +430,8 @@ export async function endRandomCall(userId: string, findNext: boolean = false): 
   return { ended: true, requeued: false };
 }
 
-// ── Periodic matcher (runs every 3 seconds to match waiting users) ──
+// ── Periodic matcher (runs every N seconds to match waiting users) ──
+const MATCHING_LOOP_INTERVAL_MS = 3_000; // 3 seconds
 let matcherInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startMatchingLoop(): void {
@@ -452,10 +462,10 @@ export function startMatchingLoop(): void {
     } catch (err) {
       log.error({ err }, "Matching loop error");
     }
-  }, 3000);
+  }, MATCHING_LOOP_INTERVAL_MS);
 
   matcherInterval.unref();
-  log.info("Matching loop started (every 3s)");
+  log.info(`Matching loop started (every ${MATCHING_LOOP_INTERVAL_MS / 1000}s)`);
 }
 
 export function stopMatchingLoop(): void {
@@ -478,12 +488,12 @@ interface UserBasicInfo {
 }
 
 // Simple cache to avoid repeated DB lookups during matching
-const userInfoCache = new Map<string, { data: UserBasicInfo; ts: number }>();
-const USER_INFO_CACHE_TTL = 60_000; // 1 minute
+import { TtlCache } from "./utils/ttlCache";
+const userInfoCache = new TtlCache<string, UserBasicInfo>({ ttlMs: 60_000, maxSize: 5_000 });
 
 async function getUserBasicInfo(db: any, userId: string): Promise<UserBasicInfo | null> {
   const cached = userInfoCache.get(userId);
-  if (cached && Date.now() - cached.ts < USER_INFO_CACHE_TTL) return cached.data;
+  if (cached) return cached;
 
   const [user] = await db.select({
     username: schema.users.username,
@@ -518,37 +528,30 @@ async function getUserBasicInfo(db: any, userId: string): Promise<UserBasicInfo 
     age,
   };
 
-  userInfoCache.set(userId, { data: info, ts: Date.now() });
+  userInfoCache.set(userId, info);
   return info;
 }
 
-/** Calculate cost for random chat based on filters */
+/** Calculate cost for random chat based on filters — uses cached pricing */
 async function calculateRandomChatCost(filters: MatchFilters): Promise<number> {
-  const db = getDb();
-  if (!db) return 0;
-
-  const pricing = await db.select().from(schema.worldPricing).where(eq(schema.worldPricing.isActive, true));
+  const { filters: p } = await getAllPricing();
   let total = 0;
 
   // Base spin cost
-  const spinCost = pricing.find(p => p.filterType === "spin_cost");
-  total += spinCost?.priceCoins || 0;
+  total += p.spin_cost || 0;
 
   // Gender filter cost
-  const genderKey = `gender_${filters.genderFilter}`;
-  const genderCost = pricing.find(p => p.filterType === genderKey);
-  total += genderCost?.priceCoins || 0;
+  const genderKey = `gender_${filters.genderFilter}` as keyof typeof p;
+  total += (p[genderKey] as number) || 0;
 
   // Age filter cost (if custom range)
   if (filters.ageMin > 18 || filters.ageMax < 60) {
-    const ageCost = pricing.find(p => p.filterType === "age_range");
-    total += ageCost?.priceCoins || 0;
+    total += p.age_range || 0;
   }
 
   // Country filter cost
   if (filters.countryFilter) {
-    const countryCost = pricing.find(p => p.filterType === "country_specific");
-    total += countryCost?.priceCoins || 0;
+    total += p.country_specific || 0;
   }
 
   return total;
@@ -608,11 +611,12 @@ export function startQueueCleanup(): void {
     for (const [key, ts] of localRecent) {
       if (ts < recentThreshold) localRecent.delete(key);
     }
+    // Memory leak protection — cap map sizes
+    if (localRecent.size > MAX_LOCAL_RECENT) localRecent.clear();
+    if (localQueue.size > MAX_LOCAL_QUEUE) localQueue.clear();
+    if (localActive.size > MAX_LOCAL_ACTIVE) localActive.clear();
 
-    // Clean user info cache
-    for (const [key, entry] of userInfoCache) {
-      if (now - entry.ts > USER_INFO_CACHE_TTL) userInfoCache.delete(key);
-    }
+    // TtlCache handles its own cleanup automatically
   }, 30_000).unref();
 }
 

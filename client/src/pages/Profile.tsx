@@ -14,6 +14,7 @@ import { authApi, profileApi } from "@/lib/authApi";
 import { PinSetup } from "@/pages/PinSetup";
 import { useLocation } from "wouter";
 import { LANGUAGES } from "@/i18n";
+import { COUNTRIES } from "@/lib/countries";
 
 // Default user shape (used before API data loads)
 const defaultUser = {
@@ -41,27 +42,6 @@ const defaultUser = {
   sessions: [] as { id: number; device: string; location: string; lastActive: string; current: boolean }[],
   joinDate: "",
 };
-
-const countries = [
-  { code: "SA", name: "السعودية", flag: "🇸🇦" },
-  { code: "AE", name: "الإمارات", flag: "🇦🇪" },
-  { code: "EG", name: "مصر", flag: "🇪🇬" },
-  { code: "KW", name: "الكويت", flag: "🇰🇼" },
-  { code: "QA", name: "قطر", flag: "🇶🇦" },
-  { code: "BH", name: "البحرين", flag: "🇧🇭" },
-  { code: "OM", name: "عمان", flag: "🇴🇲" },
-  { code: "JO", name: "الأردن", flag: "🇯🇴" },
-  { code: "IQ", name: "العراق", flag: "🇮🇶" },
-  { code: "LB", name: "لبنان", flag: "🇱🇧" },
-  { code: "MA", name: "المغرب", flag: "🇲🇦" },
-  { code: "TN", name: "تونس", flag: "🇹🇳" },
-  { code: "DZ", name: "الجزائر", flag: "🇩🇿" },
-  { code: "TR", name: "تركيا", flag: "🇹🇷" },
-  { code: "US", name: "أمريكا", flag: "🇺🇸" },
-  { code: "GB", name: "بريطانيا", flag: "🇬🇧" },
-  { code: "FR", name: "فرنسا", flag: "🇫🇷" },
-  { code: "DE", name: "ألمانيا", flag: "🇩🇪" },
-];
 
 const vipBadges: Record<string, { color: string; icon: typeof Crown; label: string }> = {
   diamond: { color: "from-cyan-400 to-blue-500", icon: Crown, label: "Diamond" },
@@ -147,6 +127,10 @@ export function Profile() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaSetup, setTwoFaSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [twoFaCode, setTwoFaCode] = useState("");
+  const [twoFaLoading, setTwoFaLoading] = useState(false);
+  const [twoFaError, setTwoFaError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState(defaultUser.notifications);
   const [saving, setSaving] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -199,6 +183,7 @@ export function Profile() {
           sessions: [],
           joinDate: u.createdAt || "",
         });
+        setTwoFaEnabled(!!u.twoFactorEnabled);
       }
     } catch {
       // Will show default empty state
@@ -607,7 +592,7 @@ export function Profile() {
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldCountry")}</p>
                 <select value={user.country} onChange={async (e) => { const v = e.target.value; setUser({ ...user, country: v }); try { await profileApi.updateProfile(1, { country: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
-                  {countries.map(c => (<option key={c.code} value={c.code} className="bg-[#1a1a2e] text-white">{c.flag} {c.name}</option>))}
+                  {COUNTRIES.map(c => (<option key={c.code} value={c.code} className="bg-[#1a1a2e] text-white">{c.flag} {c.nameAr}</option>))}
                 </select>
               </div>
             </div>
@@ -699,7 +684,114 @@ export function Profile() {
               </div>
             </div>
             <div className="border-t border-white/5 pt-4">
-              <SectionToggle label={t("profile.twoFA")} desc={t("profile.twoFADesc")} enabled={twoFaEnabled} onChange={() => setTwoFaEnabled(!twoFaEnabled)} />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white font-bold text-sm">{t("profile.twoFA", "المصادقة الثنائية")}</p>
+                  <p className="text-white/40 text-xs mt-0.5">{t("profile.twoFADesc", "حماية إضافية عند تسجيل الدخول")}</p>
+                </div>
+                {twoFaEnabled ? (
+                  <span className="text-xs bg-green-500/20 text-green-400 px-2.5 py-1 rounded-full font-bold border border-green-500/20">{t("common.active", "مفعّل")}</span>
+                ) : (
+                  <span className="text-xs bg-white/10 text-white/40 px-2.5 py-1 rounded-full font-bold">{t("common.inactive", "معطّل")}</span>
+                )}
+              </div>
+
+              {!twoFaEnabled && !twoFaSetup && (
+                <button
+                  onClick={async () => {
+                    setTwoFaLoading(true); setTwoFaError(null);
+                    try {
+                      const res = await authApi.setup2FA();
+                      setTwoFaSetup(res.data);
+                    } catch (err: any) {
+                      setTwoFaError(err?.message || "خطأ");
+                    } finally { setTwoFaLoading(false); }
+                  }}
+                  disabled={twoFaLoading}
+                  className="mt-3 w-full py-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-sm hover:bg-primary/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {twoFaLoading ? <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Shield className="w-4 h-4" />}
+                  {t("profile.enable2FA", "تفعيل المصادقة الثنائية")}
+                </button>
+              )}
+
+              {twoFaSetup && (
+                <div className="mt-3 space-y-3">
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-center">
+                    <p className="text-white/60 text-xs mb-2">{t("profile.scanQR", "امسح هذا الرمز بتطبيق المصادقة (Google Authenticator)")}</p>
+                    <div className="bg-white rounded-xl p-3 inline-block">
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(twoFaSetup.otpauthUri)}`} alt="QR" className="w-[180px] h-[180px]" />
+                    </div>
+                    <p className="text-white/40 text-[10px] mt-2 font-mono break-all" dir="ltr">{twoFaSetup.secret}</p>
+                  </div>
+                  <input
+                    type="text" inputMode="numeric" maxLength={6}
+                    value={twoFaCode}
+                    onChange={(e) => setTwoFaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    className="w-full text-center text-2xl tracking-[0.4em] font-mono px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                    dir="ltr"
+                  />
+                  {twoFaError && <p className="text-destructive text-xs bg-destructive/10 px-3 py-2 rounded-lg">{twoFaError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        if (twoFaCode.length !== 6) return;
+                        setTwoFaLoading(true); setTwoFaError(null);
+                        try {
+                          await authApi.verifySetup2FA(twoFaCode);
+                          setTwoFaEnabled(true);
+                          setTwoFaSetup(null);
+                          setTwoFaCode("");
+                        } catch (err: any) {
+                          setTwoFaError(err?.message || "رمز غير صحيح");
+                        } finally { setTwoFaLoading(false); }
+                      }}
+                      disabled={twoFaCode.length !== 6 || twoFaLoading}
+                      className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary to-secondary text-white font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {twoFaLoading ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                      {t("profile.verify", "تحقق")}
+                    </button>
+                    <button onClick={() => { setTwoFaSetup(null); setTwoFaCode(""); setTwoFaError(null); }} className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/10">
+                      {t("common.cancel", "إلغاء")}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {twoFaEnabled && (
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text" inputMode="numeric" maxLength={6}
+                      value={twoFaCode}
+                      onChange={(e) => setTwoFaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder={t("profile.enterCodeToDisable", "أدخل الرمز لإلغاء التفعيل")}
+                      className="flex-1 text-center font-mono px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 text-sm focus:outline-none focus:border-primary"
+                      dir="ltr"
+                    />
+                    <button
+                      onClick={async () => {
+                        if (twoFaCode.length !== 6) return;
+                        setTwoFaLoading(true); setTwoFaError(null);
+                        try {
+                          await authApi.disable2FA(twoFaCode);
+                          setTwoFaEnabled(false);
+                          setTwoFaCode("");
+                        } catch (err: any) {
+                          setTwoFaError(err?.message || "رمز غير صحيح");
+                        } finally { setTwoFaLoading(false); }
+                      }}
+                      disabled={twoFaCode.length !== 6 || twoFaLoading}
+                      className="px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive font-bold text-sm hover:bg-destructive/20 disabled:opacity-50"
+                    >
+                      {t("profile.disable2FA", "إلغاء")}
+                    </button>
+                  </div>
+                  {twoFaError && <p className="text-destructive text-xs bg-destructive/10 px-3 py-2 rounded-lg">{twoFaError}</p>}
+                </div>
+              )}
             </div>
             <div className="border-t border-white/5 pt-4">
               <p className="text-white font-bold text-sm mb-3 flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" />{t("profile.activeSessions")}</p>

@@ -2,56 +2,7 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-// Country data with flags
-const COUNTRIES = [
-  { code: "EG", flag: "🇪🇬", nameAr: "مصر", nameEn: "Egypt" },
-  { code: "SA", flag: "🇸🇦", nameAr: "السعودية", nameEn: "Saudi Arabia" },
-  { code: "AE", flag: "🇦🇪", nameAr: "الإمارات", nameEn: "UAE" },
-  { code: "KW", flag: "🇰🇼", nameAr: "الكويت", nameEn: "Kuwait" },
-  { code: "QA", flag: "🇶🇦", nameAr: "قطر", nameEn: "Qatar" },
-  { code: "BH", flag: "🇧🇭", nameAr: "البحرين", nameEn: "Bahrain" },
-  { code: "OM", flag: "🇴🇲", nameAr: "عُمان", nameEn: "Oman" },
-  { code: "IQ", flag: "🇮🇶", nameAr: "العراق", nameEn: "Iraq" },
-  { code: "JO", flag: "🇯🇴", nameAr: "الأردن", nameEn: "Jordan" },
-  { code: "LB", flag: "🇱🇧", nameAr: "لبنان", nameEn: "Lebanon" },
-  { code: "SY", flag: "🇸🇾", nameAr: "سوريا", nameEn: "Syria" },
-  { code: "PS", flag: "🇵🇸", nameAr: "فلسطين", nameEn: "Palestine" },
-  { code: "YE", flag: "🇾🇪", nameAr: "اليمن", nameEn: "Yemen" },
-  { code: "LY", flag: "🇱🇾", nameAr: "ليبيا", nameEn: "Libya" },
-  { code: "TN", flag: "🇹🇳", nameAr: "تونس", nameEn: "Tunisia" },
-  { code: "DZ", flag: "🇩🇿", nameAr: "الجزائر", nameEn: "Algeria" },
-  { code: "MA", flag: "🇲🇦", nameAr: "المغرب", nameEn: "Morocco" },
-  { code: "SD", flag: "🇸🇩", nameAr: "السودان", nameEn: "Sudan" },
-  { code: "TR", flag: "🇹🇷", nameAr: "تركيا", nameEn: "Turkey" },
-  { code: "US", flag: "🇺🇸", nameAr: "أمريكا", nameEn: "United States" },
-  { code: "GB", flag: "🇬🇧", nameAr: "بريطانيا", nameEn: "United Kingdom" },
-  { code: "DE", flag: "🇩🇪", nameAr: "ألمانيا", nameEn: "Germany" },
-  { code: "FR", flag: "🇫🇷", nameAr: "فرنسا", nameEn: "France" },
-  { code: "ES", flag: "🇪🇸", nameAr: "إسبانيا", nameEn: "Spain" },
-  { code: "IT", flag: "🇮🇹", nameAr: "إيطاليا", nameEn: "Italy" },
-  { code: "NL", flag: "🇳🇱", nameAr: "هولندا", nameEn: "Netherlands" },
-  { code: "SE", flag: "🇸🇪", nameAr: "السويد", nameEn: "Sweden" },
-  { code: "CA", flag: "🇨🇦", nameAr: "كندا", nameEn: "Canada" },
-  { code: "AU", flag: "🇦🇺", nameAr: "أستراليا", nameEn: "Australia" },
-  { code: "BR", flag: "🇧🇷", nameAr: "البرازيل", nameEn: "Brazil" },
-  { code: "IN", flag: "🇮🇳", nameAr: "الهند", nameEn: "India" },
-  { code: "PK", flag: "🇵🇰", nameAr: "باكستان", nameEn: "Pakistan" },
-  { code: "MY", flag: "🇲🇾", nameAr: "ماليزيا", nameEn: "Malaysia" },
-  { code: "ID", flag: "🇮🇩", nameAr: "إندونيسيا", nameEn: "Indonesia" },
-  { code: "JP", flag: "🇯🇵", nameAr: "اليابان", nameEn: "Japan" },
-  { code: "KR", flag: "🇰🇷", nameAr: "كوريا الجنوبية", nameEn: "South Korea" },
-  { code: "CN", flag: "🇨🇳", nameAr: "الصين", nameEn: "China" },
-  { code: "RU", flag: "🇷🇺", nameAr: "روسيا", nameEn: "Russia" },
-  { code: "ZA", flag: "🇿🇦", nameAr: "جنوب أفريقيا", nameEn: "South Africa" },
-  { code: "NG", flag: "🇳🇬", nameAr: "نيجيريا", nameEn: "Nigeria" },
-  { code: "MX", flag: "🇲🇽", nameAr: "المكسيك", nameEn: "Mexico" },
-  { code: "AR", flag: "🇦🇷", nameAr: "الأرجنتين", nameEn: "Argentina" },
-  { code: "CL", flag: "🇨🇱", nameAr: "تشيلي", nameEn: "Chile" },
-  { code: "CO", flag: "🇨🇴", nameAr: "كولومبيا", nameEn: "Colombia" },
-  { code: "PH", flag: "🇵🇭", nameAr: "الفلبين", nameEn: "Philippines" },
-  { code: "TH", flag: "🇹🇭", nameAr: "تايلاند", nameEn: "Thailand" },
-];
+import { COUNTRIES } from "@/lib/countries";
 
 interface CountrySelectorProps {
   isOpen: boolean;
@@ -158,5 +109,3 @@ export function CountrySelector({ isOpen, onClose, selectedCountry, onSelect }: 
     </motion.div>
   );
 }
-
-export { COUNTRIES };

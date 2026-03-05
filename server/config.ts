@@ -85,6 +85,18 @@ export function validateEnv(): EnvConfig {
     }
   }
 
+  // ── Dev-mode secret fallbacks (never used in production) ──
+  if (config.NODE_ENV !== "production") {
+    if (!config.SESSION_SECRET) {
+      config.SESSION_SECRET = "dev-session-secret-NOT-FOR-PRODUCTION-" + Date.now().toString(36);
+      console.warn("⚠️  Using auto-generated SESSION_SECRET (dev only)");
+    }
+    if (!config.JWT_SECRET) {
+      config.JWT_SECRET = "dev-jwt-secret-NOT-FOR-PRODUCTION-" + Date.now().toString(36);
+      console.warn("⚠️  Using auto-generated JWT_SECRET (dev only)");
+    }
+  }
+
   _config = config;
   return config;
 }

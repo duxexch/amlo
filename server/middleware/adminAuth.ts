@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { createLogger } from "../logger";
+import { getRedis } from "../redis";
 const log = (msg: string, _src?: string) => authLog.info(msg);
 const authLog = createLogger("adminAuth");
 
@@ -53,39 +54,49 @@ export function requireAdminRole(...roles: string[]) {
 
 /**
  * Middleware: Rate limiter for admin login.
- * Simple in-memory rate limiter — replace with Redis in production.
+ * Redis-backed rate limiter — survives restarts and works across cluster nodes.
  */
-const loginAttempts = new Map<string, { count: number; lastAttempt: number }>();
 const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const WINDOW_SECONDS = 15 * 60; // 15 minutes
+const RATE_LIMIT_PREFIX = "ablox:admin_rate:";
 
-export function rateLimitLogin(req: Request, res: Response, next: NextFunction) {
+export async function rateLimitLogin(req: Request, res: Response, next: NextFunction) {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
-  const now = Date.now();
-  const record = loginAttempts.get(ip);
+  const redis = getRedis();
 
-  if (record) {
-    if (now - record.lastAttempt > WINDOW_MS) {
-      // Reset window
-      loginAttempts.set(ip, { count: 1, lastAttempt: now });
-    } else if (record.count >= MAX_ATTEMPTS) {
-      log(`Rate limit exceeded for IP: ${ip}`, "admin-auth");
-      return res.status(429).json({
-        success: false,
-        message: "تم تجاوز عدد المحاولات المسموحة. حاول بعد 15 دقيقة.",
-      });
-    } else {
-      record.count++;
-      record.lastAttempt = now;
-    }
-  } else {
-    loginAttempts.set(ip, { count: 1, lastAttempt: now });
+  // FAIL-CLOSED: deny login attempts when Redis is unavailable (prevents brute-force bypass)
+  if (!redis) {
+    authLog.warn(`Rate limiter: Redis unavailable — blocking login attempt from ${ip}`);
+    return res.status(503).json({
+      success: false,
+      message: "الخدمة غير متاحة مؤقتاً. حاول لاحقاً.",
+    });
   }
 
-  // Cleanup old entries periodically
-  if (loginAttempts.size > 10000) {
-    Array.from(loginAttempts.entries()).forEach(([key, val]) => {
-      if (now - val.lastAttempt > WINDOW_MS) loginAttempts.delete(key);
+  try {
+    const key = `${RATE_LIMIT_PREFIX}${ip}`;
+    const current = await redis.incr(key);
+
+    // Set expiry on first attempt
+    if (current === 1) {
+      await redis.expire(key, WINDOW_SECONDS);
+    }
+
+    if (current > MAX_ATTEMPTS) {
+      const ttl = await redis.ttl(key);
+      const minutesLeft = Math.ceil(ttl / 60);
+      log(`Rate limit exceeded for IP: ${ip} (${current} attempts)`, "admin-auth");
+      return res.status(429).json({
+        success: false,
+        message: `تم تجاوز عدد المحاولات المسموحة. حاول بعد ${minutesLeft} دقيقة.`,
+      });
+    }
+  } catch (err) {
+    // FAIL-CLOSED: if Redis errors, block the request (prevents brute-force bypass)
+    authLog.warn(`Rate limiter Redis error — blocking request from ${ip}: ${err}`);
+    return res.status(503).json({
+      success: false,
+      message: "الخدمة غير متاحة مؤقتاً. حاول لاحقاً.",
     });
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Users, DollarSign, Activity, UserCog, TrendingUp, TrendingDown,
+  Users, DollarSign, Activity, UserCog,
   Clock, Flag, Eye, ArrowUpRight,
 } from "lucide-react";
 import { adminStats } from "@/lib/adminApi";
@@ -49,8 +49,6 @@ export function DashboardPage() {
       icon: Users,
       color: "text-blue-400",
       bg: "bg-blue-400/10 border-blue-400/20",
-      trend: "+12.5%",
-      up: true,
     },
     {
       label: t("admin.dashboard.todayRevenue"),
@@ -59,8 +57,6 @@ export function DashboardPage() {
       icon: DollarSign,
       color: "text-green-400",
       bg: "bg-green-400/10 border-green-400/20",
-      trend: "+8.3%",
-      up: true,
     },
     {
       label: t("admin.dashboard.activeStreams"),
@@ -69,8 +65,6 @@ export function DashboardPage() {
       icon: Activity,
       color: "text-orange-400",
       bg: "bg-orange-400/10 border-orange-400/20",
-      trend: "+5.2%",
-      up: true,
     },
     {
       label: t("admin.dashboard.pendingReports"),
@@ -79,8 +73,6 @@ export function DashboardPage() {
       icon: Flag,
       color: "text-red-400",
       bg: "bg-red-400/10 border-red-400/20",
-      trend: "-3.1%",
-      up: false,
     },
   ];
 
@@ -114,10 +106,6 @@ export function DashboardPage() {
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center border ${stat.bg}`}>
                 <stat.icon className={`w-5 h-5 ${stat.color}`} />
               </div>
-              <span className={`text-xs font-bold flex items-center gap-1 px-2 py-1 rounded-lg ${stat.up ? "text-green-400 bg-green-400/10" : "text-red-400 bg-red-400/10"}`}>
-                {stat.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                {stat.trend}
-              </span>
             </div>
             <h3 className="text-2xl font-black text-white mb-1">{stat.value}</h3>
             <p className="text-xs text-white/40 font-medium">{stat.label}</p>

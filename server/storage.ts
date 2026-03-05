@@ -1,6 +1,7 @@
 import { eq, desc, asc, sql, and, or, like, ilike, count } from "drizzle-orm";
 import { getDb } from "./db";
 import { cacheGet, cacheSet, cacheDel } from "./redis";
+import { escapeLike } from "./utils/validation";
 import * as schema from "@shared/schema";
 import type { User, InsertUser, Admin, InsertAdmin, UpgradeRequest, WalletTransaction, GiftTransaction, FraudAlert, UserReport } from "@shared/schema";
 
@@ -84,7 +85,7 @@ export class DatabaseStorage {
     const conditions: any[] = [];
 
     if (filters.search) {
-      const q = `%${filters.search}%`;
+      const q = `%${escapeLike(filters.search)}%`;
       conditions.push(or(ilike(schema.users.username, q), ilike(schema.users.displayName, q), ilike(schema.users.email, q)));
     }
     if (filters.status) conditions.push(eq(schema.users.status, filters.status));
@@ -210,6 +211,33 @@ export class DatabaseStorage {
   async getAgents() {
     if (!this.db) return [];
     return this.db.select().from(schema.agents).orderBy(desc(schema.agents.createdAt));
+  }
+
+  /** DB-side filtered + paginated agent search (avoids full table scan + JS filter) */
+  async getAgentsFiltered(opts: { search?: string; status?: string; page: number; limit: number }): Promise<{ data: typeof schema.agents.$inferSelect[]; total: number }> {
+    if (!this.db) return { data: [], total: 0 };
+    const conditions: any[] = [];
+    if (opts.search) {
+      const q = `%${escapeLike(opts.search)}%`;
+      conditions.push(
+        or(
+          ilike(schema.agents.name, q),
+          ilike(schema.agents.email, q),
+          ilike(schema.agents.referralCode, q),
+        )
+      );
+    }
+    if (opts.status) {
+      conditions.push(eq(schema.agents.status, opts.status));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countResult] = await this.db.select({ count: count() }).from(schema.agents).where(where);
+    const data = await this.db.select().from(schema.agents)
+      .where(where)
+      .orderBy(desc(schema.agents.createdAt))
+      .limit(opts.limit)
+      .offset((opts.page - 1) * opts.limit);
+    return { data, total: countResult?.count || 0 };
   }
 
   async getAgentsCount(): Promise<number> {
@@ -555,19 +583,24 @@ export class DatabaseStorage {
 
   async getFraudStats() {
     if (!this.db) return { total: 0, pending: 0, investigating: 0, resolved: 0, dismissed: 0, critical: 0 };
-    const total = await this.db.select({ count: count() }).from(schema.fraudAlerts);
-    const pending = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "pending"));
-    const investigating = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "investigating"));
-    const resolved = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "resolved"));
-    const dismissed = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.status, "dismissed"));
-    const critical = await this.db.select({ count: count() }).from(schema.fraudAlerts).where(eq(schema.fraudAlerts.severity, "critical"));
+    const result = await this.db
+      .select({
+        total: count(),
+        pending: sql<number>`count(*) filter (where ${schema.fraudAlerts.status} = 'pending')`,
+        investigating: sql<number>`count(*) filter (where ${schema.fraudAlerts.status} = 'investigating')`,
+        resolved: sql<number>`count(*) filter (where ${schema.fraudAlerts.status} = 'resolved')`,
+        dismissed: sql<number>`count(*) filter (where ${schema.fraudAlerts.status} = 'dismissed')`,
+        critical: sql<number>`count(*) filter (where ${schema.fraudAlerts.severity} = 'critical')`,
+      })
+      .from(schema.fraudAlerts);
+    const row = result[0];
     return {
-      total: total[0]?.count || 0,
-      pending: pending[0]?.count || 0,
-      investigating: investigating[0]?.count || 0,
-      resolved: resolved[0]?.count || 0,
-      dismissed: dismissed[0]?.count || 0,
-      critical: critical[0]?.count || 0,
+      total: row?.total || 0,
+      pending: row?.pending || 0,
+      investigating: row?.investigating || 0,
+      resolved: row?.resolved || 0,
+      dismissed: row?.dismissed || 0,
+      critical: row?.critical || 0,
     };
   }
 
@@ -1055,19 +1088,21 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async deleteUser(id: string) {
     if (!this.db) return;
-    // Delete related data
-    await this.db.delete(schema.userProfiles).where(eq(schema.userProfiles.userId, id));
-    await this.db.delete(schema.friendProfileVisibility)
-      .where(or(eq(schema.friendProfileVisibility.userId, id), eq(schema.friendProfileVisibility.friendId, id)));
-    await this.db.delete(schema.notificationPreferences).where(eq(schema.notificationPreferences.userId, id));
-    await this.db.delete(schema.friendships)
-      .where(or(eq(schema.friendships.senderId, id), eq(schema.friendships.receiverId, id)));
-    await this.db.delete(schema.chatBlocks)
-      .where(or(eq(schema.chatBlocks.blockerId, id), eq(schema.chatBlocks.blockedId, id)));
-    await this.db.delete(schema.userFollows)
-      .where(or(eq(schema.userFollows.followerId, id), eq(schema.userFollows.followingId, id)));
-    // Finally delete the user
-    await this.db.delete(schema.users).where(eq(schema.users.id, id));
+    // Wrap all deletions in a transaction to prevent partial deletes
+    await this.db.transaction(async (tx) => {
+      await tx.delete(schema.userProfiles).where(eq(schema.userProfiles.userId, id));
+      await tx.delete(schema.friendProfileVisibility)
+        .where(or(eq(schema.friendProfileVisibility.userId, id), eq(schema.friendProfileVisibility.friendId, id)));
+      await tx.delete(schema.notificationPreferences).where(eq(schema.notificationPreferences.userId, id));
+      await tx.delete(schema.friendships)
+        .where(or(eq(schema.friendships.senderId, id), eq(schema.friendships.receiverId, id)));
+      await tx.delete(schema.chatBlocks)
+        .where(or(eq(schema.chatBlocks.blockerId, id), eq(schema.chatBlocks.blockedId, id)));
+      await tx.delete(schema.userFollows)
+        .where(or(eq(schema.userFollows.followerId, id), eq(schema.userFollows.followingId, id)));
+      // Finally delete the user
+      await tx.delete(schema.users).where(eq(schema.users.id, id));
+    });
   }
 }
 

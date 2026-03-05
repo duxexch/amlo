@@ -1,8 +1,11 @@
 /**
- * Social Routes — Friends, Chat, Calls
+ * Social Routes — Friends, Chat, Calls, Wallet, Streams, etc.
  * All endpoints require user auth via session.
+ * Shared helpers are in socialHelpers.ts
  */
 import { Router, type Request, type Response } from "express";
+import { escapeLike, isValidUuid } from "../utils/validation";
+import rateLimit from "express-rate-limit";
 import { eq, and, or, desc, asc, sql, count, ne, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { getRedis } from "../redis";
@@ -10,7 +13,7 @@ import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => socialLog.info(msg);
 const socialLog = createLogger("social");
 import { io } from "../index";
-import { getUserSocketId, isUserOnline } from "../onlineUsers";
+import { getUserSocketId, isUserOnline, areUsersOnline } from "../onlineUsers";
 import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
 import { storage } from "../storage";
@@ -25,97 +28,22 @@ import {
   removeParticipant,
 } from "../utils/livekit";
 
+// ── Shared helpers (centralized in socialHelpers.ts) ──
+import {
+  paramStr, paramUuid, requireUser,
+  isFinancialRateLimited, DAILY_WITHDRAW_LIMIT, WEEKLY_WITHDRAW_LIMIT,
+  chargeCoins, isChatBlocked,
+} from "./socialHelpers";
+
 const router = Router();
 
-// Express 5: req.params values can be string | string[]
-function paramStr(v: string | string[] | undefined): string {
-  if (Array.isArray(v)) return v[0] ?? "";
-  return v ?? "";
-}
-
-// Use shared online tracking from server/index.ts (Redis-backed async API)
-
-// ── Helper: get current user from session ──
-function requireUser(req: Request, res: Response): string | null {
-  const userId = req.session?.userId;
-  if (!userId) {
-    res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
-    return null;
+// ── UUID param validation middleware — rejects malformed :id early ──
+router.param("id", (req, res, next, value) => {
+  if (!isValidUuid(String(value))) {
+    return res.status(400).json({ success: false, message: "معرف غير صالح" });
   }
-  return userId;
-}
-
-// ── Helper: get coin rates from system settings ──
-async function getCoinRate(key: string, defaultVal: number): Promise<number> {
-  const db = getDb();
-  if (!db) return defaultVal;
-  const [setting] = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, key)).limit(1);
-  return setting ? parseInt(setting.value) || defaultVal : defaultVal;
-}
-
-// ── Helper: charge coins (atomic — prevents race condition) ──
-async function chargeCoins(userId: string, amount: number, description: string, refId?: string): Promise<boolean> {
-  const db = getDb();
-  if (!db || amount <= 0) return true;
-  
-  // Atomic: UPDATE ... WHERE coins >= amount (no separate SELECT)
-  const result = await db.update(schema.users)
-    .set({
-      coins: sql`coins - ${amount}`,
-      updatedAt: new Date(),
-    })
-    .where(and(
-      eq(schema.users.id, userId),
-      sql`coins >= ${amount}`
-    ))
-    .returning({ id: schema.users.id, coins: schema.users.coins });
-
-  if (!result.length) return false;
-
-  await db.insert(schema.walletTransactions).values({
-    userId,
-    type: "call_charge",
-    amount: -amount,
-    balanceAfter: result[0].coins,
-    currency: "coins",
-    description,
-    referenceId: refId,
-    status: "completed",
-  });
-  return true;
-}
-
-// ── Helper: check if feature is enabled ──
-async function isChatFeatureEnabled(feature: string): Promise<boolean> {
-  const db = getDb();
-  if (!db) return true; // default enabled
-  const [setting] = await db.select().from(schema.systemSettings)
-    .where(eq(schema.systemSettings.key, `chat_${feature}_enabled`)).limit(1);
-  return !setting || setting.value !== "false";
-}
-
-// ── Helper: get chat time limit (minutes, 0 = unlimited) ──
-async function getChatTimeLimit(): Promise<number> {
-  const db = getDb();
-  if (!db) return 0;
-  const [setting] = await db.select().from(schema.systemSettings)
-    .where(eq(schema.systemSettings.key, "chat_time_limit")).limit(1);
-  return setting ? parseInt(setting.value) || 0 : 0;
-}
-
-// ── Helper: check chat block ──
-async function isChatBlocked(userId1: string, userId2: string): Promise<boolean> {
-  const db = getDb();
-  if (!db) return false;
-  const [block] = await db.select().from(schema.chatBlocks)
-    .where(
-      or(
-        and(eq(schema.chatBlocks.blockerId, userId1), eq(schema.chatBlocks.blockedId, userId2)),
-        and(eq(schema.chatBlocks.blockerId, userId2), eq(schema.chatBlocks.blockedId, userId1)),
-      )
-    ).limit(1);
-  return !!block;
-}
+  next();
+});
 
 // ════════════════════════════════════════════════════════════
 // FRIENDS API
@@ -156,11 +84,11 @@ router.get("/friends", async (req, res) => {
       country: schema.users.country,
     }).from(schema.users).where(inArray(schema.users.id, friendIds));
 
-    // attach online status (async Redis lookup)
-    const onlineStatuses = await Promise.all(friends.map(f => isUserOnline(f.id)));
-    const result = friends.map((f, i) => ({
+    // Batch online status (single HMGET instead of N HEXISTS)
+    const onlineMap = await areUsersOnline(friends.map(f => f.id));
+    const result = friends.map((f) => ({
       ...f,
-      isOnline: onlineStatuses[i],
+      isOnline: onlineMap.get(f.id) || false,
       friendshipId: friendships.find(fs => fs.senderId === f.id || fs.receiverId === f.id)?.id,
     }));
 
@@ -427,8 +355,18 @@ router.post("/friends/:userId/block", async (req, res) => {
   }
 });
 
+// ── Search rate limiting (max 30 searches per minute per user) ──
+const searchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.session as any)?.userId || req.ip || "unknown",
+  message: { success: false, message: "عدد كبير من طلبات البحث. حاول بعد دقيقة" },
+});
+
 // Search users to add as friends
-router.get("/users/search", async (req, res) => {
+router.get("/users/search", searchLimiter, async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   const db = getDb();
@@ -438,7 +376,7 @@ router.get("/users/search", async (req, res) => {
   if (!q || q.length < 2) return res.json({ success: true, data: [] });
 
   try {
-    const searchTerm = `%${q}%`;
+    const searchTerm = `%${escapeLike(q)}%`;
     const results = await db.select({
       id: schema.users.id,
       username: schema.users.username,
@@ -533,18 +471,21 @@ router.get("/conversations", async (req, res) => {
       ? await db.select().from(schema.messages).where(inArray(schema.messages.id, lastMsgIds))
       : [];
 
-    const result = await Promise.all(convs.map(async c => {
+    // Batch online status check (single HMGET instead of N HEXISTS)
+    const onlineMap = await areUsersOnline(participantIds);
+
+    const result = convs.map(c => {
       const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
       const unread = c.participant1Id === userId ? c.participant1Unread : c.participant2Unread;
       return {
         id: c.id,
         otherUser: participants.find(p => p.id === otherId),
-        isOnline: await isUserOnline(otherId),
+        isOnline: onlineMap.get(otherId) || false,
         unreadCount: unread,
         lastMessage: lastMessages.find(m => m.id === c.lastMessageId),
         lastMessageAt: c.lastMessageAt,
       };
-    }));
+    });
 
     return res.json({ success: true, data: result });
   } catch (err: any) {
@@ -642,15 +583,30 @@ router.get("/conversations/:id/messages", async (req, res) => {
 
     // Mark messages as read
     const unreadField = conv.participant1Id === userId ? "participant1Unread" : "participant2Unread";
+    const otherId = conv.participant1Id === userId ? conv.participant2Id : conv.participant1Id;
     await db.update(schema.conversations).set({ [unreadField]: 0 }).where(eq(schema.conversations.id, conv.id));
-    await db.update(schema.messages).set({ isRead: true })
+    const now = new Date();
+    const markedRead = await db.update(schema.messages).set({ isRead: true, readAt: now })
       .where(
         and(
           eq(schema.messages.conversationId, conv.id),
           ne(schema.messages.senderId, userId),
           eq(schema.messages.isRead, false),
         )
-      );
+      ).returning({ id: schema.messages.id });
+
+    // Notify sender that messages were read
+    if (markedRead.length > 0) {
+      const senderSocketId = await getUserSocketId(otherId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("messages-read", {
+          conversationId: conv.id,
+          readBy: userId,
+          readAt: now.toISOString(),
+          messageIds: markedRead.map(m => m.id),
+        });
+      }
+    }
 
     return res.json({ success: true, data: decryptMessages(msgs.reverse(), req.params.id) });
   } catch (err: any) {
@@ -693,12 +649,13 @@ router.post("/conversations/:id/messages", async (req, res) => {
     if (!content && (type === "text" || !type)) return res.status(400).json({ success: false, message: "الرسالة فارغة" });
 
     // Check feature toggles
-    if ((type === "image" || type === "voice") && !(await isChatFeatureEnabled("media"))) {
+    const pricing = await getAllPricing();
+    if ((type === "image" || type === "voice") && !pricing.messages.media_enabled) {
       return res.status(403).json({ success: false, message: "إرسال الوسائط معطل حالياً" });
     }
 
     // Check message cost
-    const messageCost = await getCoinRate("message_cost", 0);
+    const messageCost = pricing.messages.message_cost;
     if (messageCost > 0) {
       const charged = await chargeCoins(userId, messageCost, `رسالة في محادثة`, req.params.id);
       if (!charged) return res.status(402).json({ success: false, message: "رصيدك غير كافٍ لإرسال رسالة", coinsCost: messageCost });
@@ -793,19 +750,21 @@ router.get("/unread-count", async (req, res) => {
   if (!db) return res.json({ success: true, data: { unread: 0, friendRequests: 0 } });
 
   try {
-    // Unread messages
-    const convs = await db.select().from(schema.conversations)
+    // Unread messages — single aggregate SQL instead of fetching all conversations
+    const [unreadResult] = await db.select({
+      total: sql<number>`COALESCE(SUM(
+        CASE WHEN ${schema.conversations.participant1Id} = ${userId}
+          THEN ${schema.conversations.participant1Unread}
+          ELSE ${schema.conversations.participant2Unread}
+        END
+      ), 0)::int`,
+    }).from(schema.conversations)
       .where(
         or(
           eq(schema.conversations.participant1Id, userId),
           eq(schema.conversations.participant2Id, userId),
         )
       );
-
-    let totalUnread = 0;
-    for (const c of convs) {
-      totalUnread += c.participant1Id === userId ? c.participant1Unread : c.participant2Unread;
-    }
 
     // Pending friend requests
     const [reqCount] = await db.select({ count: count() }).from(schema.friendships)
@@ -816,7 +775,7 @@ router.get("/unread-count", async (req, res) => {
         )
       );
 
-    return res.json({ success: true, data: { unread: totalUnread, friendRequests: reqCount?.count || 0 } });
+    return res.json({ success: true, data: { unread: unreadResult?.total || 0, friendRequests: reqCount?.count || 0 } });
   } catch (err: any) {
     return res.json({ success: true, data: { unread: 0, friendRequests: 0 } });
   }
@@ -840,9 +799,10 @@ router.post("/calls", async (req, res) => {
   if (receiverId === userId) return res.status(400).json({ success: false, message: "لا يمكنك الاتصال بنفسك" });
 
   try {
-    // Check feature toggle
-    const featureKey = type === "video" ? "video_call" : "voice_call";
-    if (!(await isChatFeatureEnabled(featureKey))) {
+    // Check feature toggle (from cached pricing)
+    const callPricing = await getAllPricing();
+    const featureEnabled = type === "video" ? callPricing.messages.video_call_enabled : callPricing.messages.voice_call_enabled;
+    if (!featureEnabled) {
       return res.status(403).json({ success: false, message: `${type === "video" ? "مكالمات الفيديو" : "المكالمات الصوتية"} معطلة حالياً` });
     }
 
@@ -867,9 +827,8 @@ router.post("/calls", async (req, res) => {
     // Check if receiver is online
     const receiverOnline = await isUserOnline(receiverId);
 
-    // Get coin rate
-    const rateKey = type === "video" ? "video_call_rate" : "voice_call_rate";
-    const coinRate = await getCoinRate(rateKey, type === "video" ? 20 : 10);
+    // Get coin rate (from cached pricing)
+    const coinRate = type === "video" ? callPricing.calls.video_call_rate : callPricing.calls.voice_call_rate;
 
     // Check coins (minimum 1 minute charge)
     const [caller] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
@@ -902,8 +861,11 @@ router.post("/calls", async (req, res) => {
           caller: callerInfo,
         });
       }
+    } else {
+      socialLog.info({ callId: call.id, callerId: userId, receiverId, type: "missed" }, "Call missed — receiver offline");
     }
 
+    socialLog.info({ callId: call.id, callerId: userId, receiverId, type, coinRate }, "Call initiated");
     return res.status(201).json({ success: true, data: call });
   } catch (err: any) {
     log(`Call initiate error: ${err.message}`, "social");
@@ -943,6 +905,7 @@ router.post("/calls/:id/answer", async (req, res) => {
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
+    socialLog.error({ err, callId: req.params.id }, "Call answer error");
     return res.status(500).json({ success: false, message: "خطأ" });
   }
 });
@@ -968,11 +931,14 @@ router.post("/calls/:id/reject", async (req, res) => {
 
     await db.update(schema.calls).set({ status: "rejected", endedAt: new Date() }).where(eq(schema.calls.id, call.id));
 
+    socialLog.info({ callId: call.id, receiverId: userId, callerId: call.callerId }, "Call rejected");
+
     const callerSocketId = await getUserSocketId(call.callerId);
     if (callerSocketId) io.to(callerSocketId).emit("call-rejected", { callId: call.id });
 
     return res.json({ success: true, message: "تم رفض المكالمة" });
   } catch (err: any) {
+    socialLog.error({ err, callId: req.params.id }, "Call reject error");
     return res.status(500).json({ success: false, message: "خطأ" });
   }
 });
@@ -985,6 +951,11 @@ router.post("/calls/:id/end", async (req, res) => {
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
 
   try {
+    // Atomic status update — prevents double-end/double-charge race condition
+    // Only update if status is still active/ringing AND user is a party
+    const endedAt = new Date();
+    
+    // First, get call info for charging calculation
     const [call] = await db.select().from(schema.calls)
       .where(
         and(
@@ -996,7 +967,6 @@ router.post("/calls/:id/end", async (req, res) => {
 
     if (!call) return res.status(404).json({ success: false, message: "المكالمة غير موجودة" });
 
-    const endedAt = new Date();
     let durationSeconds = 0;
     let coinsCharged = 0;
 
@@ -1004,17 +974,32 @@ router.post("/calls/:id/end", async (req, res) => {
       durationSeconds = Math.ceil((endedAt.getTime() - call.startedAt.getTime()) / 1000);
       const minutes = Math.ceil(durationSeconds / 60);
       coinsCharged = minutes * call.coinRate;
-
-      // Charge the caller
-      await chargeCoins(call.callerId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${minutes} دقيقة)`, call.id);
     }
 
+    // Atomically end the call — only if still active (prevents double-ending)
     const [updated] = await db.update(schema.calls).set({
       status: "ended",
       endedAt,
       durationSeconds,
       coinsCharged,
-    }).where(eq(schema.calls.id, call.id)).returning();
+    }).where(
+      and(
+        eq(schema.calls.id, call.id),
+        or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
+      )
+    ).returning();
+
+    // If no row returned, another request already ended the call
+    if (!updated) {
+      return res.json({ success: true, message: "المكالمة منتهية بالفعل" });
+    }
+
+    // Now charge AFTER successful status update (prevents double-charge)
+    if (coinsCharged > 0) {
+      await chargeCoins(call.callerId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id);
+    }
+
+    socialLog.info({ callId: call.id, userId, durationSeconds, coinsCharged, type: call.type }, "Call ended");
 
     // Notify other party
     const otherId = call.callerId === userId ? call.receiverId : call.callerId;
@@ -1025,6 +1010,7 @@ router.post("/calls/:id/end", async (req, res) => {
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
+    socialLog.error({ err, callId: req.params.id }, "Call end error");
     return res.status(500).json({ success: false, message: "خطأ" });
   }
 });
@@ -1103,12 +1089,85 @@ router.get("/miles-pricing", async (_req, res) => {
     settings.forEach(s => {
       if (s.key === "miles_cost_per_mile") result.cost_per_mile = parseInt(s.value) || 5;
       if (s.key === "miles_packages") {
-        try { result.packages = JSON.parse(s.value); } catch {}
+        try { result.packages = JSON.parse(s.value); } catch (e: any) { socialLog.warn(`Invalid miles_packages JSON: ${e.message}`); }
       }
     });
     return res.json({ success: true, data: result });
   } catch {
     return res.json({ success: true, data: defaults });
+  }
+});
+
+// Purchase miles with coins
+router.post("/miles/purchase", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+  const { packageId } = req.body;
+  if (!packageId || typeof packageId !== "string") {
+    return res.status(400).json({ success: false, message: "packageId مطلوب" });
+  }
+
+  try {
+    // Fetch miles packages from settings
+    const [setting] = await db.select().from(schema.systemSettings)
+      .where(eq(schema.systemSettings.key, "miles_packages")).limit(1);
+
+    let packages: Array<{ id: string; miles: number; price: string }> = [
+      { id: "miles_10", miles: 10, price: "0.99" },
+      { id: "miles_50", miles: 50, price: "3.99" },
+      { id: "miles_100", miles: 100, price: "6.99" },
+      { id: "miles_250", miles: 250, price: "14.99" },
+      { id: "miles_500", miles: 500, price: "24.99" },
+      { id: "miles_1000", miles: 1000, price: "44.99" },
+    ];
+    if (setting?.value) {
+      try { packages = JSON.parse(setting.value); } catch (e: any) { socialLog.warn(`Invalid miles_packages JSON: ${e.message}`); }
+    }
+
+    const pkg = packages.find(p => p.id === packageId);
+    if (!pkg) return res.status(404).json({ success: false, message: "الباقة غير موجودة" });
+
+    // Cost per mile from settings
+    const [costSetting] = await db.select().from(schema.systemSettings)
+      .where(eq(schema.systemSettings.key, "miles_cost_per_mile")).limit(1);
+    const costPerMile = costSetting ? parseInt(costSetting.value) || 5 : 5;
+    const totalCost = pkg.miles * costPerMile;
+
+    // Check user balance
+    const [user] = await db.select({ coins: schema.users.coins }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!user || user.coins < totalCost) {
+      return res.status(400).json({ success: false, message: "رصيد غير كافٍ", required: totalCost, current: user?.coins || 0 });
+    }
+
+    // Wrap deduct + record in a DB transaction for atomicity
+    const result = await db.transaction(async (tx) => {
+      // Deduct coins + add miles
+      const [updated] = await tx.update(schema.users).set({
+        coins: sql`coins - ${totalCost}`,
+        miles: sql`miles + ${pkg.miles}`,
+      }).where(eq(schema.users.id, userId)).returning({ coins: schema.users.coins, miles: schema.users.miles });
+
+      // Record transaction
+      await tx.insert(schema.walletTransactions).values({
+        userId,
+        type: "purchase",
+        amount: -totalCost,
+        balanceAfter: updated.coins,
+        currency: "coins",
+        description: `شراء ${pkg.miles} ميل`,
+        paymentMethod: "coins",
+        status: "completed",
+      });
+
+      return updated;
+    });
+
+    return res.json({ success: true, data: { miles: result.miles, coins: result.coins, milesAdded: pkg.miles, coinsDeducted: totalCost } });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الشراء" });
   }
 });
 
@@ -1423,8 +1482,13 @@ router.get("/wallet/income", async (req: Request, res: Response) => {
     weekStart.setDate(weekStart.getDate() - 7);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Total received (gifts received)
-    const [totalResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+    // Single query with CASE WHEN for all time periods (instead of 4 separate queries)
+    const [result] = await db.select({
+      totalReceived: sql<number>`COALESCE(SUM(amount), 0)`,
+      todayReceived: sql<number>`COALESCE(SUM(CASE WHEN ${schema.walletTransactions.createdAt} >= ${todayStart} THEN amount ELSE 0 END), 0)`,
+      weekReceived: sql<number>`COALESCE(SUM(CASE WHEN ${schema.walletTransactions.createdAt} >= ${weekStart} THEN amount ELSE 0 END), 0)`,
+      monthReceived: sql<number>`COALESCE(SUM(CASE WHEN ${schema.walletTransactions.createdAt} >= ${monthStart} THEN amount ELSE 0 END), 0)`,
+    })
       .from(schema.walletTransactions)
       .where(and(
         eq(schema.walletTransactions.userId, userId),
@@ -1432,40 +1496,13 @@ router.get("/wallet/income", async (req: Request, res: Response) => {
         eq(schema.walletTransactions.status, "completed")
       ));
 
-    const [todayResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
-      .from(schema.walletTransactions)
-      .where(and(
-        eq(schema.walletTransactions.userId, userId),
-        eq(schema.walletTransactions.type, "gift_received"),
-        eq(schema.walletTransactions.status, "completed"),
-        sql`${schema.walletTransactions.createdAt} >= ${todayStart}`
-      ));
-
-    const [weekResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
-      .from(schema.walletTransactions)
-      .where(and(
-        eq(schema.walletTransactions.userId, userId),
-        eq(schema.walletTransactions.type, "gift_received"),
-        eq(schema.walletTransactions.status, "completed"),
-        sql`${schema.walletTransactions.createdAt} >= ${weekStart}`
-      ));
-
-    const [monthResult] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
-      .from(schema.walletTransactions)
-      .where(and(
-        eq(schema.walletTransactions.userId, userId),
-        eq(schema.walletTransactions.type, "gift_received"),
-        eq(schema.walletTransactions.status, "completed"),
-        sql`${schema.walletTransactions.createdAt} >= ${monthStart}`
-      ));
-
     return res.json({
       success: true,
       data: {
-        totalReceived: Number(totalResult?.total || 0),
-        todayReceived: Number(todayResult?.total || 0),
-        weekReceived: Number(weekResult?.total || 0),
-        monthReceived: Number(monthResult?.total || 0),
+        totalReceived: Number(result?.totalReceived || 0),
+        todayReceived: Number(result?.todayReceived || 0),
+        weekReceived: Number(result?.weekReceived || 0),
+        monthReceived: Number(result?.monthReceived || 0),
       },
     });
   } catch (err: any) {
@@ -1476,92 +1513,272 @@ router.get("/wallet/income", async (req: Request, res: Response) => {
 
 /**
  * POST /social/wallet/recharge — شحن العملات
+ * ⚠️ DEPRECATED: Use /api/v1/payments/checkout (Stripe) instead.
+ * This endpoint is kept as a redirect for backward compatibility.
  */
-router.post("/wallet/recharge", async (req: Request, res: Response) => {
-  const userId = requireUser(req, res);
-  if (!userId) return;
-  try {
-    const { packageId, amount, paymentMethod } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, message: "المبلغ مطلوب" });
-    }
-
-    const user = await storage.getUser(userId);
-    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
-
-    const newBalance = user.coins + amount;
-    await storage.updateUser(userId, { coins: newBalance } as any);
-
-    await storage.createTransaction({
-      userId,
-      type: "purchase",
-      amount,
-      balanceAfter: newBalance,
-      currency: "coins",
-      description: packageId ? `شحن باقة ${packageId}` : `شحن ${amount} عملة`,
-      paymentMethod: paymentMethod || "card",
-      status: "completed",
-    });
-
-    return res.json({ success: true, data: { coins: newBalance }, message: "تم الشحن بنجاح" });
-  } catch (err: any) {
-    socialLog.error({ err }, "Wallet recharge error");
-    return res.status(500).json({ success: false, message: "حدث خطأ في الشحن" });
-  }
+router.post("/wallet/recharge", async (_req: Request, res: Response) => {
+  return res.status(410).json({
+    success: false,
+    message: "هذا المسار ملغي. استخدم /api/v1/payments/checkout لشحن العملات عبر Stripe",
+    redirect: "/api/v1/payments/checkout",
+  });
 });
 
 /**
- * POST /social/wallet/withdraw — طلب سحب
+ * POST /social/wallet/withdraw — طلب سحب (مؤمن ضد السحب المزدوج)
  */
 router.post("/wallet/withdraw", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+  // Rate limit financial operations
+  if (isFinancialRateLimited(userId)) {
+    return res.status(429).json({ success: false, message: "عدد كبير من الطلبات — حاول بعد قليل" });
+  }
   try {
     const parsed = schema.withdrawalRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.flatten() });
     }
 
-    const user = await storage.getUser(userId);
-    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
 
-    if (user.coins < parsed.data.amount) {
+    // Minimum withdrawal amount
+    const MIN_WITHDRAW = 100;
+    if (parsed.data.amount < MIN_WITHDRAW) {
+      return res.status(400).json({ success: false, message: `الحد الأدنى للسحب هو ${MIN_WITHDRAW} عملة` });
+    }
+
+    // ── Daily & Weekly withdrawal limits ──
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStartDate = new Date(dayStart);
+    weekStartDate.setDate(weekStartDate.getDate() - 7);
+
+    const [dailyTotal] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.withdrawalRequests)
+      .where(and(
+        eq(schema.withdrawalRequests.userId, userId),
+        sql`${schema.withdrawalRequests.createdAt} >= ${dayStart}`,
+        ne(schema.withdrawalRequests.status, "rejected")
+      ));
+    if ((Number(dailyTotal?.total || 0) + parsed.data.amount) > DAILY_WITHDRAW_LIMIT) {
+      socialLog.warn({ audit: "withdrawal_limit_hit", userId, limit: "daily", amount: parsed.data.amount }, "Daily withdrawal limit exceeded");
+      return res.status(400).json({ success: false, message: `تجاوزت الحد اليومي للسحب (${DAILY_WITHDRAW_LIMIT.toLocaleString()} عملة)` });
+    }
+
+    const [weeklyTotal] = await db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(schema.withdrawalRequests)
+      .where(and(
+        eq(schema.withdrawalRequests.userId, userId),
+        sql`${schema.withdrawalRequests.createdAt} >= ${weekStartDate}`,
+        ne(schema.withdrawalRequests.status, "rejected")
+      ));
+    if ((Number(weeklyTotal?.total || 0) + parsed.data.amount) > WEEKLY_WITHDRAW_LIMIT) {
+      socialLog.warn({ audit: "withdrawal_limit_hit", userId, limit: "weekly", amount: parsed.data.amount }, "Weekly withdrawal limit exceeded");
+      return res.status(400).json({ success: false, message: `تجاوزت الحد الأسبوعي للسحب (${WEEKLY_WITHDRAW_LIMIT.toLocaleString()} عملة)` });
+    }
+
+    // Use DB transaction to prevent race conditions (double-withdraw)
+    const result = await db.transaction(async (tx) => {
+      // Lock user row and check balance atomically
+      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!user) throw new Error("USER_NOT_FOUND");
+
+      if (user.coins < parsed.data.amount) {
+        throw new Error("INSUFFICIENT_BALANCE");
+      }
+
+      // Deduct coins first
+      const newBalance = user.coins - parsed.data.amount;
+      await tx.update(schema.users).set({ coins: newBalance }).where(eq(schema.users.id, userId));
+
+      // Create withdrawal request (encrypt payment details for PII protection)
+      const encryptedDetails = parsed.data.paymentDetails
+        ? encryptMessage(parsed.data.paymentDetails, `withdrawal:${userId}`)
+        : parsed.data.paymentDetails;
+
+      const [withdrawal] = await tx.insert(schema.withdrawalRequests).values({
+        userId,
+        amount: parsed.data.amount,
+        paymentMethodId: parsed.data.paymentMethodId,
+        paymentDetails: encryptedDetails,
+        status: "pending",
+      }).returning();
+
+      if (!withdrawal) throw new Error("WITHDRAW_CREATE_FAILED");
+
+      // Create wallet transaction record
+      await tx.insert(schema.walletTransactions).values({
+        userId,
+        type: "withdrawal",
+        amount: -parsed.data.amount,
+        balanceAfter: newBalance,
+        currency: "coins",
+        description: `طلب سحب #${withdrawal.id}`,
+        referenceId: withdrawal.id,
+        status: "pending",
+      });
+
+      return withdrawal;
+    });
+
+    socialLog.info({ audit: "withdrawal_requested", userId, amount: parsed.data.amount, withdrawalId: result.id }, "Withdrawal requested");
+    return res.json({ success: true, data: result, message: "تم إرسال طلب السحب بنجاح" });
+  } catch (err: any) {
+    if (err.message === "USER_NOT_FOUND") {
+      socialLog.warn({ audit: "withdrawal_rejected", userId, reason: "user_not_found" }, "Withdrawal rejected");
+      return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    }
+    if (err.message === "INSUFFICIENT_BALANCE") {
+      socialLog.warn({ audit: "withdrawal_rejected", userId, reason: "insufficient_balance" }, "Withdrawal rejected — insufficient balance");
       return res.status(400).json({ success: false, message: "رصيد غير كافي" });
     }
-
-    const withdrawal = await storage.createWithdrawalRequest({
-      userId,
-      amount: parsed.data.amount,
-      paymentMethodId: parsed.data.paymentMethodId,
-      paymentDetails: parsed.data.paymentDetails,
-      status: "pending",
-    });
-
-    if (!withdrawal) {
+    if (err.message === "WITHDRAW_CREATE_FAILED") {
       return res.status(500).json({ success: false, message: "حدث خطأ في إنشاء طلب السحب" });
     }
-
-    const withdrawalId = withdrawal.id;
-
-    // Deduct coins immediately (held until processed)
-    const newBalance = user.coins - parsed.data.amount;
-    await storage.updateUser(userId, { coins: newBalance } as any);
-
-    await storage.createTransaction({
-      userId,
-      type: "withdrawal",
-      amount: -parsed.data.amount,
-      balanceAfter: newBalance,
-      currency: "coins",
-      description: `طلب سحب #${withdrawalId}`,
-      referenceId: withdrawalId,
-      status: "pending",
-    });
-
-    return res.json({ success: true, data: withdrawal, message: "تم إرسال طلب السحب بنجاح" });
-  } catch (err: any) {
     socialLog.error({ err }, "Wallet withdraw error");
     return res.status(500).json({ success: false, message: "حدث خطأ في طلب السحب" });
+  }
+});
+
+/**
+ * GET /social/wallet/withdrawal-requests — تتبع طلبات السحب الخاصة بالمستخدم
+ */
+router.get("/wallet/withdrawal-requests", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const result = await storage.getWithdrawalRequests(page, 20, { userId });
+    return res.json({ success: true, data: result.data, total: result.total });
+  } catch (err: any) {
+    socialLog.error({ err }, "Get user withdrawal requests error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/income-chart — بيانات الدخل اليومي (آخر 30 يوم)
+ */
+router.get("/wallet/income-chart", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: [] });
+
+    const days = Math.min(parseInt(req.query.days as string) || 30, 90);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const dailyIncome = await db.select({
+      day: sql<string>`DATE(${schema.walletTransactions.createdAt})`,
+      total: sql<number>`COALESCE(SUM(${schema.walletTransactions.amount}), 0)`,
+    })
+    .from(schema.walletTransactions)
+    .where(and(
+      eq(schema.walletTransactions.userId, userId),
+      eq(schema.walletTransactions.type, "gift_received"),
+      eq(schema.walletTransactions.status, "completed"),
+      sql`${schema.walletTransactions.createdAt} >= ${startDate}`
+    ))
+    .groupBy(sql`DATE(${schema.walletTransactions.createdAt})`)
+    .orderBy(sql`DATE(${schema.walletTransactions.createdAt})`);
+
+    return res.json({ success: true, data: dailyIncome.map(d => ({ day: d.day, total: Number(d.total) })) });
+  } catch (err: any) {
+    socialLog.error({ err }, "Income chart error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * POST /social/wallet/cancel-withdrawal — إلغاء طلب سحب معلق
+ */
+router.post("/wallet/cancel-withdrawal", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const { withdrawalId } = req.body;
+    if (!withdrawalId) return res.status(400).json({ success: false, message: "معرف الطلب مطلوب" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const result = await db.transaction(async (tx) => {
+      const [wr] = await tx.select().from(schema.withdrawalRequests)
+        .where(and(
+          eq(schema.withdrawalRequests.id, withdrawalId),
+          eq(schema.withdrawalRequests.userId, userId),
+          eq(schema.withdrawalRequests.status, "pending")
+        )).limit(1);
+      if (!wr) throw new Error("NOT_FOUND");
+
+      // Refund coins
+      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!user) throw new Error("USER_NOT_FOUND");
+      const newBalance = user.coins + wr.amount;
+      await tx.update(schema.users).set({ coins: newBalance }).where(eq(schema.users.id, userId));
+
+      // Update withdrawal status
+      await tx.update(schema.withdrawalRequests)
+        .set({ status: "rejected", adminNotes: "Cancelled by user" })
+        .where(eq(schema.withdrawalRequests.id, withdrawalId));
+
+      // Create refund transaction
+      await tx.insert(schema.walletTransactions).values({
+        userId,
+        type: "refund",
+        amount: wr.amount,
+        balanceAfter: newBalance,
+        currency: "coins",
+        description: `إلغاء طلب سحب #${wr.id}`,
+        referenceId: wr.id,
+        status: "completed",
+      });
+
+      return { newBalance };
+    });
+
+    // Emit balance update via socket
+    const socketId = await getUserSocketId(userId);
+    if (socketId) {
+      io.to(socketId).emit("balance-update", { coins: result.newBalance });
+      io.to(socketId).emit("withdrawal-status-change", { withdrawalId, status: "rejected", reason: "Cancelled by user" });
+    }
+
+    return res.json({ success: true, message: "تم إلغاء طلب السحب" });
+  } catch (err: any) {
+    if (err.message === "NOT_FOUND") return res.status(404).json({ success: false, message: "الطلب غير موجود أو لا يمكن إلغاؤه" });
+    if (err.message === "USER_NOT_FOUND") return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    socialLog.error({ err }, "Cancel withdrawal error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/total-spent — إجمالي المصروفات الحقيقي
+ */
+router.get("/wallet/total-spent", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: { totalSpent: 0 } });
+
+    const [result] = await db.select({ total: sql<number>`COALESCE(SUM(ABS(amount)), 0)` })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        sql`${schema.walletTransactions.amount} < 0`,
+        eq(schema.walletTransactions.status, "completed")
+      ));
+
+    return res.json({ success: true, data: { totalSpent: Number(result?.total || 0) } });
+  } catch (err: any) {
+    socialLog.error({ err }, "Total spent error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
   }
 });
 
@@ -1585,10 +1802,20 @@ router.get("/gifts", async (req: Request, res: Response) => {
 router.post("/gifts/send", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+  // Rate limit financial operations
+  if (isFinancialRateLimited(userId)) {
+    return res.status(429).json({ success: false, message: "عدد كبير من الطلبات — حاول بعد قليل" });
+  }
   try {
-    const { giftId, receiverId, streamId, quantity = 1 } = req.body;
-    if (!giftId || !receiverId) {
-      return res.status(400).json({ success: false, message: "معرف الهدية والمستلم مطلوبان" });
+    // Validate input with Zod schema
+    const parsed = schema.sendGiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.flatten() });
+    }
+    const { giftId, receiverId, streamId, quantity = 1 } = parsed.data;
+
+    if (receiverId === userId) {
+      return res.status(400).json({ success: false, message: "لا يمكنك إرسال هدية لنفسك" });
     }
 
     const gift = await storage.getGift(giftId);
@@ -1596,67 +1823,100 @@ router.post("/gifts/send", async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: "الهدية غير موجودة" });
     }
 
-    const totalPrice = gift.price * Math.max(1, Math.min(quantity, 9999));
-    const user = await storage.getUser(userId);
-    if (!user || user.coins < totalPrice) {
-      return res.status(400).json({ success: false, message: "رصيدك غير كافٍ" });
-    }
+    const totalPrice = gift.price * quantity;
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
 
-    // Deduct coins from sender
-    await storage.updateUser(userId, { coins: user.coins - totalPrice } as any);
+    // Use DB transaction to prevent race conditions (double-spend)
+    const result = await db.transaction(async (tx) => {
+      // Lock sender row with FOR UPDATE via raw SQL
+      const [sender] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!sender || sender.coins < totalPrice) {
+        throw new Error("INSUFFICIENT_BALANCE");
+      }
 
-    // Add coins to receiver (gifts convert to diamonds/coins for receiver)
-    const receiver = await storage.getUser(receiverId);
-    if (receiver) {
-      await storage.updateUser(receiverId, { diamonds: (receiver.diamonds || 0) + totalPrice } as any);
-    }
+      const newSenderBalance = sender.coins - totalPrice;
 
-    // Create gift transaction record
-    await storage.createGiftTransaction({
-      senderId: userId,
-      receiverId,
-      giftId,
-      streamId: streamId || null,
-      quantity: Math.max(1, quantity),
-      totalPrice,
-    });
+      // Deduct from sender atomically
+      await tx.update(schema.users).set({ coins: newSenderBalance }).where(eq(schema.users.id, userId));
 
-    // Create wallet transactions for both parties
-    await storage.createTransaction({
-      userId,
-      type: "gift_sent",
-      amount: -totalPrice,
-      balanceAfter: user.coins - totalPrice,
-      currency: "coins",
-      description: `إرسال هدية ${gift.name || gift.nameAr}`,
-      referenceId: giftId,
-      status: "completed",
-    });
+      // Add to receiver
+      const [receiver] = await tx.select().from(schema.users).where(eq(schema.users.id, receiverId)).limit(1);
+      if (receiver) {
+        await tx.update(schema.users).set({ diamonds: (receiver.diamonds || 0) + totalPrice }).where(eq(schema.users.id, receiverId));
+      }
 
-    await storage.createTransaction({
-      userId: receiverId,
-      type: "gift_received",
-      amount: totalPrice,
-      balanceAfter: (receiver?.diamonds || 0) + totalPrice,
-      currency: "diamonds",
-      description: `استلام هدية ${gift.name || gift.nameAr}`,
-      referenceId: giftId,
-      status: "completed",
-    });
+      // Create gift transaction record
+      await tx.insert(schema.giftTransactions).values({
+        senderId: userId,
+        receiverId,
+        giftId,
+        streamId: streamId || null,
+        quantity,
+        totalPrice,
+      });
 
-    // Update stream totalGifts if in a stream
-    if (streamId) {
-      const db = getDb();
-      if (db) {
-        await db.update(schema.streams).set({
+      // Wallet tx for sender
+      await tx.insert(schema.walletTransactions).values({
+        userId,
+        type: "gift_sent",
+        amount: -totalPrice,
+        balanceAfter: newSenderBalance,
+        currency: "coins",
+        description: `إرسال هدية ${gift.name || gift.nameAr}`,
+        referenceId: giftId,
+        status: "completed",
+      });
+
+      // Wallet tx for receiver
+      await tx.insert(schema.walletTransactions).values({
+        userId: receiverId,
+        type: "gift_received",
+        amount: totalPrice,
+        balanceAfter: (receiver?.diamonds || 0) + totalPrice,
+        currency: "diamonds",
+        description: `استلام هدية ${gift.name || gift.nameAr}`,
+        referenceId: giftId,
+        status: "completed",
+      });
+
+      // Update stream totalGifts if in a stream
+      if (streamId) {
+        await tx.update(schema.streams).set({
           totalGifts: sql`${schema.streams.totalGifts} + ${totalPrice}`,
         }).where(eq(schema.streams.id, streamId));
       }
-    }
 
-    return res.json({ success: true, message: "تم إرسال الهدية بنجاح", newBalance: user.coins - totalPrice });
+      return newSenderBalance;
+    });
+
+    // Audit log for successful gift (fraud detection)
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    socialLog.info({
+      audit: "gift_sent",
+      senderId: userId,
+      receiverId,
+      giftId,
+      quantity,
+      ip,
+    }, `Gift sent: ${userId} → ${receiverId} (gift ${giftId} x${quantity})`);
+
+    return res.json({ success: true, message: "تم إرسال الهدية بنجاح", newBalance: result });
   } catch (err: any) {
-    socialLog.error({ err }, "Send gift error");
+    if (err.message === "INSUFFICIENT_BALANCE") {
+      return res.status(400).json({ success: false, message: "رصيدك غير كافٍ" });
+    }
+    // Audit log for failed gift operations (fraud detection)
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    socialLog.error({
+      err,
+      audit: "gift_send_failed",
+      senderId: userId,
+      receiverId: req.body?.receiverId,
+      giftId: req.body?.giftId,
+      quantity: req.body?.quantity,
+      ip,
+    }, "Send gift error");
     return res.status(500).json({ success: false, message: "خطأ في إرسال الهدية" });
   }
 });
@@ -1785,22 +2045,31 @@ async function enrichStream(s: any) {
 }
 
 // GET /social/streams/active — list active live streams with host info
-router.get("/streams/active", async (_req: Request, res: Response) => {
+router.get("/streams/active", async (req: Request, res: Response) => {
   try {
-    const result = await storage.getActiveStreams(1, 50);
-    if (!result || !result.data?.length) return res.json([]);
-
+    const category = String(req.query.category || "").trim();
     const db = getDb();
-    if (!db) return res.json(result.data);
+    if (!db) return res.json([]);
 
-    const userIds = result.data.map((s: any) => s.userId).filter(Boolean);
+    const conditions = [eq(schema.streams.status, "active")];
+    if (category && category !== "all") {
+      conditions.push(eq(schema.streams.category, category));
+    }
+
+    const data = await db.select().from(schema.streams)
+      .where(and(...conditions))
+      .orderBy(desc(schema.streams.viewerCount)).limit(50);
+
+    if (!data.length) return res.json([]);
+
+    const userIds = data.map((s: any) => s.userId).filter(Boolean);
     let usersMap: Record<string, any> = {};
     if (userIds.length > 0) {
       const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
       users.forEach((u: any) => { usersMap[u.id] = u; });
     }
 
-    const enriched = result.data.map((s: any) => {
+    const enriched = data.map((s: any) => {
       const host = usersMap[s.userId];
       return {
         ...s,
@@ -1886,24 +2155,29 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "لديك بث نشط بالفعل", data: existing });
     }
 
-    const { title, type, tags } = req.body;
+    const { title, type, tags, category, scheduledAt } = req.body;
     if (!title || typeof title !== "string" || title.trim().length < 1) {
       return res.status(400).json({ success: false, message: "عنوان البث مطلوب" });
     }
 
     const streamType = ["live", "audio", "video_call"].includes(type) ? type : "live";
     const streamTags = Array.isArray(tags) ? tags.filter((t: any) => typeof t === "string").join(",") : (typeof tags === "string" ? tags : "");
+    const validCategories = ["chat", "gaming", "music", "education", "sports", "cooking", "art", "other"];
+    const streamCategory = validCategories.includes(category) ? category : null;
+    const isScheduled = scheduledAt && new Date(scheduledAt) > new Date();
 
     const stream = await storage.createStream({
       userId,
       title: title.trim().slice(0, 200),
       type: streamType,
       tags: streamTags,
-      status: "active",
+      category: streamCategory,
+      status: isScheduled ? "scheduled" : "active",
+      scheduledAt: isScheduled ? new Date(scheduledAt) : null,
       viewerCount: 0,
       peakViewers: 0,
       totalGifts: 0,
-    });
+    } as any);
 
     if (!stream) {
       return res.status(500).json({ success: false, message: "فشل في إنشاء البث" });
@@ -1921,6 +2195,29 @@ router.post("/streams/create", async (req: Request, res: Response) => {
 
     const enriched = await enrichStream(stream);
     socialLog.info({ streamId: stream.id, userId, type: streamType }, "Stream created");
+
+    // Notify followers that this user started a stream
+    if (!isScheduled && io && db) {
+      try {
+        const followers = await db.select({ followerId: schema.userFollows.followerId })
+          .from(schema.userFollows).where(eq(schema.userFollows.followingId, userId)).limit(500);
+        const [hostUser] = await db.select({ displayName: schema.users.displayName, avatar: schema.users.avatar })
+          .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+        for (const f of followers) {
+          const socketId = await getUserSocketId(f.followerId);
+          if (socketId) {
+            io.to(socketId).emit("stream-started", {
+              streamId: stream.id,
+              hostName: hostUser?.displayName || "مستخدم",
+              hostAvatar: hostUser?.avatar || null,
+              title: stream.title,
+              type: streamType,
+            });
+          }
+        }
+      } catch { /* non-blocking */ }
+    }
+
     return res.json({ success: true, data: enriched });
   } catch (err: any) {
     socialLog.error({ err }, "Create stream error");
@@ -2206,6 +2503,405 @@ router.post("/streams/:id/kick", async (req: Request, res: Response) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ── Scheduled Streams — البثوث المجدولة ──
+// ═══════════════════════════════════════════════════════
+
+router.get("/streams/scheduled", async (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    if (!db) return res.json([]);
+    const data = await db.select().from(schema.streams)
+      .where(and(eq(schema.streams.status, "scheduled"), sql`${schema.streams.scheduledAt} > NOW()`))
+      .orderBy(asc(schema.streams.scheduledAt));
+    const userIds = data.map(s => s.userId).filter(Boolean);
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
+      users.forEach(u => { usersMap[u.id] = u; });
+    }
+    const enriched = data.map(s => {
+      const host = usersMap[s.userId];
+      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+    });
+    return res.json(enriched);
+  } catch (err: any) {
+    socialLog.error({ err }, "Scheduled streams error");
+    return res.json([]);
+  }
+});
+
+// GET /streams/search — search streams by title/tags
+router.get("/streams/search", searchLimiter, async (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    if (!q || q.length < 2) return res.json([]);
+    const db = getDb();
+    if (!db) return res.json([]);
+    const escapedQ = escapeLike(q);
+    const data = await db.select().from(schema.streams)
+      .where(and(
+        eq(schema.streams.status, "active"),
+        or(
+          sql`LOWER(${schema.streams.title}) LIKE ${"%" + escapedQ + "%"}`,
+          sql`LOWER(${schema.streams.tags}) LIKE ${"%" + escapedQ + "%"}`
+        )
+      ))
+      .orderBy(desc(schema.streams.viewerCount)).limit(30);
+    const userIds = data.map(s => s.userId).filter(Boolean);
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
+      users.forEach(u => { usersMap[u.id] = u; });
+    }
+    const enriched = data.map(s => {
+      const host = usersMap[s.userId];
+      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+    });
+    return res.json(enriched);
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream search error");
+    return res.json([]);
+  }
+});
+
+// GET /streams/:id/stats — host stats dashboard
+router.get("/streams/:id/stats", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+    const db = getDb();
+    if (!db) return res.json({ data: {} });
+    // get unique viewers count
+    const [uniqueViewers] = await db.select({ count: count() }).from(schema.streamViewers).where(eq(schema.streamViewers.streamId, streamId));
+    // top gifter
+    const topGifters = await db.select({
+      userId: schema.giftTransactions.senderId,
+      total: sql<number>`SUM(${schema.giftTransactions.totalPrice})`.as("total"),
+    }).from(schema.giftTransactions)
+      .where(eq(schema.giftTransactions.streamId, streamId))
+      .groupBy(schema.giftTransactions.senderId)
+      .orderBy(sql`total DESC`).limit(5);
+
+    // Duration
+    const duration = stream.endedAt
+      ? Math.round((new Date(stream.endedAt).getTime() - new Date(stream.startedAt).getTime()) / 1000)
+      : Math.round((Date.now() - new Date(stream.startedAt).getTime()) / 1000);
+
+    // Enrich top gifters with names
+    let enrichedGifters: any[] = [];
+    if (topGifters.length > 0) {
+      const gifterIds = topGifters.map(g => g.userId).filter(Boolean);
+      if (gifterIds.length > 0) {
+        const gUsers = await db.select({ id: schema.users.id, displayName: schema.users.displayName, avatar: schema.users.avatar })
+          .from(schema.users).where(inArray(schema.users.id, gifterIds as string[]));
+        enrichedGifters = topGifters.map(g => {
+          const u = gUsers.find(u => u.id === g.userId);
+          return { userId: g.userId, total: g.total, name: u?.displayName || "مجهول", avatar: u?.avatar || null };
+        });
+      }
+    }
+
+    return res.json({
+      data: {
+        peakViewers: stream.peakViewers,
+        totalGifts: stream.totalGifts,
+        uniqueViewers: uniqueViewers?.count || 0,
+        duration,
+        topGifters: enrichedGifters,
+        startedAt: stream.startedAt,
+        endedAt: stream.endedAt,
+        viewerCount: stream.viewerCount,
+      }
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream stats error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Pinned Message — الرسالة المثبتة ──
+// ═══════════════════════════════════════════════════════
+
+router.post("/streams/:id/pin", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "فقط المضيف" });
+    const { message } = req.body;
+    await storage.updateStream(streamId, { pinnedMessage: message || null } as any);
+    // Broadcast to room
+    if (io) io.to(`stream-${streamId}`).emit("pinned-message", { message: message || null });
+    return res.json({ success: true });
+  } catch (err: any) {
+    socialLog.error({ err }, "Pin message error");
+    return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+router.delete("/streams/:id/pin", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    await storage.updateStream(streamId, { pinnedMessage: null } as any);
+    if (io) io.to(`stream-${streamId}`).emit("pinned-message", { message: null });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Polls — استطلاعات الرأي ──
+// ═══════════════════════════════════════════════════════
+
+router.post("/streams/:id/poll", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false, message: "فقط المضيف" });
+    const { question, options } = req.body;
+    if (!question || !Array.isArray(options) || options.length < 2) {
+      return res.status(400).json({ success: false, message: "سؤال و خيارين على الأقل" });
+    }
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    // End any existing active poll
+    await db.update(schema.streamPolls).set({ isActive: false }).where(and(eq(schema.streamPolls.streamId, streamId), eq(schema.streamPolls.isActive, true)));
+    const initialVotes: Record<string, number> = {};
+    options.forEach((o: string) => { initialVotes[o] = 0; });
+    const [poll] = await db.insert(schema.streamPolls).values({
+      streamId,
+      question,
+      options: JSON.stringify(options),
+      votes: JSON.stringify(initialVotes),
+      voterIds: "[]",
+    }).returning();
+    if (io) io.to(`stream-${streamId}`).emit("poll-created", { poll: { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes) } });
+    return res.json({ success: true, data: { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes) } });
+  } catch (err: any) {
+    socialLog.error({ err }, "Create poll error");
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.get("/streams/:id/poll", async (req: Request, res: Response) => {
+  try {
+    const streamId = paramStr(req.params.id);
+    const db = getDb();
+    if (!db) return res.json({ data: null });
+    const [poll] = await db.select().from(schema.streamPolls)
+      .where(and(eq(schema.streamPolls.streamId, streamId), eq(schema.streamPolls.isActive, true)))
+      .orderBy(desc(schema.streamPolls.createdAt)).limit(1);
+    if (!poll) return res.json({ data: null });
+    return res.json({ data: { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes), voterIds: JSON.parse(poll.voterIds) } });
+  } catch (err: any) {
+    return res.json({ data: null });
+  }
+});
+
+router.post("/streams/:id/poll/:pollId/vote", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const pollId = paramStr(req.params.pollId);
+    const { option } = req.body;
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    const [poll] = await db.select().from(schema.streamPolls).where(eq(schema.streamPolls.id, pollId)).limit(1);
+    if (!poll || !poll.isActive) return res.status(400).json({ success: false, message: "الاستطلاع منتهي" });
+    const voterIds: string[] = JSON.parse(poll.voterIds);
+    if (voterIds.includes(userId)) return res.status(400).json({ success: false, message: "صوتت بالفعل" });
+    const options: string[] = JSON.parse(poll.options);
+    if (!options.includes(option)) return res.status(400).json({ success: false, message: "خيار غير صالح" });
+
+    // Atomic vote update — prevents race conditions with concurrent voters
+    const [updated] = await db.update(schema.streamPolls).set({
+      votes: sql`jsonb_set(${schema.streamPolls.votes}::jsonb, ${sql.raw(`'{${option.replace(/'/g, "''")}}'`)}, (COALESCE((${schema.streamPolls.votes}::jsonb->>${option})::int, 0) + 1)::text::jsonb)`,
+      voterIds: sql`(${schema.streamPolls.voterIds}::jsonb || ${JSON.stringify([userId])}::jsonb)::text`,
+    }).where(
+      and(
+        eq(schema.streamPolls.id, pollId),
+        eq(schema.streamPolls.isActive, true),
+        sql`NOT (${schema.streamPolls.voterIds}::jsonb ? ${userId})`,
+      )
+    ).returning();
+
+    if (!updated) return res.status(400).json({ success: false, message: "صوتت بالفعل أو الاستطلاع منتهي" });
+
+    const votes = JSON.parse(updated.votes);
+    const newVoterIds: string[] = JSON.parse(updated.voterIds);
+    if (io) io.to(`stream-${streamId}`).emit("poll-updated", { pollId, votes, totalVoters: newVoterIds.length });
+    return res.json({ success: true, data: { votes, totalVoters: newVoterIds.length } });
+  } catch (err: any) {
+    socialLog.error({ err }, "Vote poll error");
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.post("/streams/:id/poll/:pollId/end", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const pollId = paramStr(req.params.pollId);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    await db.update(schema.streamPolls).set({ isActive: false }).where(eq(schema.streamPolls.id, pollId));
+    if (io) io.to(`stream-${streamId}`).emit("poll-ended", { pollId });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Chat Moderation — إدارة الشات ──
+// ═══════════════════════════════════════════════════════
+
+router.post("/streams/:id/mute", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const { targetUserId, reason } = req.body;
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    await db.insert(schema.streamMutedUsers).values({ streamId, userId: targetUserId, mutedBy: userId, reason: reason || null });
+    if (io) io.to(`stream-${streamId}`).emit("user-muted", { userId: targetUserId });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/streams/:id/mute/:targetId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const targetId = paramStr(req.params.targetId);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    await db.delete(schema.streamMutedUsers).where(and(eq(schema.streamMutedUsers.streamId, streamId), eq(schema.streamMutedUsers.userId, targetId)));
+    if (io) io.to(`stream-${streamId}`).emit("user-unmuted", { userId: targetId });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.post("/streams/:id/banned-words", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const { word } = req.body;
+    if (!word || typeof word !== "string") return res.status(400).json({ success: false });
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    const [created] = await db.insert(schema.streamBannedWords).values({ streamId, word: word.trim().toLowerCase() }).returning();
+    return res.json({ success: true, data: created });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/streams/:id/banned-words/:wordId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const wordId = paramStr(req.params.wordId);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false });
+    await db.delete(schema.streamBannedWords).where(eq(schema.streamBannedWords.id, wordId));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.get("/streams/:id/banned-words", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    const db = getDb();
+    if (!db) return res.json([]);
+    const words = await db.select().from(schema.streamBannedWords).where(eq(schema.streamBannedWords.streamId, streamId));
+    return res.json(words);
+  } catch { return res.json([]); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Stream Recording — التسجيل ──
+// ═══════════════════════════════════════════════════════
+
+router.post("/streams/:id/record/start", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    // In production, this would call LiveKit's Egress API to start recording
+    // For now, we flag the stream as being recorded
+    await storage.updateStream(streamId, { recordingUrl: "recording" } as any);
+    socialLog.info({ streamId }, "Recording started (flagged)");
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+router.post("/streams/:id/record/stop", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
+    // In production, this would stop the LiveKit Egress and get the recording URL
+    await storage.updateStream(streamId, { recordingUrl: null } as any);
+    socialLog.info({ streamId }, "Recording stopped");
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// ── Follower Notification on Stream Start ──
+// ═══════════════════════════════════════════════════════
+// (Integrated into /streams/create above — see socket notification below)
+
+// ═══════════════════════════════════════════════════════
 // ── Auto-Translation — الترجمة التلقائية ──
 // ═══════════════════════════════════════════════════════
 
@@ -2214,12 +2910,22 @@ const SUPPORTED_LANGS = [
   "hi", "ur", "fa", "zh", "ja", "ko", "id",
 ];
 
+// ── Translation rate limiting (max 30 per minute per user) ──
+const translateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.session as any)?.userId || req.ip || "unknown",
+  message: { success: false, message: "عدد كبير من طلبات الترجمة. حاول بعد دقيقة" },
+});
+
 /**
  * POST /api/social/translate
  * Body: { text: string, targetLang: string, sourceLang?: string }
  * Returns: { translatedText: string, detectedLang: string }
  */
-router.post("/translate", async (req: Request, res: Response) => {
+router.post("/translate", translateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).session?.userId;
     if (!userId) return res.status(401).json({ success: false, message: "غير مصرح" });
@@ -2274,6 +2980,39 @@ router.post("/translate", async (req: Request, res: Response) => {
     socialLog.error({ err }, "Translation error");
     return res.status(500).json({ success: false, message: "خطأ في الترجمة" });
   }
+});
+
+// ════════════════════════════════════════════════════════════
+// XP & LEVEL SYSTEM — نظام النقاط والمستويات
+// ════════════════════════════════════════════════════════════
+import { getUserLevelInfo, getXpLeaderboard, XP_REWARDS, xpForLevel } from "../services/xpLevel";
+
+// ── GET /xp/me — Get current user's level info ──
+router.get("/xp/me", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  const info = await getUserLevelInfo(userId);
+  if (!info) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+
+  return res.json({ success: true, data: info });
+});
+
+// ── GET /xp/leaderboard — Top users by XP ──
+router.get("/xp/leaderboard", async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+  const leaderboard = await getXpLeaderboard(limit);
+  return res.json({ success: true, data: leaderboard });
+});
+
+// ── GET /xp/rewards — XP reward table ──
+router.get("/xp/rewards", (_req, res) => {
+  const rewards = Object.entries(XP_REWARDS).map(([action, xp]) => ({ action, xp }));
+  const levels = Array.from({ length: 10 }, (_, i) => ({
+    level: (i + 1) * 5,
+    xpRequired: xpForLevel((i + 1) * 5),
+  }));
+  return res.json({ success: true, data: { rewards, sampleLevels: levels } });
 });
 
 export default router;

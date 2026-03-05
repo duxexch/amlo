@@ -12,8 +12,14 @@ import { io } from "../index";
 import { getUserSocketId, getOnlineUserIds } from "../onlineUsers";
 import * as schema from "../../shared/schema";
 import { worldSearchSchema, worldMessageSchema } from "../../shared/schema";
+import { getAllPricing } from "../pricingService";
 
 const router = Router();
+
+// ── Named constants ──
+const MAX_MATCH_CANDIDATES = 50;             // Max candidates to fetch for scoring
+const GOOD_CHAT_DURATION_SECONDS = 300;      // 5 min threshold for "good chat history"
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes — zombie session cleanup
 
 // Express 5: req.params values can be string | string[]
 function paramStr(v: string | string[] | undefined): string {
@@ -40,11 +46,11 @@ function requireUser(req: Request, res: Response): string | null {
   return userId;
 }
 
-// ── Helper: get world pricing from DB ──
-async function getWorldPricing(): Promise<schema.WorldPricing[]> {
-  const db = getDb();
-  if (!db) return [];
-  return db.select().from(schema.worldPricing).where(eq(schema.worldPricing.isActive, true));
+// ── Helper: get world pricing from cached pricingService ──
+async function getWorldPricing(): Promise<{ filterType: string; priceCoins: number }[]> {
+  const pricing = await getAllPricing();
+  // Convert the flat filters object to the array format existing code expects
+  return Object.entries(pricing.filters).map(([key, val]) => ({ filterType: key, priceCoins: val }));
 }
 
 // ── Helper: calculate total search cost ──
@@ -259,7 +265,7 @@ router.post("/search", async (req, res) => {
     })
       .from(schema.users)
       .where(and(...conditions))
-      .limit(50); // fetch up to 50 candidates for scoring
+      .limit(MAX_MATCH_CANDIDATES); // fetch up to N candidates for scoring
 
     if (candidates.length === 0) {
       const [session] = await db.insert(schema.worldSessions).values({
@@ -334,7 +340,7 @@ router.post("/search", async (req, res) => {
 
       // 6. Previous successful long chat (+10) — indicates good chemistry
       const prevDuration = sessionHistory.get(candidate.id);
-      if (prevDuration && prevDuration > 300) score += 10; // >5 min = good chat history
+      if (prevDuration && prevDuration > GOOD_CHAT_DURATION_SECONDS) score += 10; // >5 min = good chat history
 
       // 7. Random factor (+0-5) to prevent deterministic results
       score += Math.random() * 5;
@@ -394,8 +400,10 @@ router.post("/search", async (req, res) => {
         matchedUser: match,
       },
     });
+
+    worldLog.info({ sessionId: session.id, userId, matchedUserId: match.id, cost, chatType: filters.chatType }, "World match found");
   } catch (err) {
-    log(`World search error: ${err}`, "world");
+    worldLog.error({ err }, "World search error");
     res.status(500).json({ success: false, message: "خطأ في البحث" });
   }
 });
@@ -515,12 +523,23 @@ router.post("/sessions/:id/end", async (req, res) => {
     const durationMinutes = Math.ceil(durationSeconds / 60);
     const milesEarned = durationMinutes * milesPerMinute;
 
-    // Update session
-    await db.update(schema.worldSessions).set({
+    // Atomic status update with guard — prevents double-ending race condition
+    const [updatedSession] = await db.update(schema.worldSessions).set({
       status: "ended",
       endedAt: new Date(),
       milesEarned,
-    }).where(eq(schema.worldSessions.id, session.id));
+    }).where(
+      and(
+        eq(schema.worldSessions.id, session.id),
+        ne(schema.worldSessions.status, "ended"),
+        ne(schema.worldSessions.status, "cancelled"),
+      )
+    ).returning();
+
+    // If no row updated, another request already ended it
+    if (!updatedSession) {
+      return res.json({ success: true, data: { message: "الجلسة منتهية بالفعل", milesEarned: 0 } });
+    }
 
     // Award miles to user
     await db.update(schema.users).set({

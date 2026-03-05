@@ -5,6 +5,14 @@ import { User, Mail, Lock, ArrowRight, AlertCircle, Gift, Phone, Eye, EyeOff, Ch
 import { useTranslation } from "react-i18next";
 import { authApi, loginOtpApi } from "../lib/authApi";
 
+// Extend window for OAuth SDKs
+declare global {
+  interface Window {
+    google?: { accounts: { id: { initialize: (config: any) => void; prompt: () => void } } };
+    FB?: { login: (callback: (response: any) => void, options?: any) => void };
+  }
+}
+
 // Social providers with brand colors
 const socialProviders = [
   { key: "google", name: "Google", color: "#EA4335", icon: "G" },
@@ -43,6 +51,11 @@ export function UserAuth() {
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [, setLocation] = useLocation();
 
+  // 2FA state
+  const [show2FA, setShow2FA] = useState(false);
+  const [twoFAUserId, setTwoFAUserId] = useState<string | null>(null);
+  const [twoFACode, setTwoFACode] = useState("");
+
   // Form state
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -72,6 +85,12 @@ export function UserAuth() {
       if (isLogin) {
         // Login
         const result = await authApi.login({ login: email, password });
+        if (result.data.requires2FA) {
+          setTwoFAUserId(result.data.userId);
+          setShow2FA(true);
+          setTwoFACode("");
+          return;
+        }
         if (result.data.needsPinVerify) {
           // User has profiles — show choice: PIN or OTP
           setShowLoginChoice(true);
@@ -123,10 +142,73 @@ export function UserAuth() {
     }
   };
 
-  const handleSocialLogin = (provider: string) => {
-    // Social login — redirect to OAuth provider
-    // TODO: Implement OAuth flows for each provider in production
-    setAuthError(t("auth.socialComingSoon", `تسجيل الدخول عبر ${provider} قريباً`));
+  const handleSocialLogin = async (provider: string) => {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      if (provider === "google" && window.google?.accounts?.id) {
+        // Google Sign-In — request ID token via Google Identity Services
+        window.google.accounts.id.initialize({
+          client_id: "", // Will be set from admin settings
+          callback: async (response: any) => {
+            try {
+              const result = await authApi.oauthGoogle(response.credential);
+              if (result.data.requires2FA) {
+                setTwoFAUserId(result.data.userId);
+                setShow2FA(true);
+                setTwoFACode("");
+              } else {
+                setLocation("/");
+              }
+            } catch (err: any) {
+              setAuthError(err?.message || "خطأ في تسجيل الدخول");
+            }
+          },
+        });
+        window.google.accounts.id.prompt();
+        return;
+      }
+
+      if (provider === "facebook" && window.FB) {
+        window.FB.login((response: any) => {
+          if (response.authResponse) {
+            authApi.oauthFacebook(response.authResponse.accessToken)
+              .then((result) => {
+                if (result.data.requires2FA) {
+                  setTwoFAUserId(result.data.userId);
+                  setShow2FA(true);
+                  setTwoFACode("");
+                } else {
+                  setLocation("/");
+                }
+              })
+              .catch((err: any) => setAuthError(err?.message || "خطأ في تسجيل الدخول"));
+          }
+        }, { scope: "email,public_profile" });
+        return;
+      }
+
+      // Fallback for providers without SDK
+      setAuthError(t("auth.socialComingSoon", `تسجيل الدخول عبر ${provider} قريباً`));
+    } catch (err: any) {
+      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handle2FAVerify = async () => {
+    if (!twoFAUserId || twoFACode.length !== 6) return;
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await authApi.verify2FA(twoFAUserId, twoFACode);
+      setLocation("/");
+    } catch (err: any) {
+      setAuthError(err?.message || "رمز التحقق غير صحيح");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleOtpSubmit = async () => {
@@ -203,8 +285,54 @@ export function UserAuth() {
         </button>
 
         <AnimatePresence mode="wait">
-          {/* Login OTP Verify Screen */}
-          {showLoginOtp ? (
+          {/* 2FA Verification Screen */}
+          {show2FA ? (
+            <motion.div
+              key="2fa-verify"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-yellow-500 to-orange-500 flex items-center justify-center mx-auto mb-6">
+                <Lock className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">{t("auth.twoFactorTitle", "المصادقة الثنائية")}</h2>
+              <p className="text-white/50 mb-6 text-sm">{t("auth.twoFactorDesc", "أدخل رمز التحقق من تطبيق المصادقة")}</p>
+
+              {authError && (
+                <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  {authError}
+                </div>
+              )}
+
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={twoFACode}
+                onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                className="w-full text-center text-3xl tracking-[0.5em] font-mono px-4 py-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:border-primary focus:ring-1 focus:ring-primary outline-none mb-6"
+                autoFocus
+              />
+
+              <button
+                onClick={handle2FAVerify}
+                disabled={twoFACode.length !== 6 || authLoading}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-primary to-secondary text-white font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                {t("auth.verify", "تحقق")}
+              </button>
+
+              <button onClick={() => { setShow2FA(false); setTwoFAUserId(null); setTwoFACode(""); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors mt-4 flex items-center justify-center gap-1">
+                <ChevronLeft className="w-4 h-4" />
+                {t("auth.back", "رجوع")}
+              </button>
+            </motion.div>
+          ) : showLoginOtp ? (
             <motion.div
               key="login-otp"
               initial={{ opacity: 0, x: 20 }}

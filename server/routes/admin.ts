@@ -13,7 +13,7 @@ import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => adminLog.info(msg);
 const adminLog = createLogger("admin");
 import { randomUUID } from "crypto";
-import { updateSmtpConfig, updateOtpConfig } from "../services/email";
+import { updateSmtpConfig, updateOtpConfig, sendEmail } from "../services/email";
 import {
   adminLoginSchema,
   createAgentSchema,
@@ -38,19 +38,13 @@ import { eq, asc, desc, count } from "drizzle-orm";
 import * as schema from "../../shared/schema";
 import { getAllPricing, invalidatePricingCache } from "../pricingService";
 import { getQueueStats } from "../matchingEngine";
+import { paramStr } from "./socialHelpers";
 
 const router = Router();
 
-/** Type-safe param extraction (Express 5 types params as string | string[]) */
-function paramStr(val: string | string[] | undefined): string {
-  return Array.isArray(val) ? val[0] : val || "";
-}
-
-/** Strip sensitive fields (passwordHash, etc.) from DB objects before sending to client */
-function stripSensitive<T extends Record<string, any>>(obj: T): Omit<T, 'passwordHash'> {
-  const { passwordHash, ...safe } = obj;
-  return safe;
-}
+/** Strip sensitive fields from DB objects before sending to client (centralized) */
+import { sanitizeUser } from "../utils/sanitize";
+const stripSensitive = sanitizeUser;
 
 // ══════════════════════════════════════════════════════════
 // AUTH ROUTES — تسجيل دخول / خروج المدير
@@ -303,26 +297,9 @@ router.get("/agents", requireAdmin, async (req, res) => {
     const search = (req.query.search as string) || "";
     const status = (req.query.status as string) || "";
 
-    const allAgents = await storage.getAgents();
-    let filtered = [...allAgents];
-
-    if (search) {
-      const q = search.toLowerCase();
-      filtered = filtered.filter(
-        (a) =>
-          a.name?.toLowerCase().includes(q) ||
-          a.email?.toLowerCase().includes(q) ||
-          a.referralCode?.toLowerCase().includes(q),
-      );
-    }
-    if (status) {
-      filtered = filtered.filter((a) => a.status === status);
-    }
-
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    // Strip passwordHash from response (SECURITY)
-    const data = filtered.slice(start, start + limit).map((a: any) => stripSensitive(a));
+    // DB-side search, filter, and pagination (no full table scan)
+    const { data: agents, total } = await storage.getAgentsFiltered({ search, status, page, limit });
+    const data = agents.map((a: any) => stripSensitive(a));
 
     return res.json({
       success: true,
@@ -504,7 +481,26 @@ router.patch("/agent-applications/:id", requireAdmin, async (req, res) => {
           status: "active",
           createdBy: req.session.adminId,
         });
-        log(`Agent created from application: ${app.email} — temp password sent`, "admin");
+
+        // Send temp password to agent via email
+        const emailSent = await sendEmail(
+          app.email,
+          "تم قبول طلبك كوكيل — Ablox Agent Account",
+          `<div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>مبروك! تم قبول طلبك كوكيل في Ablox</h2>
+            <p>يمكنك تسجيل الدخول باستخدام:</p>
+            <p><strong>البريد:</strong> ${app.email}</p>
+            <p><strong>كلمة المرور المؤقتة:</strong> ${tempPassword}</p>
+            <p style="color: #e74c3c;"><strong>يرجى تغيير كلمة المرور بعد تسجيل الدخول مباشرة.</strong></p>
+          </div>`,
+          `تم قبول طلبك. كلمة المرور المؤقتة: ${tempPassword} — يرجى تغييرها بعد تسجيل الدخول.`
+        );
+
+        if (emailSent) {
+          log(`Agent created from application: ${app.email} — temp password sent via email`, "admin");
+        } else {
+          log(`Agent created from application: ${app.email} — email NOT sent (SMTP not configured)`, "admin");
+        }
       } catch (err: any) {
         log(`Auto-create agent from application failed: ${err.message}`, "admin");
       }
@@ -594,8 +590,13 @@ router.delete("/gifts/:id", requireAdmin, async (req, res) => {
 
 router.post("/gifts/:id/send", requireAdmin, async (req, res) => {
   try {
-    const { userId, message } = req.body;
-    if (!userId) return res.status(400).json({ success: false, message: "معرف المستخدم مطلوب" });
+    const sendSchema = z.object({
+      userId: z.string().min(1, "معرف المستخدم مطلوب"),
+      message: z.string().max(500).optional(),
+    });
+    const parsed = sendSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || "بيانات غير صالحة" });
+    const { userId, message } = parsed.data;
 
     const gift = await storage.getGift(paramStr(req.params.id));
     if (!gift) return res.status(404).json({ success: false, message: "الهدية غير موجودة" });
@@ -777,11 +778,21 @@ router.get("/payment-methods", requireAdmin, async (_req, res) => {
 
 router.post("/payment-methods", requireAdmin, async (req, res) => {
   try {
-    const { name, nameAr, icon, type, provider, countries, minAmount, maxAmount, fee, instructions } = req.body;
-
-    if (!name || !nameAr || !type) {
-      return res.status(400).json({ success: false, message: "الاسم والنوع مطلوبين" });
-    }
+    const paymentMethodSchema = z.object({
+      name: z.string().min(1).max(100),
+      nameAr: z.string().min(1).max(100),
+      icon: z.string().max(10).default("💳"),
+      type: z.enum(["deposit", "withdrawal", "both"]),
+      provider: z.string().max(100).optional(),
+      countries: z.array(z.string()).optional(),
+      minAmount: z.number().int().min(1).default(1),
+      maxAmount: z.number().int().min(1).default(50000),
+      fee: z.string().max(20).default("0"),
+      instructions: z.string().max(2000).optional(),
+    });
+    const parsed = paymentMethodSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || "بيانات غير صالحة" });
+    const { name, nameAr, icon, type, provider, countries, minAmount, maxAmount, fee, instructions } = parsed.data;
 
     const pm = await storage.createPaymentMethod({
       name,

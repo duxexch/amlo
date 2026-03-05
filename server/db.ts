@@ -198,7 +198,18 @@ export async function ensureDefaultAdmin(): Promise<void> {
   const { admins } = await import("@shared/schema");
   const { eq } = await import("drizzle-orm");
 
-  const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    if (process.env.NODE_ENV === "production") {
+      log("ADMIN_PASSWORD env var not set — skipping admin password sync (REQUIRED for first setup)", "db");
+      // In production, if admin doesn't exist yet and no password is set, abort
+    } else {
+      log("⚠️  WARNING: ADMIN_PASSWORD not set — set it in .env for production", "db");
+    }
+  }
+
+  if (!adminPassword) return; // Don't create/update admin without explicit password
+
   const adminHash = bcrypt.hashSync(adminPassword, 12);
 
   try {
@@ -209,6 +220,10 @@ export async function ensureDefaultAdmin(): Promise<void> {
       .limit(1);
 
     if (!existing) {
+      if (!adminPassword) {
+        log("No admin user exists and ADMIN_PASSWORD not set — set ADMIN_PASSWORD env var to create default admin", "db");
+        return;
+      }
       await d.insert(admins).values({
         username: "admin",
         email: "admin@ablox.app",
@@ -219,12 +234,16 @@ export async function ensureDefaultAdmin(): Promise<void> {
       });
       log("Default admin user created (admin)", "db");
     } else {
-      // Always sync password with env var
-      await d
-        .update(admins)
-        .set({ passwordHash: adminHash, isActive: true, updatedAt: new Date() })
-        .where(eq(admins.username, "admin"));
-      log("Default admin password synced", "db");
+      // Only sync password when ADMIN_PASSWORD env var is explicitly set
+      if (adminPassword) {
+        await d
+          .update(admins)
+          .set({ passwordHash: adminHash, updatedAt: new Date() })
+          .where(eq(admins.username, "admin"));
+        log("Admin password synced from ADMIN_PASSWORD env var", "db");
+      } else {
+        log("Default admin already exists, keeping existing password", "db");
+      }
     }
   } catch (err: any) {
     log(`Failed to ensure admin: ${err.message}`, "db");

@@ -30,6 +30,9 @@ LOAD-TEST-REPORT.md
 .env.local
 .env.production
 
+# ── Database backups ──
+backups/
+
 # ── Signing keys (NEVER commit) ──
 signing/
 *.keystore

@@ -69,7 +69,10 @@ function createTransport(): Transporter | null {
         pass: smtpConfig.pass,
       },
       tls: {
-        rejectUnauthorized: false,
+        // Enforce TLS certificate verification in production to prevent MITM attacks
+        rejectUnauthorized: process.env.NODE_ENV === "production"
+          ? (process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== "false")
+          : false,
       },
     });
 

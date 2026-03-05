@@ -6,6 +6,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { eq, and, or, desc, asc, sql, count, ne, inArray, like, gte, lte, between } from "drizzle-orm";
+import { escapeLike } from "../utils/validation";
 import { getDb } from "../db";import { requireAdmin } from "../middleware/adminAuth";
 import { storage } from "../storage";
 import { createLogger } from "../logger";
@@ -537,7 +538,7 @@ async function getModerationSettings(): Promise<typeof defaultModerationSettings
       const data = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
       return { ...defaultModerationSettings, ...data };
     }
-  } catch {}
+  } catch (e: any) { chatLog.warn(`Failed to parse moderation config: ${e.message}`); }
   return { ...defaultModerationSettings };
 }
 
@@ -1113,7 +1114,7 @@ router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
       level: schema.users.level,
       canStream: schema.users.canStream,
     }).from(schema.users)
-      .where(sql`(${schema.users.username} ILIKE ${'%' + q + '%'} OR ${schema.users.displayName} ILIKE ${'%' + q + '%'})`)
+      .where(sql`(${schema.users.username} ILIKE ${'%' + escapeLike(q) + '%'} OR ${schema.users.displayName} ILIKE ${'%' + escapeLike(q) + '%'})`)
       .limit(20);
     return res.json({ success: true, data: users });
   } catch {

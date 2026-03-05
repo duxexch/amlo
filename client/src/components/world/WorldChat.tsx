@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Send, Heart, UserPlus, Gift, X, Plane, ArrowLeft, Clock, SkipForward, Flag, WifiOff, Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import avatarImg from "@/assets/images/avatar-3d.png";
-import { COUNTRIES } from "./CountrySelector";
+import { COUNTRIES } from "@/lib/countries";
 
 interface ChatMessage {
   id: string;

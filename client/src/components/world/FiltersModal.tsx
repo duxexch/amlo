@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Coins, Plane, ChevronDown, MessageSquare, Mic, Video, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { CountrySelector, COUNTRIES } from "./CountrySelector";
+import { CountrySelector } from "./CountrySelector";
+import { COUNTRIES } from "@/lib/countries";
 
 interface FiltersModalProps {
   isOpen: boolean;

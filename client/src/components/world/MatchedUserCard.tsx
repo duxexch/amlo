@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { UserPlus, Heart, MessageCircle, Crown, Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import avatarImg from "@/assets/images/avatar-3d.png";
-import { COUNTRIES } from "./CountrySelector";
+import { COUNTRIES } from "@/lib/countries";
 
 interface MatchedUser {
   id: string;

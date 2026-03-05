@@ -43,6 +43,7 @@ export interface StreamEventHandlers {
   onRemoteAudioTrack: (track: MediaStreamTrack, participantId: string) => void;
   onLocalVideoTrack: (track: MediaStreamTrack) => void;
   onLocalAudioTrack: (track: MediaStreamTrack) => void;
+  onScreenShareTrack: (track: MediaStreamTrack | null, participantId: string) => void;
   onParticipantJoined: (info: StreamParticipantInfo) => void;
   onParticipantLeft: (participantId: string) => void;
   onActiveSpeakersChanged: (speakerIds: string[]) => void;
@@ -164,7 +165,12 @@ class LiveKitStreamManager {
         if (track.kind === Track.Kind.Video) {
           const mediaTrack = track.mediaStreamTrack;
           if (mediaTrack) {
-            this.handlers.onRemoteVideoTrack?.(mediaTrack, participant.identity);
+            // Detect screen share vs camera tracks
+            if (publication.source === Track.Source.ScreenShare) {
+              this.handlers.onScreenShareTrack?.(mediaTrack, participant.identity);
+            } else {
+              this.handlers.onRemoteVideoTrack?.(mediaTrack, participant.identity);
+            }
           }
         } else if (track.kind === Track.Kind.Audio) {
           // Audio tracks are automatically played by LiveKit
@@ -182,7 +188,11 @@ class LiveKitStreamManager {
       RoomEvent.TrackUnsubscribed,
       (track: any, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         if (track.kind === Track.Kind.Video) {
-          this.handlers.onRemoteVideoRemoved?.(participant.identity);
+          if (_publication.source === Track.Source.ScreenShare) {
+            this.handlers.onScreenShareTrack?.(null, participant.identity);
+          } else {
+            this.handlers.onRemoteVideoRemoved?.(participant.identity);
+          }
         }
         track.detach();
       }
@@ -282,8 +292,6 @@ class LiveKitStreamManager {
         await this.room.localParticipant.publishTrack(track, {
           // Simulcast for video — send multiple quality layers
           simulcast: track.kind === Track.Kind.Video,
-          // For audio rooms, use higher audio quality
-          audioBitrate: publishVideo ? 32_000 : 64_000,
         });
 
         if (track.kind === Track.Kind.Video) {
@@ -394,6 +402,56 @@ class LiveKitStreamManager {
    */
   getRemoteParticipants(): Map<string, RemoteParticipant> {
     return this.room?.remoteParticipants || new Map();
+  }
+
+  /**
+   * Get local video MediaStreamTrack
+   */
+  getLocalVideoTrack(): MediaStreamTrack | null {
+    return this.localVideoTrack?.mediaStreamTrack || null;
+  }
+
+  /**
+   * Get remote video tracks as array of {track, participantId}
+   */
+  getRemoteVideoTracks(): Array<{ track: MediaStreamTrack; participantId: string }> {
+    const result: Array<{ track: MediaStreamTrack; participantId: string }> = [];
+    if (!this.room) return result;
+    this.room.remoteParticipants.forEach((participant) => {
+      participant.trackPublications.forEach((pub) => {
+        if (pub.isSubscribed && pub.track && pub.track.kind === Track.Kind.Video) {
+          const mt = pub.track.mediaStreamTrack;
+          if (mt) result.push({ track: mt, participantId: participant.identity });
+        }
+      });
+    });
+    return result;
+  }
+
+  /**
+   * Toggle screen share on/off
+   */
+  async setScreenShareEnabled(enabled: boolean): Promise<void> {
+    if (!this.room?.localParticipant) return;
+    await this.room.localParticipant.setScreenShareEnabled(enabled);
+  }
+
+  /**
+   * Toggle screen share — returns new state
+   * @returns true if screen share is now active
+   */
+  async toggleScreenShare(): Promise<boolean> {
+    if (!this.room?.localParticipant) return false;
+    const wasSharing = this.room.localParticipant.isScreenShareEnabled;
+    await this.room.localParticipant.setScreenShareEnabled(!wasSharing);
+    return !wasSharing;
+  }
+
+  /**
+   * Check if screen share is active
+   */
+  isScreenSharing(): boolean {
+    return this.room?.localParticipant?.isScreenShareEnabled ?? false;
   }
 
   /**

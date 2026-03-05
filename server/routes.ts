@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { Router } from "express";
 import { storage } from "./storage";
 import adminRoutes from "./routes/admin";
 import agentRoutes from "./routes/agent";
@@ -7,6 +8,11 @@ import socialRoutes from "./routes/social";
 import adminChatRoutes from "./routes/adminChat";
 import worldRoutes from "./routes/world";
 import userAuthRoutes from "./routes/userAuth";
+import uploadRoutes from "./routes/upload";
+import pushRoutes from "./routes/push";
+import storiesRoutes from "./routes/stories";
+import groupsRoutes from "./routes/groups";
+import paymentRoutes from "./routes/payments";
 import { createLogger } from "./logger";
 const log = (msg: string, _src?: string) => routesLog.info(msg);
 const routesLog = createLogger("routes");
@@ -16,30 +22,62 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ═══════════════════════════════════════════════════════
+  // API Versioning: mount all routes under /api/v1/
+  // Legacy /api/ paths remain as aliases for backward compat
+  // ═══════════════════════════════════════════════════════
+  const v1 = Router();
+
   // ── Admin Panel API ──
-  app.use("/api/admin", adminRoutes);
-  log("Admin API routes registered at /api/admin", "routes");
+  v1.use("/admin", adminRoutes);
+  log("Admin API routes registered at /api/v1/admin", "routes");
 
   // ── Admin Chat & Broadcast Management API ──
-  app.use("/api/admin/chat", adminChatRoutes);
-  log("Admin Chat Management routes registered at /api/admin/chat", "routes");
+  v1.use("/admin/chat", adminChatRoutes);
+  log("Admin Chat Management routes registered at /api/v1/admin/chat", "routes");
 
   // ── Agent Panel API ──
-  app.use("/api/agent", agentRoutes);
-  log("Agent API routes registered at /api/agent", "routes");
+  v1.use("/agent", agentRoutes);
+  log("Agent API routes registered at /api/v1/agent", "routes");
 
   // ── Social API (Friends, Chat, Calls) ──
-  app.use("/api/social", socialRoutes);
-  log("Social API routes registered at /api/social", "routes");
+  v1.use("/social", socialRoutes);
+  log("Social API routes registered at /api/v1/social", "routes");
 
   // ── User Auth & Profile API ──
-  app.use("/api/auth", userAuthRoutes);
-  log("User Auth routes registered at /api/auth", "routes");
+  v1.use("/auth", userAuthRoutes);
+  log("User Auth routes registered at /api/v1/auth", "routes");
+
+  // ── File Upload API ──
+  v1.use("/upload", uploadRoutes);
+  log("Upload routes registered at /api/v1/upload", "routes");
+
+  // ── Push Notifications API ──
+  v1.use("/push", pushRoutes);
+  log("Push notification routes registered at /api/v1/push", "routes");
+
+  // ── Stories (Moments) API ──
+  v1.use("/social/stories", storiesRoutes);
+  log("Stories routes registered at /api/v1/social/stories", "routes");
+
+  // ── Group Chat API ──
+  v1.use("/social/groups", groupsRoutes);
+  log("Group Chat routes registered at /api/v1/social/groups", "routes");
 
   // ── World API (Around the World — حول العالم) ──
-  app.use("/api/social/world", worldRoutes);
-  app.use("/api/admin/world", worldRoutes);
-  log("World API routes registered at /api/social/world & /api/admin/world", "routes");
+  v1.use("/social/world", worldRoutes);
+  v1.use("/admin/world", worldRoutes);
+  log("World API routes registered at /api/v1/social/world & /api/v1/admin/world", "routes");
+
+  // ── Payment Gateway (Stripe) ──
+  v1.use("/payments", paymentRoutes);
+  log("Payment routes registered at /api/v1/payments", "routes");
+
+  // Mount v1 router + legacy /api alias
+  app.use("/api/v1", v1);
+  app.use("/api", v1);   // backward compatibility — same handlers
+  log("API versioning active: /api/v1/* (primary) + /api/* (legacy alias)", "routes");
 
   // ── Public API routes (for the app) ──
 

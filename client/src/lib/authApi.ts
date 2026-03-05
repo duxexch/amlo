@@ -102,6 +102,47 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ email, code }),
     }),
+
+  // OAuth
+  oauthGoogle: (idToken: string) =>
+    request<{ success: boolean; data: any }>("/oauth/google", {
+      method: "POST",
+      body: JSON.stringify({ idToken }),
+    }),
+
+  oauthFacebook: (accessToken: string) =>
+    request<{ success: boolean; data: any }>("/oauth/facebook", {
+      method: "POST",
+      body: JSON.stringify({ accessToken }),
+    }),
+
+  oauthApple: (identityToken: string, fullName?: { givenName?: string; familyName?: string }) =>
+    request<{ success: boolean; data: any }>("/oauth/apple", {
+      method: "POST",
+      body: JSON.stringify({ identityToken, fullName }),
+    }),
+
+  // 2FA
+  setup2FA: () =>
+    request<{ success: boolean; data: { secret: string; otpauthUri: string } }>("/2fa/setup", { method: "POST" }),
+
+  verifySetup2FA: (code: string) =>
+    request<{ success: boolean; message: string }>("/2fa/verify-setup", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  verify2FA: (userId: string, code: string) =>
+    request<{ success: boolean; data: any }>("/2fa/verify", {
+      method: "POST",
+      body: JSON.stringify({ userId, code }),
+    }),
+
+  disable2FA: (code: string) =>
+    request<{ success: boolean; message: string }>("/2fa/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 };
 
 // ── PIN & Profiles ──
