@@ -134,9 +134,16 @@ export const walletApi = {
   incomeChart: (days = 30) => request<any>(`/wallet/income-chart?days=${days}`),
   cancelWithdrawal: (withdrawalId: string) =>
     request("/wallet/cancel-withdrawal", { method: "POST", body: JSON.stringify({ withdrawalId }) }),
-  totalSpent: () => request<{ totalSpent: number }>("/wallet/total-spent"),
   conversionRate: () => request<{ coinsPerUsd: number }>("/wallet/conversion-rate"),
-  spendingBreakdown: () => request<{ type: string; total: number; count: number }[]>("/wallet/spending-breakdown"),
+  /** Miles pricing packages */
+  milesPricing: () => request<{ packages: any[] }>("/miles-pricing"),
+  /** Recharge packages from payment system */
+  rechargePackages: async () => {
+    const res = await fetch("/api/payments/packages", { credentials: "include" });
+    const json = await res.json();
+    if (!res.ok) throw json;
+    return json;
+  },
   /** #14: Merged spending summary (totalSpent + breakdown in one call) */
   spendingSummary: () => request<{ totalSpent: number; breakdown: { type: string; total: number; count: number }[] }>("/wallet/spending-summary"),
   /** #15: Get remaining withdrawal limits */

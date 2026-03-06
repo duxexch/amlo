@@ -523,12 +523,6 @@ export const adminWithdrawals = {
 
   update: (id: string, data: { status: string; adminNotes?: string }) =>
     request(`/withdrawal-requests/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-
-  exportCsvUrl: (status?: string) => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    return `/api/admin/export/withdrawals?${params}`;
-  },
 };
 
 // ── Admin Exports ────────────────────────────────────────

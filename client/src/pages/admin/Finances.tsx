@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { adminTransactions, adminPaymentMethods, adminWallets, adminPricing, adminFinanceStats, adminWithdrawals, adminExports, adminAdjustments } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
+import { getTypeIcon as sharedGetTypeIcon, getStatusStyle as sharedGetStatusStyle } from "./financeHelpers";
 
 // ════════════════════════════════════════════════════════════
 // TYPES
@@ -266,7 +267,7 @@ export function FinancesPage() {
 // ════════════════════════════════════════════════════════════
 
 function TransactionsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -308,28 +309,10 @@ function TransactionsTab({ search, showFilters }: { search: string; showFilters:
     finally { setActionLoading(null); }
   };
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "purchase": return <CreditCard className="w-4 h-4 text-green-400" />;
-      case "gift_sent": return <ArrowUpRight className="w-4 h-4 text-red-400" />;
-      case "gift_received": return <ArrowDownLeft className="w-4 h-4 text-blue-400" />;
-      case "withdrawal": return <DollarSign className="w-4 h-4 text-orange-400" />;
-      case "refund": return <RefreshCw className="w-4 h-4 text-purple-400" />;
-      default: return <Gift className="w-4 h-4 text-white/40" />;
-    }
-  };
+  const getTypeIcon = (type: string) => sharedGetTypeIcon(type);
 
   const getTypeLabel = (type: string) => { const opt = TX_TYPE_OPTIONS.find((o) => o.value === type); return opt ? t(opt.labelKey) : type; };
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case "completed": return "bg-green-400/10 text-green-400 border-green-400/20";
-      case "pending": return "bg-yellow-400/10 text-yellow-400 border-yellow-400/20";
-      case "failed": return "bg-red-400/10 text-red-400 border-red-400/20";
-      case "rejected": return "bg-red-500/10 text-red-500 border-red-500/20";
-      case "refunded": return "bg-purple-400/10 text-purple-400 border-purple-400/20";
-      default: return "bg-white/5 text-white/30 border-white/10";
-    }
-  };
+  const getStatusStyle = (status: string) => sharedGetStatusStyle(status);
   const getStatusLabel = (status: string) => { const opt = TX_STATUS_OPTIONS.find((o) => o.value === status); return opt ? t(opt.labelKey) : status; };
   const txName = (tx: Transaction) => tx.userName || tx.username || "—";
 
@@ -428,8 +411,8 @@ function TransactionsTab({ search, showFilters }: { search: string; showFilters:
                       <span className="text-xs font-bold text-white">@{txName(tx)}</span>
                     </td>
                     <td className="py-2 px-3">
-                      <span className={`text-sm font-bold ${tx.type === "gift_sent" || tx.type === "withdrawal" ? "text-red-400" : "text-green-400"}`}>
-                        {tx.type === "gift_sent" || tx.type === "withdrawal" ? "-" : "+"}{Math.abs(tx.amount).toLocaleString()}
+                      <span className={`text-sm font-bold ${tx.amount < 0 ? "text-red-400" : "text-green-400"}`}>
+                        {tx.amount < 0 ? "-" : "+"}{Math.abs(tx.amount).toLocaleString()}
                       </span>
                       <span className="text-[10px] text-white/25 mr-1">{tx.currency === "coins" ? t("admin.finances.currency_coins") : t("admin.finances.currency_diamonds")}</span>
                     </td>
@@ -448,7 +431,7 @@ function TransactionsTab({ search, showFilters }: { search: string; showFilters:
                       </span>
                     </td>
                     <td className="py-2 px-3 hidden xl:table-cell">
-                      <span className="text-xs text-white/30">{new Date(tx.createdAt).toLocaleString("ar-EG")}</span>
+                      <span className="text-xs text-white/30">{new Date(tx.createdAt).toLocaleString(i18n.language)}</span>
                     </td>
                     <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1">
@@ -541,7 +524,7 @@ function TransactionModal({
   getStatusStyle: (status: string) => string;
   getStatusLabel: (status: string) => string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [rejectReason, setRejectReason] = useState("");
   const [adminNotes, setAdminNotes] = useState(tx.adminNotes || "");
   const [editAmount, setEditAmount] = useState(String(tx.amount));
@@ -630,7 +613,7 @@ function TransactionModal({
               {tx.status === "refunded" && <RefreshCw className="w-3.5 h-3.5" />}
               {getStatusLabel(tx.status)}
             </span>
-            <span className="text-xs text-white/30">{new Date(tx.createdAt).toLocaleString("ar-EG")}</span>
+            <span className="text-xs text-white/30">{new Date(tx.createdAt).toLocaleString(i18n.language)}</span>
           </div>
 
           {/* Info Grid */}
@@ -666,7 +649,7 @@ function TransactionModal({
           {/* Review info */}
           {tx.reviewedAt && (
             <p className="text-[11px] text-white/20 text-center">
-              {t("admin.finances.reviewedAt", { date: new Date(tx.reviewedAt).toLocaleString("ar-EG") })}
+              {t("admin.finances.reviewedAt", { date: new Date(tx.reviewedAt).toLocaleString(i18n.language) })}
             </p>
           )}
 
@@ -1179,7 +1162,7 @@ interface WalletDetail {
 }
 
 function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [walletInfo, setWalletInfo] = useState<WalletDetail | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1210,28 +1193,10 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "purchase": return <CreditCard className="w-3.5 h-3.5 text-green-400" />;
-      case "gift_sent": return <ArrowUpRight className="w-3.5 h-3.5 text-red-400" />;
-      case "gift_received": return <ArrowDownLeft className="w-3.5 h-3.5 text-blue-400" />;
-      case "withdrawal": return <DollarSign className="w-3.5 h-3.5 text-orange-400" />;
-      case "refund": return <RefreshCw className="w-3.5 h-3.5 text-purple-400" />;
-      default: return <Gift className="w-3.5 h-3.5 text-white/40" />;
-    }
-  };
+  const getTypeIcon = (type: string) => sharedGetTypeIcon(type, "sm");
 
   const getTypeLabel = (type: string) => { const opt = TX_TYPE_OPTIONS.find((o) => o.value === type); return opt ? t(opt.labelKey) : type; };
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case "completed": return "bg-green-400/10 text-green-400 border-green-400/20";
-      case "pending": return "bg-yellow-400/10 text-yellow-400 border-yellow-400/20";
-      case "failed": return "bg-red-400/10 text-red-400 border-red-400/20";
-      case "rejected": return "bg-red-500/10 text-red-500 border-red-500/20";
-      case "refunded": return "bg-purple-400/10 text-purple-400 border-purple-400/20";
-      default: return "bg-white/5 text-white/30 border-white/10";
-    }
-  };
+  const getStatusStyle = (status: string) => sharedGetStatusStyle(status);
   const getStatusLabel = (status: string) => { const opt = TX_STATUS_OPTIONS.find((o) => o.value === status); return opt ? t(opt.labelKey) : status; };
 
   return (
@@ -1331,10 +1296,10 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-left">
-                          <p className={`text-sm font-bold ${tx.type === "gift_sent" || tx.type === "withdrawal" ? "text-red-400" : "text-green-400"}`}>
-                            {tx.type === "gift_sent" || tx.type === "withdrawal" ? "-" : "+"}{Math.abs(tx.amount).toLocaleString()}
+                          <p className={`text-sm font-bold ${tx.amount < 0 ? "text-red-400" : "text-green-400"}`}>
+                            {tx.amount < 0 ? "-" : "+"}{Math.abs(tx.amount).toLocaleString()}
                           </p>
-                          <p className="text-[10px] text-white/20">{new Date(tx.createdAt).toLocaleDateString("ar-EG")}</p>
+                          <p className="text-[10px] text-white/20">{new Date(tx.createdAt).toLocaleDateString(i18n.language)}</p>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${getStatusStyle(tx.status)}`}>
                           {getStatusLabel(tx.status)}
@@ -1479,7 +1444,10 @@ function PaymentMethodsTab({ search }: { search: string }) {
     const newState = !allActive;
     setToggleAllLoading(true);
     try {
-      await Promise.all(methods.map((m) => adminPaymentMethods.update(m.id, { isActive: newState })));
+      // Batch: send all updates via Promise.allSettled to avoid N sequential failures
+      const results = await Promise.allSettled(methods.map((m) => adminPaymentMethods.update(m.id, { isActive: newState })));
+      const failedCount = results.filter(r => r.status === "rejected").length;
+      if (failedCount > 0) console.warn(`${failedCount} toggle updates failed`);
       setMethods((prev) => prev.map((m) => ({ ...m, isActive: newState })));
     } catch (e) { console.error(e); }
     finally { setToggleAllLoading(false); }
@@ -1795,12 +1763,12 @@ function CurrenciesTab() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [packages, setPackages] = useState<any[]>([]);
-  const [filters, setFilters] = useState<any[]>([]);
-  const [callRates, setCallRates] = useState({ voiceCallRate: 5, videoCallRate: 10 });
-  const [messageCosts, setMessageCosts] = useState<any>({});
-  const [matchingStats, setMatchingStats] = useState<any>(null);
-  const [editingPackage, setEditingPackage] = useState<any>(null);
+  const [packages, setPackages] = useState<{ id: string; coins: number; bonusCoins: number; priceUsd: string; isPopular: boolean; sortOrder: number }[]>([]);
+  const [filters, setFilters] = useState<{ filterType: string; priceCoins: number }[]>([]);
+  const [callRates, setCallRates] = useState<{ voiceCallRate: number; videoCallRate: number }>({ voiceCallRate: 5, videoCallRate: 10 });
+  const [messageCosts, setMessageCosts] = useState<Record<string, any>>({});
+  const [matchingStats, setMatchingStats] = useState<Record<string, number> | null>(null);
+  const [editingPackage, setEditingPackage] = useState<Record<string, any> | null>(null);
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -2242,11 +2210,15 @@ function FinancialDashboard() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
       const res = await adminFinanceStats.get();
-      if (res?.data) setStats(res.data);
+      if (res?.data) {
+        setStats(res.data);
+        setLastUpdated(new Date());
+      }
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -2286,7 +2258,13 @@ function FinancialDashboard() {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div className="space-y-1.5">
+      {lastUpdated && (
+        <div className="flex justify-end">
+          <span className="text-[10px] text-white/25">{t("admin.finances.lastUpdated", "آخر تحديث")}: {lastUpdated.toLocaleTimeString()}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
       {cards.map((c, i) => (
         <motion.div
           key={i}
@@ -2311,6 +2289,7 @@ function FinancialDashboard() {
           </div>
         </motion.div>
       ))}
+      </div>
     </div>
   );
 }
@@ -2328,7 +2307,7 @@ const WR_STATUS_OPTIONS = [
 ];
 
 function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -2480,10 +2459,10 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                   <td className="px-3 py-2.5 text-emerald-400 font-medium">${wr.amountUsd || "—"}</td>
                   <td className="px-3 py-2.5">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(wr.status)}`}>
-                      {wr.status}
+                      {WR_STATUS_OPTIONS.find(o => o.value === wr.status)?.labelKey ? t(WR_STATUS_OPTIONS.find(o => o.value === wr.status)!.labelKey) : wr.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 text-white/40">{new Date(wr.createdAt).toLocaleDateString("ar")}</td>
+                  <td className="px-3 py-2.5 text-white/40">{new Date(wr.createdAt).toLocaleDateString(i18n.language)}</td>
                   <td className="px-3 py-2.5 text-end">
                     <div className="flex items-center justify-end gap-1.5">
                       {(wr.status === "pending" || wr.status === "processing") && (
@@ -2615,7 +2594,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                 <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrUser")}:</span> <span className="text-white font-medium">@{selectedWr.user?.username || selectedWr.userId?.slice(0, 8)}</span></div>
                 <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrAmount")}:</span> <span className="text-white font-medium">{selectedWr.amount?.toLocaleString()} {t("admin.finances.coins")}</span></div>
                 <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrAmountUsd")}:</span> <span className="text-emerald-400 font-medium">${selectedWr.amountUsd || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.txStatus")}:</span> <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(selectedWr.status)}`}>{selectedWr.status}</span></div>
+                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.txStatus")}:</span> <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(selectedWr.status)}`}>{WR_STATUS_OPTIONS.find(o => o.value === selectedWr.status)?.labelKey ? t(WR_STATUS_OPTIONS.find(o => o.value === selectedWr.status)!.labelKey) : selectedWr.status}</span></div>
                 {selectedWr.paymentDetails && (
                   <div>
                     <span className="text-white/40 block mb-1">{t("admin.finances.wrPaymentDetails")}:</span>
@@ -2662,7 +2641,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                           {adj.amount > 0 ? "+" : ""}{adj.amount} {adj.currency}
                         </span>
                         <span className="text-white/30 truncate max-w-[50%]">{adj.description}</span>
-                        <span className="text-white/20">{new Date(adj.createdAt).toLocaleDateString("ar")}</span>
+                        <span className="text-white/20">{new Date(adj.createdAt).toLocaleDateString(i18n.language)}</span>
                       </div>
                     ))}
                   </div>

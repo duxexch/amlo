@@ -1814,61 +1814,6 @@ router.post("/wallet/cancel-withdrawal", async (req: Request, res: Response) => 
 });
 
 /**
- * GET /social/wallet/total-spent — إجمالي المصروفات الحقيقي
- */
-router.get("/wallet/total-spent", async (req: Request, res: Response) => {
-  const userId = requireUser(req, res);
-  if (!userId) return;
-  try {
-    const db = getDb();
-    if (!db) return res.json({ success: true, data: { totalSpent: 0 } });
-
-    const [result] = await db.select({ total: sql<number>`COALESCE(SUM(ABS(amount)), 0)` })
-      .from(schema.walletTransactions)
-      .where(and(
-        eq(schema.walletTransactions.userId, userId),
-        sql`${schema.walletTransactions.amount} < 0`,
-        eq(schema.walletTransactions.status, "completed")
-      ));
-
-    return res.json({ success: true, data: { totalSpent: Number(result?.total || 0) } });
-  } catch (err: any) {
-    socialLog.error({ err }, "Total spent error");
-    return res.status(500).json({ success: false, message: "حدث خطأ" });
-  }
-});
-
-/**
- * GET /social/wallet/spending-breakdown — تفصيل المصروفات حسب النوع
- */
-router.get("/wallet/spending-breakdown", async (req: Request, res: Response) => {
-  const userId = requireUser(req, res);
-  if (!userId) return;
-  try {
-    const db = getDb();
-    if (!db) return res.json({ success: true, data: [] });
-
-    const breakdown = await db.select({
-      type: schema.walletTransactions.type,
-      total: sql<number>`COALESCE(SUM(ABS(amount)), 0)`,
-      count: sql<number>`COUNT(*)`,
-    })
-      .from(schema.walletTransactions)
-      .where(and(
-        eq(schema.walletTransactions.userId, userId),
-        sql`${schema.walletTransactions.amount} < 0`,
-        eq(schema.walletTransactions.status, "completed")
-      ))
-      .groupBy(schema.walletTransactions.type);
-
-    return res.json({ success: true, data: breakdown.map(b => ({ type: b.type, total: Number(b.total), count: Number(b.count) })) });
-  } catch (err: any) {
-    socialLog.error({ err }, "Spending breakdown error");
-    return res.status(500).json({ success: false, message: "حدث خطأ" });
-  }
-});
-
-/**
  * #14: GET /social/wallet/spending-summary — ملخص الإنفاق (totalSpent + breakdown) في API واحد
  */
 router.get("/wallet/spending-summary", async (req: Request, res: Response) => {

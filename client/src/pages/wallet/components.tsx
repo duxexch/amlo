@@ -17,20 +17,24 @@ export const ShimmerButton = ({ children, className = "", ...props }: React.Butt
   </button>
 );
 
-/* ─── CountUp ─── */
+/* ─── CountUp — uses ref to avoid stale closure ─── */
 export const CountUp = ({ value }: { value: number }) => {
   const [display, setDisplay] = React.useState(0);
+  const fromRef = React.useRef(0);
   React.useEffect(() => {
+    fromRef.current = display;
     const dur = 800;
     const start = performance.now();
-    const from = display;
+    const from = fromRef.current;
+    let raf: number;
     const step = (now: number) => {
       const p = Math.min((now - start) / dur, 1);
       const ease = 1 - Math.pow(1 - p, 3);
       setDisplay(Math.round(from + (value - from) * ease));
-      if (p < 1) requestAnimationFrame(step);
+      if (p < 1) raf = requestAnimationFrame(step);
     };
-    requestAnimationFrame(step);
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
   }, [value]);
   return <>{display.toLocaleString()}</>;
 };

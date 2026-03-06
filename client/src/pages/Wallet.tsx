@@ -99,11 +99,11 @@ export function Wallet() {
   // Fetch coin packages from API
   useEffect(() => {
     if (!packagesLoaded) {
-      fetch("/api/payments/packages", { credentials: "include" })
-        .then(r => r.json())
-        .then(data => {
-          if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-            setPackages(data.data.map((p: any) => ({
+      walletApi.rechargePackages()
+        .then((data: any) => {
+          const pkgs = Array.isArray(data) ? data : data?.data || [];
+          if (pkgs.length > 0) {
+            setPackages(pkgs.map((p: any) => ({
               id: p.id,
               coins: p.coins || 0,
               bonus: p.bonus_coins || p.bonusCoins || 0,
@@ -233,13 +233,12 @@ export function Wallet() {
     }
   }, [activeTab, chartPeriod]);
 
-  // Load miles
+  // Load miles — use API client instead of raw fetch
   useEffect(() => {
     if (activeTab === "miles" && milesPackages.length === 0) {
       setMilesLoading(true);
-      fetch("/api/social/miles-pricing", { credentials: "include" })
-        .then(r => r.json())
-        .then(data => { if (data.success && data.data?.packages) setMilesPackages(data.data.packages); })
+      walletApi.milesPricing()
+        .then((data: any) => { if (data?.packages) setMilesPackages(data.packages); })
         .catch(() => {})
         .finally(() => setMilesLoading(false));
     }
@@ -266,17 +265,22 @@ export function Wallet() {
     }
   }, [activeTab]);
 
-  // Load total spent for hero card — #14: now part of spending summary, keep standalone for initial load
+  // #13: Fetch conversion rate with sessionStorage cache (5 min TTL)
   useEffect(() => {
-    walletApi.spendingSummary()
-      .then((res: any) => {
-        setTotalSpent(res?.totalSpent || 0);
-        setSpendingBreakdown(Array.isArray(res?.breakdown) ? res.breakdown : []);
-      })
-      .catch(() => {});
-    // #4: Fetch conversion rate from API
+    const cached = sessionStorage.getItem("wallet:conversionRate");
+    if (cached) {
+      try {
+        const { rate, ts } = JSON.parse(cached);
+        if (Date.now() - ts < 5 * 60_000 && rate > 0) { setConversionRate(rate); return; }
+      } catch {}
+    }
     walletApi.conversionRate()
-      .then((res: any) => { if (res?.coinsPerUsd > 0) setConversionRate(res.coinsPerUsd); })
+      .then((res: any) => {
+        if (res?.coinsPerUsd > 0) {
+          setConversionRate(res.coinsPerUsd);
+          sessionStorage.setItem("wallet:conversionRate", JSON.stringify({ rate: res.coinsPerUsd, ts: Date.now() }));
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -337,6 +341,12 @@ export function Wallet() {
           setWithdrawalRequests(res?.data || []);
           setWrPage(1); setWrHasMore((res?.data || []).length >= 20);
         }).catch(() => {});
+      } else if (activeTab === "miles") {
+        setMilesLoading(true);
+        walletApi.milesPricing()
+          .then((data: any) => { if (data?.packages) setMilesPackages(data.packages); })
+          .catch(() => {})
+          .finally(() => setMilesLoading(false));
       }
       haptic();
       toast.success(t("wallet.title"), { description: t("wallet.refreshed") });
@@ -349,6 +359,21 @@ export function Wallet() {
   const handleWithdrawConfirm = () => {
     const amount = Number(withdrawAmount);
     if (!amount || amount < 1000) return;
+    // Client-side withdrawal limit validation
+    if (withdrawLimits) {
+      if (withdrawLimits.hasActiveRequest) {
+        toast.error(t("wallet.activeRequestExists", "لديك طلب سحب قيد المعالجة"));
+        return;
+      }
+      if (amount > withdrawLimits.dailyRemaining) {
+        toast.error(t("wallet.dailyLimitExceeded", "تجاوزت الحد اليومي للسحب"));
+        return;
+      }
+      if (amount > withdrawLimits.weeklyRemaining) {
+        toast.error(t("wallet.weeklyLimitExceeded", "تجاوزت الحد الأسبوعي للسحب"));
+        return;
+      }
+    }
     if (withdrawMethod === "bank" && (!bankName.trim() || !accountNumber.trim() || !accountHolder.trim())) {
       toast.error(t("wallet.fillAllFields"));
       return;
@@ -619,7 +644,7 @@ export function Wallet() {
             {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
               {[
-                { label: t("wallet.totalEarned"), value: balance.diamonds, color: "text-emerald-400", gradient: "from-emerald-500/15 to-emerald-500/5", border: "border-emerald-500/10", icon: <Plus className="w-3.5 h-3.5" /> },
+                { label: t("wallet.myDiamonds", "ماساتي"), value: balance.diamonds, color: "text-emerald-400", gradient: "from-emerald-500/15 to-emerald-500/5", border: "border-emerald-500/10", icon: <Plus className="w-3.5 h-3.5" /> },
                 { label: t("wallet.totalSpentAll"), value: totalSpent, color: "text-red-400", gradient: "from-red-500/15 to-red-500/5", border: "border-red-500/10", icon: <Minus className="w-3.5 h-3.5" /> },
                 { label: t("wallet.tabMiles"), value: balance.miles, color: "text-cyan-400", gradient: "from-cyan-500/15 to-cyan-500/5", border: "border-cyan-500/10", icon: <Navigation className="w-3.5 h-3.5" /> },
               ].map((stat, i) => (
@@ -1284,7 +1309,7 @@ export function Wallet() {
                   { label: t("wallet.txStatus"), value: getStatusBadge(selectedTx.status) as any },
                   { label: t("wallet.txDate"), value: selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString(i18n.language) : "-" },
                   { label: t("wallet.balanceAfter"), value: selectedTx.balanceAfter?.toLocaleString() || "-" },
-                  { label: t("wallet.txPaymentMethod"), value: getMethodLabel(selectedTx.paymentMethod) },
+                  ...(selectedTx.type === "withdrawal" ? [{ label: t("wallet.txPaymentMethod"), value: getMethodLabel(selectedTx.paymentMethod) }] : []),
                   { label: t("wallet.txId"), value: selectedTx.id?.slice(0, 16) + "..." || "-" },
                 ].map((row, i) => (
                   <div key={i}>
