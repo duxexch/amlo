@@ -906,20 +906,23 @@ router.get("/message-reports/stats", requireAdmin, async (_req, res) => {
   if (!db) return res.json({ success: true, data: { pending: 0, reviewed: 0, resolved: 0, dismissed: 0, total: 0 } });
 
   try {
-    const [pending] = await db.select({ count: count() }).from(schema.messageReports).where(eq(schema.messageReports.status, "pending"));
-    const [reviewed] = await db.select({ count: count() }).from(schema.messageReports).where(eq(schema.messageReports.status, "reviewed"));
-    const [resolved] = await db.select({ count: count() }).from(schema.messageReports).where(eq(schema.messageReports.status, "resolved"));
-    const [dismissed] = await db.select({ count: count() }).from(schema.messageReports).where(eq(schema.messageReports.status, "dismissed"));
-    const [total] = await db.select({ count: count() }).from(schema.messageReports);
+    // Single query with CASE WHEN instead of 5 sequential COUNT queries
+    const [stats] = await db.select({
+      pending: sql<number>`count(*) filter (where ${schema.messageReports.status} = 'pending')`,
+      reviewed: sql<number>`count(*) filter (where ${schema.messageReports.status} = 'reviewed')`,
+      resolved: sql<number>`count(*) filter (where ${schema.messageReports.status} = 'resolved')`,
+      dismissed: sql<number>`count(*) filter (where ${schema.messageReports.status} = 'dismissed')`,
+      total: count(),
+    }).from(schema.messageReports);
 
     return res.json({
       success: true,
       data: {
-        pending: pending?.count || 0,
-        reviewed: reviewed?.count || 0,
-        resolved: resolved?.count || 0,
-        dismissed: dismissed?.count || 0,
-        total: total?.count || 0,
+        pending: stats?.pending || 0,
+        reviewed: stats?.reviewed || 0,
+        resolved: stats?.resolved || 0,
+        dismissed: stats?.dismissed || 0,
+        total: stats?.total || 0,
       },
     });
   } catch {
@@ -1119,6 +1122,141 @@ router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
     return res.json({ success: true, data: users });
   } catch {
     return res.json({ success: true, data: [] });
+  }
+});
+
+// ── CSV Export Helpers ──────────────────────────────
+function toCsv(headers: string[], rows: string[][]): string {
+  const BOM = "\uFEFF"; // Excel Arabic support
+  const escape = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [headers.map(escape).join(",")];
+  for (const row of rows) lines.push(row.map(escape).join(","));
+  return BOM + lines.join("\r\n");
+}
+
+// Export conversations as CSV
+router.get("/export/conversations", async (_req, res) => {
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+  try {
+    const convs = await db.select({
+      id: schema.conversations.id,
+      user1: schema.conversations.participant1Id,
+      user2: schema.conversations.participant2Id,
+      lastMessageId: schema.conversations.lastMessageId,
+      lastMessageAt: schema.conversations.lastMessageAt,
+      createdAt: schema.conversations.createdAt,
+    }).from(schema.conversations)
+      .orderBy(desc(schema.conversations.lastMessageAt))
+      .limit(5000);
+
+    // Get user names
+    const userIds: string[] = [...new Set(convs.flatMap((c: { user1: string; user2: string }) => [c.user1, c.user2]))];
+    const users = userIds.length > 0
+      ? await db.select({ id: schema.users.id, username: schema.users.username })
+          .from(schema.users).where(inArray(schema.users.id, userIds))
+      : [];
+    const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
+
+    const headers = ["ID", "User 1", "User 2", "Last Message ID", "Last Message At", "Created At"];
+    const rows = convs.map((c: { id: string; user1: string; user2: string; lastMessageId: string | null; lastMessageAt: Date | null; createdAt: Date }) => [
+      String(c.id),
+      nameMap.get(c.user1) ?? String(c.user1),
+      nameMap.get(c.user2) ?? String(c.user2),
+      c.lastMessageId ?? "",
+      c.lastMessageAt ? new Date(c.lastMessageAt).toISOString() : "",
+      c.createdAt ? new Date(c.createdAt).toISOString() : "",
+    ]);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=conversations.csv");
+    return res.send(toCsv(headers, rows));
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Export messages as CSV
+router.get("/export/messages", async (_req, res) => {
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+  try {
+    const msgs = await db.select({
+      id: schema.messages.id,
+      conversationId: schema.messages.conversationId,
+      senderId: schema.messages.senderId,
+      content: schema.messages.content,
+      type: schema.messages.type,
+      createdAt: schema.messages.createdAt,
+    }).from(schema.messages)
+      .orderBy(desc(schema.messages.createdAt))
+      .limit(10000);
+
+    const senderIds: string[] = [...new Set(msgs.map((m: { senderId: string }) => m.senderId))];
+    const users = senderIds.length > 0
+      ? await db.select({ id: schema.users.id, username: schema.users.username })
+          .from(schema.users).where(inArray(schema.users.id, senderIds))
+      : [];
+    const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
+
+    const headers = ["ID", "Conversation ID", "Sender", "Content", "Type", "Created At"];
+    const rows = msgs.map((m: { id: string; conversationId: string; senderId: string; content: string | null; type: string; createdAt: Date }) => [
+      String(m.id),
+      String(m.conversationId),
+      nameMap.get(m.senderId) ?? String(m.senderId),
+      m.content ?? "",
+      m.type ?? "text",
+      m.createdAt ? new Date(m.createdAt).toISOString() : "",
+    ]);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=messages.csv");
+    return res.send(toCsv(headers, rows));
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Export reports as CSV
+router.get("/export/reports", async (_req, res) => {
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+  try {
+    const reports = await db.select({
+      id: schema.messageReports.id,
+      messageId: schema.messageReports.messageId,
+      reporterId: schema.messageReports.reporterId,
+      reportedUserId: schema.messageReports.reportedUserId,
+      reason: schema.messageReports.reason,
+      status: schema.messageReports.status,
+      createdAt: schema.messageReports.createdAt,
+    }).from(schema.messageReports)
+      .orderBy(desc(schema.messageReports.createdAt))
+      .limit(5000);
+
+    const userIds: string[] = [...new Set(reports.flatMap((r: { reporterId: string; reportedUserId: string }) => [r.reporterId, r.reportedUserId]))];
+    const users = userIds.length > 0
+      ? await db.select({ id: schema.users.id, username: schema.users.username })
+          .from(schema.users).where(inArray(schema.users.id, userIds))
+      : [];
+    const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
+
+    const headers = ["ID", "Message ID", "Reporter", "Reported User", "Reason", "Status", "Created At"];
+    const rows = reports.map((r: { id: string; messageId: string; reporterId: string; reportedUserId: string; reason: string | null; status: string | null; createdAt: Date }) => [
+      String(r.id),
+      String(r.messageId),
+      nameMap.get(r.reporterId) ?? String(r.reporterId),
+      nameMap.get(r.reportedUserId) ?? String(r.reportedUserId),
+      r.reason ?? "",
+      r.status ?? "",
+      r.createdAt ? new Date(r.createdAt).toISOString() : "",
+    ]);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=reports.csv");
+    return res.send(toCsv(headers, rows));
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
   }
 });
 

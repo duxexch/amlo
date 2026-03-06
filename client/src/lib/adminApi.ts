@@ -650,6 +650,20 @@ export const adminAnnouncementPopup = {
 const chatReq = <T = any>(path: string, options?: RequestInit) =>
   request<T>(`/chat${path}`, options);
 
+async function downloadCsv(path: string, filename: string) {
+  const res = await fetch(`${BASE}${path}`, { credentials: "include" });
+  if (!res.ok) throw new AdminApiError("Export failed", res.status);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const adminChatManagement = {
   // Overview
   getStats: () => chatReq<any>("/overview/stats"),
@@ -724,6 +738,11 @@ export const adminChatManagement = {
   getChatBlocks: (page = 1) => chatReq<any>(`/chat-blocks?page=${page}`),
   removeChatBlock: (id: string) =>
     chatReq(`/chat-blocks/${id}`, { method: "DELETE" }),
+
+  // ── CSV Exports ──
+  exportConversations: () => downloadCsv("/chat-management/export/conversations", "conversations.csv"),
+  exportMessages: () => downloadCsv("/chat-management/export/messages", "messages.csv"),
+  exportReports: () => downloadCsv("/chat-management/export/reports", "reports.csv"),
 };
 
 // ── Pricing / Currencies ──────────────────────────────

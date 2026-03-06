@@ -457,6 +457,7 @@ export const messages = pgTable(
     type: text("type").notNull().default("text"), // text | image | voice | gift | system
     mediaUrl: text("media_url"),
     giftId: varchar("gift_id").references(() => gifts.id, { onDelete: "set null" }),
+    replyToId: varchar("reply_to_id"),
     isRead: boolean("is_read").notNull().default(false),
     readAt: timestamp("read_at"),
     isDeleted: boolean("is_deleted").notNull().default(false),
@@ -471,6 +472,26 @@ export const messages = pgTable(
 );
 
 export type Message = typeof messages.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 15b. MESSAGE REACTIONS - تفاعلات الرسائل (إيموجي)
+// ════════════════════════════════════════════════════════════
+export const messageReactions = pgTable(
+  "message_reactions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    messageId: varchar("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(), // e.g. "❤️", "😂", "👍"
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("reaction_msg_idx").on(table.messageId),
+    index("reaction_user_idx").on(table.userId),
+  ],
+);
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
 
 // ════════════════════════════════════════════════════════════
 // 16. CALLS - سجل المكالمات (صوت + فيديو)
@@ -565,6 +586,7 @@ export const sendMessageSchema = z.object({
   type: z.enum(["text", "image", "voice", "gift"]).default("text"),
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
+  replyToId: z.string().max(100).optional(),
 });
 
 export const initiateCallSchema = z.object({

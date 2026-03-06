@@ -645,7 +645,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     // Validate message body
     const parsed = sendMessageSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ success: false, message: "بيانات الرسالة غير صالحة" });
-    const { content, type, mediaUrl, giftId } = parsed.data;
+    const { content, type, mediaUrl, giftId, replyToId } = parsed.data;
     if (!content && (type === "text" || !type)) return res.status(400).json({ success: false, message: "الرسالة فارغة" });
 
     // Check feature toggles
@@ -671,6 +671,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
       type: type || "text",
       mediaUrl: mediaUrl || null,
       giftId: giftId || null,
+      replyToId: replyToId || null,
       coinsCost: messageCost,
     }).returning();
 
@@ -739,6 +740,81 @@ router.delete("/messages/:id", async (req, res) => {
     return res.json({ success: true, message: "تم حذف الرسالة" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
+  }
+});
+
+// ── Message Reactions ──────────────────────────────────
+// Toggle reaction on a message (add or remove)
+router.post("/messages/:id/reactions", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+  try {
+    const { emoji } = req.body;
+    if (!emoji || typeof emoji !== "string" || emoji.length > 10) {
+      return res.status(400).json({ success: false, message: "إيموجي غير صالح" });
+    }
+
+    // Check that the message exists
+    const [msg] = await db.select({ id: schema.messages.id, conversationId: schema.messages.conversationId })
+      .from(schema.messages)
+      .where(eq(schema.messages.id, req.params.id))
+      .limit(1);
+    if (!msg) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+
+    // Check if user already reacted with this emoji
+    const [existing] = await db.select({ id: schema.messageReactions.id })
+      .from(schema.messageReactions)
+      .where(and(
+        eq(schema.messageReactions.messageId, req.params.id),
+        eq(schema.messageReactions.userId, userId),
+        eq(schema.messageReactions.emoji, emoji),
+      ))
+      .limit(1);
+
+    if (existing) {
+      // Remove reaction
+      await db.delete(schema.messageReactions).where(eq(schema.messageReactions.id, existing.id));
+      return res.json({ success: true, action: "removed" });
+    } else {
+      // Add reaction
+      const [reaction] = await db.insert(schema.messageReactions).values({
+        messageId: req.params.id,
+        userId,
+        emoji,
+      }).returning();
+      return res.json({ success: true, action: "added", data: reaction });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في التفاعل" });
+  }
+});
+
+// Get reactions for a message
+router.get("/messages/:id/reactions", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+  try {
+    const reactions = await db.select({
+      id: schema.messageReactions.id,
+      emoji: schema.messageReactions.emoji,
+      userId: schema.messageReactions.userId,
+      username: schema.users.username,
+      createdAt: schema.messageReactions.createdAt,
+    })
+      .from(schema.messageReactions)
+      .leftJoin(schema.users, eq(schema.messageReactions.userId, schema.users.id))
+      .where(eq(schema.messageReactions.messageId, req.params.id))
+      .orderBy(schema.messageReactions.createdAt);
+
+    return res.json({ success: true, data: reactions });
+  } catch {
+    return res.json({ success: true, data: [] });
   }
 });
 

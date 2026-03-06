@@ -68,6 +68,10 @@ export const chatApi = {
     }),
   deleteMessage: (id: string) =>
     request(`/messages/${id}`, { method: "DELETE" }),
+  toggleReaction: (messageId: string, emoji: string) =>
+    request(`/messages/${messageId}/reactions`, { method: "POST", body: JSON.stringify({ emoji }) }),
+  getReactions: (messageId: string) =>
+    request<any[]>(`/messages/${messageId}/reactions`),
   unreadCount: () => request<{ unread: number; friendRequests: number }>("/unread-count"),
   settings: () => request<{
     chat_media_enabled: boolean;

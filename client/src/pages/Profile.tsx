@@ -510,7 +510,7 @@ export function Profile() {
               </div>
               <div className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-white/50" />
-                <span className="text-white/40 text-xs">{t("profile.memberSince")} {new Date(user.joinDate).toLocaleDateString('ar')}</span>
+                <span className="text-white/40 text-xs">{t("profile.memberSince")} {new Date(user.joinDate).toLocaleDateString(navigator.language || 'ar')}</span>
               </div>
             </div>
             <p className="text-white/60 text-sm leading-relaxed max-w-md">{user.bio}</p>
