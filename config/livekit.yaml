@@ -37,8 +37,3 @@ logging:
   level: info
   # JSON for structured logging
   json: true
-
-# ── WebRTC Codec Preferences ──
-# Prefer VP8 for broad compatibility, Opus for audio
-codec:
-  prefer_vp8: true
