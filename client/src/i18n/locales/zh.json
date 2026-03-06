@@ -1590,6 +1590,8 @@
     "scheduledStreams": "预定直播",
     "upcoming": "即将开始",
     "scheduleStream": "预约直播（可选）",
+    "scheduleDate": "日期",
+    "scheduleTime": "时间",
     "clearSchedule": "× 取消预约",
     "scheduleBtn": "预约直播",
     "startedStreaming": "开始了直播！",

@@ -1582,6 +1582,8 @@
     "scheduledStreams": "پخش‌های برنامه‌ریزی شده",
     "upcoming": "به زودی",
     "scheduleStream": "برنامه‌ریزی پخش (اختیاری)",
+    "scheduleDate": "تاریخ",
+    "scheduleTime": "زمان",
     "clearSchedule": "× لغو برنامه‌ریزی",
     "scheduleBtn": "برنامه‌ریزی پخش",
     "startedStreaming": "شروع به پخش کرد!",

@@ -1590,6 +1590,8 @@
     "scheduledStreams": "निर्धारित स्ट्रीम",
     "upcoming": "आने वाला",
     "scheduleStream": "स्ट्रीम शेड्यूल करें (वैकल्पिक)",
+    "scheduleDate": "तारीख",
+    "scheduleTime": "समय",
     "clearSchedule": "× शेड्यूल रद्द करें",
     "scheduleBtn": "स्ट्रीम शेड्यूल करें",
     "startedStreaming": "ने स्ट्रीमिंग शुरू की!",

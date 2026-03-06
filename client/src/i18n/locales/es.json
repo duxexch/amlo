@@ -1582,6 +1582,8 @@
     "scheduledStreams": "Transmisiones Programadas",
     "upcoming": "Próximamente",
     "scheduleStream": "Programar transmisión (opcional)",
+    "scheduleDate": "Fecha",
+    "scheduleTime": "Hora",
     "clearSchedule": "× Cancelar programación",
     "scheduleBtn": "Programar transmisión",
     "startedStreaming": "¡comenzó a transmitir!",

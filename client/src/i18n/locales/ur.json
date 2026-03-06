@@ -1590,6 +1590,8 @@
     "scheduledStreams": "شیڈیولڈ براڈکاسٹ",
     "upcoming": "جلد آنے والا",
     "scheduleStream": "براڈکاسٹ شیڈیول کریں (اختیاری)",
+    "scheduleDate": "تاریخ",
+    "scheduleTime": "وقت",
     "clearSchedule": "× شیڈیول منسوخ کریں",
     "scheduleBtn": "براڈکاسٹ شیڈیول کریں",
     "startedStreaming": "نے براڈکاسٹ شروع کیا!",

@@ -1590,6 +1590,8 @@
     "scheduledStreams": "Transmissões Agendadas",
     "upcoming": "Em breve",
     "scheduleStream": "Agendar transmissão (opcional)",
+    "scheduleDate": "Data",
+    "scheduleTime": "Hora",
     "clearSchedule": "× Cancelar agendamento",
     "scheduleBtn": "Agendar transmissão",
     "startedStreaming": "começou a transmitir!",

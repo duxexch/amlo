@@ -1590,6 +1590,8 @@
     "scheduledStreams": "예약된 방송",
     "upcoming": "곳",
     "scheduleStream": "방송 예약 (선택)",
+    "scheduleDate": "날짜",
+    "scheduleTime": "시간",
     "clearSchedule": "× 예약 취소",
     "scheduleBtn": "방송 예약",
     "startedStreaming": "님이 방송을 시작했습니다!",

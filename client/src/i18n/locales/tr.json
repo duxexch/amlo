@@ -1590,6 +1590,8 @@
     "scheduledStreams": "Planlanmış Yayınlar",
     "upcoming": "Yakında",
     "scheduleStream": "Yayın planla (isteğe bağlı)",
+    "scheduleDate": "Tarih",
+    "scheduleTime": "Saat",
     "clearSchedule": "× Planı iptal et",
     "scheduleBtn": "Yayını Planla",
     "startedStreaming": "yayına başladı!",

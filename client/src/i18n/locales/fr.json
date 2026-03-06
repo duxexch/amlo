@@ -1590,6 +1590,8 @@
     "scheduledStreams": "Diffusions programmées",
     "upcoming": "Bientôt",
     "scheduleStream": "Programmer la diffusion (optionnel)",
+    "scheduleDate": "Date",
+    "scheduleTime": "Heure",
     "clearSchedule": "× Annuler la programmation",
     "scheduleBtn": "Programmer la diffusion",
     "startedStreaming": "a commencé à diffuser !",

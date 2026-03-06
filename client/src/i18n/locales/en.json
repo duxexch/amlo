@@ -1619,6 +1619,8 @@
     "scheduledStreams": "Scheduled Streams",
     "upcoming": "Upcoming",
     "scheduleStream": "Schedule Stream (optional)",
+    "scheduleDate": "Date",
+    "scheduleTime": "Time",
     "clearSchedule": "× Cancel Schedule",
     "scheduleBtn": "Schedule Stream",
     "startedStreaming": "started streaming!",

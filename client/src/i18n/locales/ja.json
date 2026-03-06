@@ -1590,6 +1590,8 @@
     "scheduledStreams": "予定された配信",
     "upcoming": "まもなく",
     "scheduleStream": "配信を予約（任意）",
+    "scheduleDate": "日付",
+    "scheduleTime": "時間",
     "clearSchedule": "× 予約をキャンセル",
     "scheduleBtn": "配信を予約",
     "startedStreaming": "が配信を開始しました！",

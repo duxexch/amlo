@@ -1582,6 +1582,8 @@
     "scheduledStreams": "Geplante Streams",
     "upcoming": "Demnächst",
     "scheduleStream": "Stream planen (optional)",
+    "scheduleDate": "Datum",
+    "scheduleTime": "Uhrzeit",
     "clearSchedule": "× Planung abbrechen",
     "scheduleBtn": "Stream planen",
     "startedStreaming": "hat gestreamt!",

@@ -1795,7 +1795,9 @@ export function LiveBroadcast() {
   const [createType, setCreateType] = useState<"live" | "audio">("live");
   const [createTags, setCreateTags] = useState("");
   const [createCategory, setCreateCategory] = useState<string>("chat");
-  const [createScheduledAt, setCreateScheduledAt] = useState("");
+  const [createScheduleDate, setCreateScheduleDate] = useState("");
+  const [createScheduleTime, setCreateScheduleTime] = useState("");
+  const createScheduledAt = createScheduleDate ? `${createScheduleDate}T${createScheduleTime || "00:00"}` : "";
   const [creating, setCreating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1902,7 +1904,8 @@ export function LiveBroadcast() {
         setShowCreateModal(false);
         setCreateTitle("");
         setCreateTags("");
-        setCreateScheduledAt("");
+        setCreateScheduleDate("");
+        setCreateScheduleTime("");
         if (createScheduledAt) {
           // Scheduled stream — refresh scheduled list
           streamsApi.scheduled().then((data: any[]) => setScheduledStreams(data.map(parseStream))).catch(() => {});
@@ -2169,7 +2172,7 @@ export function LiveBroadcast() {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="relative w-full max-w-lg bg-[#0c0c1d]/95 backdrop-blur-2xl rounded-t-[32px] p-6 border-t border-white/10 max-h-[85vh] overflow-y-auto"
+              className="relative w-full max-w-lg bg-[#0c0c1d]/95 backdrop-blur-2xl rounded-t-[32px] p-6 border-t border-white/10 max-h-[90vh] overflow-y-auto overscroll-contain"
               dir={dir}
             >
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-white/20 rounded-full" />
@@ -2256,14 +2259,30 @@ export function LiveBroadcast() {
                   <Calendar className="w-3.5 h-3.5" />
                   {t("live.scheduleStream", "جدولة البث (اختياري)")}
                 </label>
-                <input
-                  type="datetime-local"
-                  value={createScheduledAt}
-                  onChange={e => setCreateScheduledAt(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all [color-scheme:dark]"
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-white/30 text-[10px] mb-1 block">{t("live.scheduleDate", "التاريخ")}</label>
+                    <input
+                      type="date"
+                      value={createScheduleDate}
+                      onChange={e => setCreateScheduleDate(e.target.value)}
+                      onFocus={e => setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 100)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-3 text-white text-sm focus:outline-none focus:border-primary/50 transition-all [color-scheme:dark]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-white/30 text-[10px] mb-1 block">{t("live.scheduleTime", "الوقت")}</label>
+                    <input
+                      type="time"
+                      value={createScheduleTime}
+                      onChange={e => setCreateScheduleTime(e.target.value)}
+                      onFocus={e => setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 100)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-3 text-white text-sm focus:outline-none focus:border-primary/50 transition-all [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
                 {createScheduledAt && (
-                  <button onClick={() => setCreateScheduledAt("")} className="text-white/40 text-[10px] mt-1 hover:text-white/60">
+                  <button onClick={() => { setCreateScheduleDate(""); setCreateScheduleTime(""); }} className="text-white/40 text-[10px] mt-1 hover:text-white/60">
                     {t("live.clearSchedule", "× إلغاء الجدولة")}
                   </button>
                 )}

@@ -1619,6 +1619,8 @@
     "scheduledStreams": "بثوث مجدولة",
     "upcoming": "قريباً",
     "scheduleStream": "جدولة البث (اختياري)",
+    "scheduleDate": "التاريخ",
+    "scheduleTime": "الوقت",
     "clearSchedule": "× إلغاء الجدولة",
     "scheduleBtn": "جدولة البث",
     "startedStreaming": "بدأ البث!",
