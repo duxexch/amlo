@@ -183,10 +183,10 @@ export function startOnlineUsersCleanup(io: { sockets: { sockets: Map<string, un
 
       if (cleaned > 0) {
         const remaining = redis ? await redis.hlen(REDIS_KEY) : localMap.size;
-        console.log(`[onlineUsers] Cleaned ${cleaned} zombie entries, ${remaining} remaining`);
+        onlineLog.info(`Cleaned ${cleaned} zombie entries, ${remaining} remaining`);
       }
     } catch (err) {
-      console.error("[onlineUsers] Cleanup error:", err);
+      onlineLog.error({ err }, "Cleanup error");
     }
   }, CLEANUP_INTERVAL_MS); // Every 5 minutes (reduced frequency for less overhead)
   _cleanupTimer.unref();

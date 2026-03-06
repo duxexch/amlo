@@ -3,7 +3,9 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    const err = new Error(`${res.status}: ${text}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
 }
 
@@ -51,7 +53,7 @@ export const queryClient = new QueryClient({
       retry: (failureCount, error) => {
         // Don't retry on auth errors or client errors
         if (error instanceof Error) {
-          const status = parseInt(error.message);
+          const status = (error as any).status || parseInt(error.message);
           if (status >= 400 && status < 500) return false;
         }
         return failureCount < 2; // max 2 retries for server/network errors

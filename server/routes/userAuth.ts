@@ -17,6 +17,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { eq, and, or } from "drizzle-orm";
+import rateLimit from "express-rate-limit";
 import { getDb } from "../db";
 import { cacheGet, cacheSet, cacheDel } from "../redis";
 import { createLogger } from "../logger";
@@ -74,6 +75,25 @@ function requirePinVerified(req: Request, res: Response): string | null {
 import { sanitizeUser } from "../utils/sanitize";
 const stripSensitive = sanitizeUser;
 
+// ── Auth rate limiters ──
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15, // 15 attempts per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip || "unknown",
+  message: { success: false, message: "عدد كبير من المحاولات — حاول بعد 15 دقيقة" },
+});
+
+const strictAuthLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // 5 attempts per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip || "unknown",
+  message: { success: false, message: "عدد كبير من المحاولات — حاول لاحقاً" },
+});
+
 // ════════════════════════════════════════════════════════════
 // AUTH ROUTES
 // ════════════════════════════════════════════════════════════
@@ -81,7 +101,7 @@ const stripSensitive = sanitizeUser;
 /**
  * POST /auth/register — Create a new user account
  */
-router.post("/register", async (req: Request, res: Response) => {
+router.post("/register", authLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = userRegisterSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -163,7 +183,7 @@ router.post("/register", async (req: Request, res: Response) => {
 /**
  * POST /auth/login — Login with username/email + password
  */
-router.post("/login", async (req: Request, res: Response) => {
+router.post("/login", authLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = userLoginSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -308,7 +328,7 @@ router.get("/me", async (req: Request, res: Response) => {
  * POST /auth/forgot-password — Request password reset
  * Generates a token stored in Redis (30 min TTL) or DB
  */
-router.post("/forgot-password", async (req: Request, res: Response) => {
+router.post("/forgot-password", strictAuthLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = forgotPasswordSchema.safeParse(req.body);
     if (!parsed.success) {

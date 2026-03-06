@@ -299,11 +299,14 @@ io.on("connection", (socket) => {
       return;
     }
     const chatMsg = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), // shorter IDs
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       roomId,
-      message: message.slice(0, 2000), // reduced from 5000 — saves bandwidth in rooms
-      user: typeof user === "object" && user ? { id: (user as any).id, name: (user as any).name } : null, // dropped avatar from broadcast (clients already have it)
-      ts: Date.now(), // unix timestamp instead of ISO string (saves ~15 bytes per msg)
+      message: message.slice(0, 2000),
+      // Use server-verified userId instead of client-supplied user object
+      user: socket.data.userId
+        ? { id: socket.data.userId, name: typeof user === "object" && user ? ((user as any).name || "مستخدم") : "مستخدم" }
+        : (typeof user === "object" && user ? { id: (user as any).id, name: (user as any).name } : null),
+      ts: Date.now(),
     };
     io.to(`room:${roomId}`).emit("chat-message", chatMsg);
     // ── Persist last 200 messages per room in Redis ──
@@ -323,13 +326,13 @@ io.on("connection", (socket) => {
   });
 
   // ── Speaker Invitation (Audio Rooms) ──
-  socket.on("invite-speaker", (data: unknown) => {
+  socket.on("invite-speaker", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { roomId, targetUserId, hostName } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(targetUserId, 100)) return;
     // Only host (room creator) can invite — verify socket is in room
     if (!socket.rooms.has(`room:${roomId}`)) return;
-    const targetSocketId = getUserSocketIdSync(targetUserId);
+    const targetSocketId = await getUserSocketId(targetUserId);
     if (targetSocketId) {
       io.to(targetSocketId).emit("speaker-invite", {
         roomId,
@@ -351,11 +354,11 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("decline-speaker-invite", (data: unknown) => {
+  socket.on("decline-speaker-invite", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { roomId, hostId } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(hostId, 100)) return;
-    const hostSocketId = getUserSocketIdSync(hostId);
+    const hostSocketId = await getUserSocketId(hostId);
     if (hostSocketId) {
       io.to(hostSocketId).emit("speaker-declined", {
         roomId,
@@ -376,7 +379,7 @@ io.on("connection", (socket) => {
   });
 
   // ── Private Chat (typing indicator) — throttled to save bandwidth ──
-  socket.on("typing", (data: unknown) => {
+  socket.on("typing", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { conversationId, receiverId } = data as Record<string, unknown>;
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
@@ -385,7 +388,7 @@ io.on("connection", (socket) => {
     const lastTyping = typingThrottle.get(uid) || 0;
     if (Date.now() - lastTyping < TYPING_THROTTLE_MS) return; // drop excessive events
     typingThrottle.set(uid, Date.now());
-    const receiverSocketId = getUserSocketIdSync(receiverId);
+    const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("typing", {
         conversationId,
@@ -394,11 +397,11 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("stop-typing", (data: unknown) => {
+  socket.on("stop-typing", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { conversationId, receiverId } = data as Record<string, unknown>;
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
-    const receiverSocketId = getUserSocketIdSync(receiverId);
+    const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("stop-typing", {
         conversationId,
@@ -408,11 +411,11 @@ io.on("connection", (socket) => {
   });
 
   // ── Private Chat (read receipt) ──
-  socket.on("messages-read", (data: unknown) => {
+  socket.on("messages-read", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { conversationId, receiverId } = data as Record<string, unknown>;
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
-    const receiverSocketId = getUserSocketIdSync(receiverId);
+    const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("messages-read", {
         conversationId,
@@ -422,11 +425,11 @@ io.on("connection", (socket) => {
   });
 
   // ── Calls (WebRTC signaling) — sync lookup ──
-  socket.on("call-signal", (data: unknown) => {
+  socket.on("call-signal", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { callId, targetId, signal } = data as Record<string, unknown>;
     if (!isStr(callId, 100) || !isStr(targetId, 100)) return;
-    const targetSocketId = getUserSocketIdSync(targetId);
+    const targetSocketId = await getUserSocketId(targetId);
     if (targetSocketId) {
       io.to(targetSocketId).emit("call-signal", {
         callId,
@@ -551,7 +554,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("world-typing", (data: unknown) => {
+  socket.on("world-typing", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { sessionId, receiverId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100) || !isStr(receiverId, 100)) return;
@@ -559,7 +562,7 @@ io.on("connection", (socket) => {
     const lastTyping = typingThrottle.get(`world:${uid}`) || 0;
     if (Date.now() - lastTyping < TYPING_THROTTLE_MS) return;
     typingThrottle.set(`world:${uid}`, Date.now());
-    const receiverSocketId = getUserSocketIdSync(receiverId);
+    const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("world-chat-typing", {
         sessionId,
@@ -568,11 +571,11 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("world-stop-typing", (data: unknown) => {
+  socket.on("world-stop-typing", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { sessionId, receiverId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100) || !isStr(receiverId, 100)) return;
-    const receiverSocketId = getUserSocketIdSync(receiverId);
+    const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("world-chat-stop-typing", {
         sessionId,
@@ -907,7 +910,7 @@ if (!SESSION_SECRET && process.env.NODE_ENV === "production") {
   throw new Error("SESSION_SECRET env var is required in production");
 }
 if (!SESSION_SECRET) {
-  console.warn("⚠️  WARNING: Using dev-only SESSION_SECRET — set SESSION_SECRET in .env for production");
+  serverLog.warn("Using dev-only SESSION_SECRET — set SESSION_SECRET in .env for production");
 }
 
 export function log(message: string, source = "express") {
@@ -994,7 +997,7 @@ app.use((req, res, next) => {
     }
     return userSessionMiddleware(req, res, next);
   });
-  console.log("[session] Dual session middleware initialized (user: ablox.sid, admin: ablox.admin.sid)");
+  serverLog.info("Dual session middleware initialized (user: ablox.sid, admin: ablox.admin.sid)");
 
   // ── Attach Redis Adapter for horizontal scaling ──
   try {
@@ -1004,15 +1007,15 @@ app.use((req, res, next) => {
       const subClient = createRedisDuplicate("sub");
       if (pubClient && subClient) {
         io.adapter(createAdapter(pubClient, subClient));
-        console.log("[socket.io] Redis adapter attached — horizontal scaling enabled");
+        serverLog.info("Socket.io Redis adapter attached — horizontal scaling enabled");
       } else {
-        console.log("[socket.io] Redis duplicate failed — using in-memory adapter");
+        serverLog.warn("Socket.io Redis duplicate failed — using in-memory adapter");
       }
     } else {
-      console.log("[socket.io] No Redis — using in-memory adapter (single node only)");
+      serverLog.info("Socket.io no Redis — using in-memory adapter (single node only)");
     }
   } catch (err) {
-    console.error("[socket.io] Redis adapter setup failed, using in-memory:", err);
+    serverLog.error({ err }, "Socket.io Redis adapter setup failed, using in-memory");
   }
 
   // ── Digital Asset Links for TWA/APK verification ──

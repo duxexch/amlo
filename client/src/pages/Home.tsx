@@ -61,7 +61,8 @@ function FeaturedMarquee() {
   const pausedRef = useRef(false);
 
   useEffect(() => {
-    fetch("/api/featured-streams")
+    const controller = new AbortController();
+    fetch("/api/featured-streams", { signal: controller.signal })
       .then(r => r.json())
       .then(data => {
         if (data.success && data.data?.length) {
@@ -69,6 +70,7 @@ function FeaturedMarquee() {
         }
       })
       .catch(() => {});
+    return () => controller.abort();
   }, []);
 
   // Infinite scroll animation
@@ -171,12 +173,16 @@ export function Home() {
   };
 
   useEffect(() => {
-    fetch("/api/followed-accounts")
-      .then(r => r.json())
+    // Only fetch if user is likely logged in (has session cookie)
+    if (!document.cookie.includes("ablox.sid")) return;
+    const controller = new AbortController();
+    fetch("/api/followed-accounts", { credentials: "include", signal: controller.signal })
+      .then(r => { if (!r.ok) throw r; return r.json(); })
       .then(data => {
         if (data.success) setFollowedAccounts(data.data);
       })
       .catch(() => {});
+    return () => controller.abort();
   }, []);
 
   const filteredAccounts = followedAccounts.filter(a => {

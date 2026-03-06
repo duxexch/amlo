@@ -7,6 +7,7 @@ import { type Request, type Response } from "express";
 import { eq, and, or, sql } from "drizzle-orm";
 import { isValidUuid } from "../utils/validation";
 import { getDb } from "../db";
+import { getRedis } from "../redis";
 import * as schema from "../../shared/schema";
 
 // ── Express 5 param helpers ──
@@ -37,23 +38,38 @@ export function requireUser(req: Request, res: Response): string | null {
   return userId;
 }
 
-// ── Financial rate limiter (per-user, in-memory) ──
-const financialRateLimit = new Map<string, { count: number; windowStart: number }>();
+// ── Financial rate limiter (Redis-backed, cluster-safe) ──
 const FINANCIAL_MAX_REQUESTS = 5;
-const FINANCIAL_WINDOW_MS = 60_000;
+const FINANCIAL_WINDOW_SEC = 60;
+
+export async function isFinancialRateLimited(userId: string): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return isFinancialRateLimitedLocal(userId);
+  try {
+    const key = `frl:${userId}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, FINANCIAL_WINDOW_SEC);
+    return count > FINANCIAL_MAX_REQUESTS;
+  } catch {
+    return isFinancialRateLimitedLocal(userId);
+  }
+}
+
+// In-memory fallback for when Redis is unavailable
+const financialRateLimit = new Map<string, { count: number; windowStart: number }>();
 
 setInterval(() => {
   const now = Date.now();
   for (const [key, v] of financialRateLimit) {
-    if (now - v.windowStart > FINANCIAL_WINDOW_MS * 2) financialRateLimit.delete(key);
+    if (now - v.windowStart > FINANCIAL_WINDOW_SEC * 2000) financialRateLimit.delete(key);
   }
   if (financialRateLimit.size > 50_000) financialRateLimit.clear();
 }, 5 * 60_000);
 
-export function isFinancialRateLimited(userId: string): boolean {
+function isFinancialRateLimitedLocal(userId: string): boolean {
   const now = Date.now();
   const entry = financialRateLimit.get(userId);
-  if (!entry || now - entry.windowStart > FINANCIAL_WINDOW_MS) {
+  if (!entry || now - entry.windowStart > FINANCIAL_WINDOW_SEC * 1000) {
     financialRateLimit.set(userId, { count: 1, windowStart: now });
     return false;
   }
@@ -66,11 +82,11 @@ export const DAILY_WITHDRAW_LIMIT = 50_000;
 export const WEEKLY_WITHDRAW_LIMIT = 200_000;
 
 // ── Charge coins (atomic) ──
-export async function chargeCoins(userId: string, amount: number, description: string, refId?: string): Promise<boolean> {
-  const db = getDb();
-  if (!db || amount <= 0) return true;
+export async function chargeCoins(userId: string, amount: number, description: string, refId?: string, tx?: any): Promise<boolean> {
+  const executor = tx || getDb();
+  if (!executor || amount <= 0) return true;
 
-  const result = await db.update(schema.users)
+  const result = await executor.update(schema.users)
     .set({
       coins: sql`coins - ${amount}`,
       updatedAt: new Date(),
@@ -83,7 +99,7 @@ export async function chargeCoins(userId: string, amount: number, description: s
 
   if (!result.length) return false;
 
-  await db.insert(schema.walletTransactions).values({
+  await executor.insert(schema.walletTransactions).values({
     userId,
     type: "call_charge",
     amount: -amount,

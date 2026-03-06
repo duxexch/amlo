@@ -37,6 +37,16 @@ import {
 
 const router = Router();
 
+// ── Helper: get the other participant ID in a conversation ──
+async function getConversationOtherId(db: any, conversationId: string, userId: string): Promise<string | null> {
+  const [conv] = await db.select({
+    p1: schema.conversations.participant1Id,
+    p2: schema.conversations.participant2Id,
+  }).from(schema.conversations).where(eq(schema.conversations.id, conversationId)).limit(1);
+  if (!conv) return null;
+  return conv.p1 === userId ? conv.p2 : conv.p1;
+}
+
 // ── UUID param validation middleware — rejects malformed :id early ──
 router.param("id", (req, res, next, value) => {
   if (!isValidUuid(String(value))) {
@@ -56,6 +66,10 @@ router.get("/friends", async (req, res) => {
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
 
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+  const offset = (page - 1) * limit;
+
   try {
     const friendships = await db.select().from(schema.friendships)
       .where(
@@ -67,7 +81,9 @@ router.get("/friends", async (req, res) => {
           eq(schema.friendships.status, "accepted"),
         )
       )
-      .orderBy(desc(schema.friendships.updatedAt));
+      .orderBy(desc(schema.friendships.updatedAt))
+      .limit(limit)
+      .offset(offset);
 
     const friendIds = friendships.map(f => f.senderId === userId ? f.receiverId : f.senderId);
     if (friendIds.length === 0) return res.json({ success: true, data: [] });
@@ -106,6 +122,10 @@ router.get("/friends/requests", async (req, res) => {
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
 
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+  const offset = (page - 1) * limit;
+
   try {
     const requests = await db.select().from(schema.friendships)
       .where(
@@ -114,7 +134,9 @@ router.get("/friends/requests", async (req, res) => {
           eq(schema.friendships.status, "pending"),
         )
       )
-      .orderBy(desc(schema.friendships.createdAt));
+      .orderBy(desc(schema.friendships.createdAt))
+      .limit(limit)
+      .offset(offset);
 
     if (requests.length === 0) return res.json({ success: true, data: [] });
 
@@ -431,12 +453,16 @@ router.get("/users/search", searchLimiter, async (req, res) => {
 // CHAT / MESSAGES API
 // ════════════════════════════════════════════════════════════
 
-// Get conversations list
+// Get conversations list (paginated)
 router.get("/conversations", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
+
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+  const offset = (page - 1) * limit;
 
   try {
     const convs = await db.select().from(schema.conversations)
@@ -449,7 +475,9 @@ router.get("/conversations", async (req, res) => {
           eq(schema.conversations.isActive, true),
         )
       )
-      .orderBy(desc(schema.conversations.lastMessageAt));
+      .orderBy(desc(schema.conversations.lastMessageAt))
+      .limit(limit)
+      .offset(offset);
 
     if (convs.length === 0) return res.json({ success: true, data: [] });
 
@@ -675,14 +703,14 @@ router.post("/conversations/:id/messages", async (req, res) => {
       coinsCost: messageCost,
     }).returning();
 
-    // Update conversation
-    const unreadField = conv.participant1Id === userId ? "participant2Unread" : "participant1Unread";
-    const currentUnread = conv.participant1Id === userId ? conv.participant2Unread : conv.participant1Unread;
-
+    // Update conversation — atomic unread increment (no read-then-write race)
+    const isP1 = conv.participant1Id === userId;
     await db.update(schema.conversations).set({
       lastMessageId: msg.id,
       lastMessageAt: new Date(),
-      [unreadField]: currentUnread + 1,
+      ...(isP1
+        ? { participant2Unread: sql`${schema.conversations.participant2Unread} + 1` }
+        : { participant1Unread: sql`${schema.conversations.participant1Unread} + 1` }),
     }).where(eq(schema.conversations.id, conv.id));
 
     // Get sender info for real-time
@@ -737,6 +765,19 @@ router.delete("/messages/:id", async (req, res) => {
     if (!msg) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
 
     await db.update(schema.messages).set({ isDeleted: true }).where(eq(schema.messages.id, msg.id));
+
+    // Notify the other participant about the deletion via socket
+    const otherId = await getConversationOtherId(db, msg.conversationId, userId);
+    if (otherId) {
+      const otherSocketId = await getUserSocketId(otherId);
+      if (otherSocketId) {
+        io.to(otherSocketId).emit("message-deleted", {
+          messageId: msg.id,
+          conversationId: msg.conversationId,
+        });
+      }
+    }
+
     return res.json({ success: true, message: "تم حذف الرسالة" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -753,7 +794,9 @@ router.post("/messages/:id/reactions", async (req, res) => {
 
   try {
     const { emoji } = req.body;
-    if (!emoji || typeof emoji !== "string" || emoji.length > 10) {
+    // Unicode-aware emoji validation: must be 1-4 grapheme clusters and only emoji characters
+    const emojiRegex = /^(\p{Extended_Pictographic}|\p{Emoji_Presentation}|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|[\u200D\uFE0F])+$/u;
+    if (!emoji || typeof emoji !== "string" || !emojiRegex.test(emoji) || [...emoji].length > 8) {
       return res.status(400).json({ success: false, message: "إيموجي غير صالح" });
     }
 
@@ -763,6 +806,17 @@ router.post("/messages/:id/reactions", async (req, res) => {
       .where(eq(schema.messages.id, req.params.id))
       .limit(1);
     if (!msg) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+
+    // Verify user is a conversation participant
+    const [conv] = await db.select({ id: schema.conversations.id }).from(schema.conversations)
+      .where(and(
+        eq(schema.conversations.id, msg.conversationId),
+        or(
+          eq(schema.conversations.participant1Id, userId),
+          eq(schema.conversations.participant2Id, userId),
+        ),
+      )).limit(1);
+    if (!conv) return res.status(403).json({ success: false, message: "لا يمكنك التفاعل مع هذه الرسالة" });
 
     // Check if user already reacted with this emoji
     const [existing] = await db.select({ id: schema.messageReactions.id })
@@ -777,6 +831,22 @@ router.post("/messages/:id/reactions", async (req, res) => {
     if (existing) {
       // Remove reaction
       await db.delete(schema.messageReactions).where(eq(schema.messageReactions.id, existing.id));
+
+      // Emit socket event for reaction removed
+      const otherId = conv.id ? await getConversationOtherId(db, msg.conversationId, userId) : null;
+      if (otherId) {
+        const otherSocketId = await getUserSocketId(otherId);
+        if (otherSocketId) {
+          io.to(otherSocketId).emit("reaction-updated", {
+            messageId: req.params.id,
+            conversationId: msg.conversationId,
+            userId,
+            emoji,
+            action: "removed",
+          });
+        }
+      }
+
       return res.json({ success: true, action: "removed" });
     } else {
       // Add reaction
@@ -785,6 +855,22 @@ router.post("/messages/:id/reactions", async (req, res) => {
         userId,
         emoji,
       }).returning();
+
+      // Emit socket event for reaction added
+      const otherId = await getConversationOtherId(db, msg.conversationId, userId);
+      if (otherId) {
+        const otherSocketId = await getUserSocketId(otherId);
+        if (otherSocketId) {
+          io.to(otherSocketId).emit("reaction-updated", {
+            messageId: req.params.id,
+            conversationId: msg.conversationId,
+            userId,
+            emoji,
+            action: "added",
+          });
+        }
+      }
+
       return res.json({ success: true, action: "added", data: reaction });
     }
   } catch (err: any) {
@@ -800,6 +886,21 @@ router.get("/messages/:id/reactions", async (req, res) => {
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
 
   try {
+    // Verify user is a conversation participant
+    const [msg] = await db.select({ conversationId: schema.messages.conversationId })
+      .from(schema.messages).where(eq(schema.messages.id, req.params.id)).limit(1);
+    if (!msg) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+
+    const [conv] = await db.select({ id: schema.conversations.id }).from(schema.conversations)
+      .where(and(
+        eq(schema.conversations.id, msg.conversationId),
+        or(
+          eq(schema.conversations.participant1Id, userId),
+          eq(schema.conversations.participant2Id, userId),
+        ),
+      )).limit(1);
+    if (!conv) return res.status(403).json({ success: false, message: "لا يمكنك عرض التفاعلات" });
+
     const reactions = await db.select({
       id: schema.messageReactions.id,
       emoji: schema.messageReactions.emoji,
@@ -1028,7 +1129,6 @@ router.post("/calls/:id/end", async (req, res) => {
 
   try {
     // Atomic status update — prevents double-end/double-charge race condition
-    // Only update if status is still active/ringing AND user is a party
     const endedAt = new Date();
     
     // First, get call info for charging calculation
@@ -1052,27 +1152,33 @@ router.post("/calls/:id/end", async (req, res) => {
       coinsCharged = minutes * call.coinRate;
     }
 
-    // Atomically end the call — only if still active (prevents double-ending)
-    const [updated] = await db.update(schema.calls).set({
-      status: "ended",
-      endedAt,
-      durationSeconds,
-      coinsCharged,
-    }).where(
-      and(
-        eq(schema.calls.id, call.id),
-        or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
-      )
-    ).returning();
+    // Wrap status update + charge in a transaction for atomicity
+    const updated = await db.transaction(async (tx: any) => {
+      // Atomically end the call — only if still active (prevents double-ending)
+      const [ended] = await tx.update(schema.calls).set({
+        status: "ended",
+        endedAt,
+        durationSeconds,
+        coinsCharged,
+      }).where(
+        and(
+          eq(schema.calls.id, call.id),
+          or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
+        )
+      ).returning();
 
-    // If no row returned, another request already ended the call
+      if (!ended) return null;
+
+      // Charge within same transaction — if charge fails, status update rolls back too
+      if (coinsCharged > 0) {
+        await chargeCoins(call.callerId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id, tx);
+      }
+
+      return ended;
+    });
+
     if (!updated) {
       return res.json({ success: true, message: "المكالمة منتهية بالفعل" });
-    }
-
-    // Now charge AFTER successful status update (prevents double-charge)
-    if (coinsCharged > 0) {
-      await chargeCoins(call.callerId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id);
     }
 
     socialLog.info({ callId: call.id, userId, durationSeconds, coinsCharged, type: call.type }, "Call ended");
@@ -1632,7 +1738,7 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   // Rate limit financial operations
-  if (isFinancialRateLimited(userId)) {
+  if (await isFinancialRateLimited(userId)) {
     return res.status(429).json({ success: false, message: "عدد كبير من الطلبات — حاول بعد قليل" });
   }
   try {
@@ -2039,7 +2145,7 @@ router.post("/gifts/send", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   // Rate limit financial operations
-  if (isFinancialRateLimited(userId)) {
+  if (await isFinancialRateLimited(userId)) {
     return res.status(429).json({ success: false, message: "عدد كبير من الطلبات — حاول بعد قليل" });
   }
   try {
@@ -2065,8 +2171,8 @@ router.post("/gifts/send", async (req: Request, res: Response) => {
 
     // Use DB transaction to prevent race conditions (double-spend)
     const result = await db.transaction(async (tx) => {
-      // Lock sender row with FOR UPDATE via raw SQL
-      const [sender] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      // Lock sender row with FOR UPDATE to prevent concurrent double-spend
+      const [sender] = await tx.execute(sql`SELECT * FROM users WHERE id = ${userId} FOR UPDATE`) as any;
       if (!sender || sender.coins < totalPrice) {
         throw new Error("INSUFFICIENT_BALANCE");
       }
@@ -2076,8 +2182,8 @@ router.post("/gifts/send", async (req: Request, res: Response) => {
       // Deduct from sender atomically
       await tx.update(schema.users).set({ coins: newSenderBalance }).where(eq(schema.users.id, userId));
 
-      // Add to receiver
-      const [receiver] = await tx.select().from(schema.users).where(eq(schema.users.id, receiverId)).limit(1);
+      // Add to receiver (also lock to prevent lost updates)
+      const [receiver] = await tx.execute(sql`SELECT * FROM users WHERE id = ${receiverId} FOR UPDATE`) as any;
       if (receiver) {
         await tx.update(schema.users).set({ diamonds: (receiver.diamonds || 0) + totalPrice }).where(eq(schema.users.id, receiverId));
       }
@@ -2964,10 +3070,11 @@ router.post("/streams/:id/poll/:pollId/vote", async (req: Request, res: Response
     const options: string[] = JSON.parse(poll.options);
     if (!options.includes(option)) return res.status(400).json({ success: false, message: "خيار غير صالح" });
 
-    // Atomic vote update — prevents race conditions with concurrent voters
+    // Atomic vote update — safe parameterized JSON path
+    const optionPath = `{${option}}`;
     const [updated] = await db.update(schema.streamPolls).set({
-      votes: sql`jsonb_set(${schema.streamPolls.votes}::jsonb, ${sql.raw(`'{${option.replace(/'/g, "''")}}'`)}, (COALESCE((${schema.streamPolls.votes}::jsonb->>${option})::int, 0) + 1)::text::jsonb)`,
-      voterIds: sql`(${schema.streamPolls.voterIds}::jsonb || ${JSON.stringify([userId])}::jsonb)::text`,
+      votes: sql`jsonb_set(${schema.streamPolls.votes}::jsonb, ${optionPath}::text[], (COALESCE((${schema.streamPolls.votes}::jsonb->>${ option })::int, 0) + 1)::text::jsonb)`,
+      voterIds: sql`(${schema.streamPolls.voterIds}::jsonb || ${sql`${JSON.stringify([userId])}::jsonb`})::text`,
     }).where(
       and(
         eq(schema.streamPolls.id, pollId),

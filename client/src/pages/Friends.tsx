@@ -21,79 +21,19 @@ import { useLocation } from "wouter";
 import { useConversations } from "./chat/chatHooks";
 import { ChatPopupModal } from "./chat/ChatPopupModal";
 import type { Conversation } from "./chat/chatTypes";
-import { io as socketIO, Socket } from "socket.io-client";
+import { socketManager } from "@/lib/socketManager";
+import { UserAvatar } from "@/components/UserAvatar";
+import { formatTime } from "@/lib/timeUtils";
 
 // ── Types ──
 type Tab = "chats" | "friends" | "requests";
 
-// ── Socket singleton ──
-let socket: Socket | null = null;
-let socketRefCount = 0;
-function getSocket(): Socket {
-  if (!socket) socket = socketIO({ transports: ["websocket", "polling"] });
-  return socket;
-}
-function acquireSocket(): Socket {
-  socketRefCount++;
-  return getSocket();
-}
-function releaseSocket() {
-  socketRefCount--;
-  if (socketRefCount <= 0 && socket) {
-    socket.disconnect();
-    socket = null;
-    socketRefCount = 0;
-  }
-}
-
-// ── Time format ──
-function formatTime(date: Date): string {
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const lang = document.documentElement.lang || navigator.language || "ar";
-  if (diff < 60000) return lang.startsWith("ar") ? "الآن" : "now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}${lang.startsWith("ar") ? "د" : "m"}`;
-  if (diff < 86400000) return date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
-  if (diff < 604800000) return date.toLocaleDateString(lang, { weekday: "short" });
-  return date.toLocaleDateString(lang, { month: "short", day: "numeric" });
-}
 
 
 
 // ═══════════════════════════════════
 // SUB-COMPONENTS
 // ═══════════════════════════════════
-
-function UserAvatar({ user, size = "md" }: { user: any; size?: "xs" | "sm" | "md" | "lg" }) {
-  const sizeClasses = { xs: "w-8 h-8", sm: "w-10 h-10", md: "w-12 h-12", lg: "w-14 h-14" };
-  const textClasses = { xs: "text-xs", sm: "text-sm", md: "text-lg", lg: "text-xl" };
-  const colors = [
-    "from-primary to-secondary", "from-cyan-400 to-blue-500", "from-pink-400 to-rose-500",
-    "from-amber-400 to-orange-500", "from-emerald-400 to-teal-500", "from-violet-400 to-purple-500",
-  ];
-  const color = colors[Math.abs((user?.displayName || user?.username || "").charCodeAt(0)) % colors.length];
-  const initial = (user?.displayName || user?.username || "?")[0]?.toUpperCase();
-
-  return (
-    <div className="relative shrink-0">
-      {user?.avatar ? (
-        <img src={user.avatar} alt="" className={`${sizeClasses[size]} rounded-2xl object-cover`} />
-      ) : (
-        <div className={`${sizeClasses[size]} rounded-2xl bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white ${textClasses[size]}`}>
-          {initial}
-        </div>
-      )}
-      {user?.isOnline && (
-        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#0a0a1a] shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-      )}
-      {user?.isVerified && (
-        <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center">
-          <Check className="w-2.5 h-2.5 text-white" />
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Online Friends Strip (stories-style) ──
 function OnlineStrip({ friends, onChat, onSearch }: { friends: any[]; onChat: (id: string) => void; onSearch: () => void }) {
@@ -146,7 +86,7 @@ function OnlineStrip({ friends, onChat, onSearch }: { friends: any[]; onChat: (i
 }
 
 // ── Conversation Item ──
-function ConversationItem({ conv, onClick }: { conv: any; onClick: () => void }) {
+function ConversationItem({ conv, onClick, isTyping }: { conv: any; onClick: () => void; isTyping?: boolean }) {
   const timeStr = formatTime(new Date(conv.lastMessageAt || conv.lastMessage?.createdAt || Date.now()));
   const isMe = conv.lastMessage?.senderId !== conv.otherUser?.id;
 
@@ -167,8 +107,24 @@ function ConversationItem({ conv, onClick }: { conv: any; onClick: () => void })
         </div>
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <p className="text-white/35 text-xs truncate flex items-center gap-1">
-            {isMe && <CheckCheck className="w-3 h-3 text-primary/60 shrink-0" />}
-            {conv.lastMessage?.content || "..."}
+            {isTyping ? (
+              <span className="text-primary/70 italic">يكتب...</span>
+            ) : (
+              <>
+                {isMe && (
+                  conv.lastMessage?._pending
+                    ? <Clock className="w-3 h-3 text-white/30 shrink-0" />
+                    : conv.lastMessage?.isRead
+                      ? <CheckCheck className="w-3 h-3 text-primary/60 shrink-0" />
+                      : <Check className="w-3 h-3 text-white/40 shrink-0" />
+                )}
+                {conv.lastMessage?.type === "image" ? "📷 صورة" :
+                 conv.lastMessage?.type === "voice" ? "🎤 رسالة صوتية" :
+                 conv.lastMessage?.type === "gift" ? "🎁 هدية" :
+                 conv.lastMessage?.isDeleted ? "🚫 تم الحذف" :
+                 conv.lastMessage?.content || "..."}
+              </>
+            )}
           </p>
           {conv.unreadCount > 0 && (
             <span className="shrink-0 min-w-5 h-5 bg-primary rounded-full flex items-center justify-center text-white text-[10px] font-bold px-1 shadow-[0_0_10px_rgba(var(--primary-rgb),0.4)]">
@@ -336,10 +292,9 @@ export function Friends() {
   const { t } = useTranslation();
   const [location, navigate] = useLocation();
 
-  // ── Socket lifecycle — connect on mount, disconnect on unmount ──
+  // ── Ensure socket is connected on mount ──
   useEffect(() => {
-    acquireSocket();
-    return () => releaseSocket();
+    socketManager.getSocket(); // ensures singleton is connected
   }, []);
 
   // ── Tab ──
@@ -358,7 +313,7 @@ export function Friends() {
   const searchRef = useRef<HTMLDivElement>(null);
 
   // ── Chat state (delegated to hooks) ──
-  const { conversations, setConversations, settings: chatSettings, loading, totalUnread } = useConversations();
+  const { conversations, setConversations, settings: chatSettings, loading, totalUnread, typingConvIds } = useConversations();
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [searchFilter, setSearchFilter] = useState("");
   const [pinSwitching, setPinSwitching] = useState(false);
@@ -661,7 +616,7 @@ export function Friends() {
                       </div>
                     ) : filteredConvs.length > 0 ? (
                       filteredConvs.map(conv => (
-                        <ConversationItem key={conv.id} conv={conv} onClick={() => setActiveConv(conv as Conversation)} />
+                        <ConversationItem key={conv.id} conv={conv} isTyping={typingConvIds.has(conv.id)} onClick={() => setActiveConv(conv as Conversation)} />
                       ))
                     ) : (
                       <div className="text-center py-14">

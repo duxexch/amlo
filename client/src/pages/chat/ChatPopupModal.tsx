@@ -7,57 +7,32 @@
  * - Infinite scroll, Sound notifications
  * - Online/last-seen, Typing indicator
  */
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageCircle, Search, Send, Phone, Video,
   Check, CheckCheck, Clock, Coins, Loader2,
   MoreVertical, Trash2, X, ShieldCheck, Flag,
   Ban, Lock, Unlock, Languages, Reply, Copy,
-  SmilePlus, Smile,
+  SmilePlus, Smile, Image, Mic, ChevronDown,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 import { useActiveChat, useReportModal, useMessageTranslation } from "./chatHooks";
 import type { ChatMessage, Conversation, ChatSettings } from "./chatTypes";
+import { chatApi } from "@/lib/socialApi";
+import { UserAvatar } from "@/components/UserAvatar";
+import { formatTime } from "@/lib/timeUtils";
 
 // ── Common emojis ──
-const EMOJI_LIST = ["😀","😂","😍","🥰","😎","👍","❤️","🔥","🎉","😢","😡","🤔","👏","💪","🙏","😊","🤣","😭","😱","🤩","💯","✨","💀","🫡","😏"];
-
-// ── Time formatter (uses lang param instead of hardcoded "ar") ──
-function formatTime(date: Date, lang: string): string {
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  if (diff < 60000) return lang === "ar" ? "الآن" : "now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}${lang === "ar" ? "د" : "m"}`;
-  if (diff < 86400000) return date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
-  if (diff < 604800000) return date.toLocaleDateString(lang, { weekday: "short" });
-  return date.toLocaleDateString(lang, { month: "short", day: "numeric" });
-}
-
-// ── User Avatar (memoized) ──
-const UserAvatar = memo(function UserAvatar({ user, size = "sm" }: { user: any; size?: "xs" | "sm" | "md" }) {
-  const sizeClasses = { xs: "w-7 h-7", sm: "w-10 h-10", md: "w-12 h-12" };
-  const textClasses = { xs: "text-xs", sm: "text-sm", md: "text-lg" };
-  const colors = ["from-primary to-secondary", "from-cyan-400 to-blue-500", "from-pink-400 to-rose-500", "from-amber-400 to-orange-500", "from-emerald-400 to-teal-500", "from-violet-400 to-purple-500"];
-  const color = colors[Math.abs((user?.displayName || user?.username || "").charCodeAt(0)) % colors.length];
-  const initial = (user?.displayName || user?.username || "?")[0]?.toUpperCase();
-
-  return (
-    <div className="relative shrink-0">
-      {user?.avatar ? (
-        <img src={user.avatar} alt="" className={`${sizeClasses[size]} rounded-2xl object-cover`} />
-      ) : (
-        <div className={`${sizeClasses[size]} rounded-2xl bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white ${textClasses[size]}`}>
-          {initial}
-        </div>
-      )}
-      {user?.isOnline && (
-        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#0a0a1a] shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-      )}
-    </div>
-  );
-});
+const EMOJI_CATEGORIES = [
+  { icon: "😀", label: "وجوه", emojis: ["😀","😂","😍","🥰","😎","😊","🤣","😭","😱","🤩","😢","😡","🤔","😏","😴","🥺","😤","🫡","🤗","😇","🙃","😜","🤭","😬","🥴"] },
+  { icon: "❤️", label: "رموز", emojis: ["❤️","🔥","💯","✨","💀","⭐","💫","🌈","💐","🏆","🎯","💎","🪄","🫶","💕","💖","💝","❤️‍🔥","🖤","💙"] },
+  { icon: "👍", label: "إيماءات", emojis: ["👍","👏","💪","🙏","✌️","🤝","👋","🫰","🤙","👊","✊","🤞","🤟","🫵","☝️","👆","👇","👉","👈","🤌"] },
+  { icon: "🎉", label: "أنشطة", emojis: ["🎉","🎊","🎁","🎂","🎈","🎵","🎶","🎮","⚽","🏀","🎲","🎯","🎪","🎭","🎤","🎧","🎸","🎺","🎻","🪘"] },
+  { icon: "🍔", label: "طعام", emojis: ["🍔","🍕","🍟","🌮","🍣","🍩","🍪","🍰","☕","🧃","🍫","🍭","🍿","🥤","🧁","🍦","🍜","🥙","🍗","🥗"] },
+  { icon: "🐱", label: "حيوانات", emojis: ["🐱","🐶","🐻","🦁","🐼","🦊","🐸","🐧","🦋","🐝","🐢","🐬","🦄","🐴","🐰","🐨","🐮","🐷","🐵","🦅"] },
+];
 
 // ── Message Bubble with full context menu ──
 const MessageBubble = memo(function MessageBubble({
@@ -70,8 +45,24 @@ const MessageBubble = memo(function MessageBubble({
   const { t, i18n } = useTranslation();
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
-  const [reaction, setReaction] = useState<string | null>(null);
+  const [reactions, setReactions] = useState<Array<{ emoji: string; userId: string; username?: string }>>([]);
+  const [myReaction, setMyReaction] = useState<string | null>(null);
   const { translatedText, isTranslating, showTranslation, handleTranslate } = useMessageTranslation(msg.content, i18n.language);
+  const [swipeX, setSwipeX] = useState(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Load reactions from API on mount
+  useEffect(() => {
+    if (msg.isDeleted || msg.id.startsWith("temp-")) return;
+    chatApi.getReactions(msg.id).then((res: any) => {
+      const data = res?.data || res || [];
+      if (Array.isArray(data)) {
+        setReactions(data);
+        const mine = data.find((r: any) => r.userId === "me" || r.isMine);
+        if (mine) setMyReaction(mine.emoji);
+      }
+    }).catch(() => {});
+  }, [msg.id, msg.isDeleted]);
 
   if (msg.isDeleted) {
     return (
@@ -89,9 +80,45 @@ const MessageBubble = memo(function MessageBubble({
     setShowMenu(false);
   };
 
-  const handleReaction = (emoji: string) => {
-    setReaction(reaction === emoji ? null : emoji);
+  const handleReaction = async (emoji: string) => {
     setShowReactions(false);
+    const prevReaction = myReaction;
+    // Optimistic update
+    if (myReaction === emoji) {
+      setMyReaction(null);
+      setReactions(prev => prev.filter(r => !(r.emoji === emoji && (r.userId === "me" || r.isMine))));
+    } else {
+      setMyReaction(emoji);
+      setReactions(prev => [...prev.filter(r => !(r.userId === "me" || r.isMine)), { emoji, userId: "me" }]);
+    }
+    try {
+      await chatApi.toggleReaction(msg.id, emoji);
+    } catch {
+      setMyReaction(prevReaction); // revert on error
+    }
+  };
+
+  // Swipe-to-reply touch handlers
+  const SWIPE_THRESHOLD = 60;
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const dx = e.touches[0].clientX - touchStartRef.current.x;
+    const dy = Math.abs(e.touches[0].clientY - touchStartRef.current.y);
+    if (dy > 30) { touchStartRef.current = null; setSwipeX(0); return; }
+    // RTL: positive dx = swipe right = reply; LTR: negative dx = swipe left = reply
+    const dir = document.documentElement.dir === "rtl" ? 1 : -1;
+    const offset = dx * dir;
+    if (offset > 0) setSwipeX(Math.min(offset, SWIPE_THRESHOLD + 20));
+  };
+  const onTouchEnd = () => {
+    if (swipeX >= SWIPE_THRESHOLD) {
+      onReply(msg);
+    }
+    setSwipeX(0);
+    touchStartRef.current = null;
   };
 
   return (
@@ -100,7 +127,17 @@ const MessageBubble = memo(function MessageBubble({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.15 }}
       className={`flex items-end gap-2 group ${isMe ? "flex-row-reverse" : ""}`}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      style={{ transform: swipeX > 0 ? `translateX(${document.documentElement.dir === "rtl" ? swipeX : -swipeX}px)` : undefined, transition: swipeX === 0 ? "transform 0.2s ease" : "none" }}
     >
+      {/* Swipe reply indicator */}
+      {swipeX > 20 && (
+        <div className={`absolute ${document.documentElement.dir === "rtl" ? "-start-8" : "-end-8"} top-1/2 -translate-y-1/2`}>
+          <Reply className={`w-5 h-5 transition-all ${swipeX >= SWIPE_THRESHOLD ? "text-primary scale-110" : "text-white/30"}`} />
+        </div>
+      )}
       <div className={`w-7 h-7 shrink-0 ${showAvatar ? "" : "invisible"}`}>
         {showAvatar && !isMe && <UserAvatar user={otherUser} size="xs" />}
       </div>
@@ -144,14 +181,24 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         </div>
 
-        {/* Reaction badge */}
-        {reaction && (
-          <button
-            className="absolute -bottom-3 start-2 bg-white/10 border border-white/10 rounded-full px-1.5 py-0.5 text-xs hover:scale-110 transition-transform"
-            onClick={() => setShowReactions(true)}
-          >
-            {reaction}
-          </button>
+        {/* Reaction badges */}
+        {reactions.length > 0 && (
+          <div className="absolute -bottom-3 start-2 flex gap-0.5">
+            {Object.entries(reactions.reduce((acc: Record<string, number>, r: any) => {
+              acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>)).map(([emoji, cnt]) => (
+              <button
+                key={emoji}
+                className={`bg-white/10 border rounded-full px-1.5 py-0.5 text-xs hover:scale-110 transition-transform ${
+                  myReaction === emoji ? "border-primary/40 bg-primary/10" : "border-white/10"
+                }`}
+                onClick={() => handleReaction(emoji)}
+              >
+                {emoji}{(cnt as number) > 1 && <span className="text-[9px] ml-0.5 text-white/50">{cnt as number}</span>}
+              </button>
+            ))}
+          </div>
         )}
 
         {/* Action button on hover */}
@@ -211,7 +258,7 @@ const MessageBubble = memo(function MessageBubble({
             >
               {["👍","❤️","😂","😢","😡","🔥","🎉","👏"].map(emoji => (
                 <button key={emoji} onClick={() => handleReaction(emoji)}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg hover:bg-white/10 transition-colors ${reaction === emoji ? "bg-primary/20 ring-1 ring-primary/30" : ""}`}>
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg hover:bg-white/10 transition-colors ${myReaction === emoji ? "bg-primary/20 ring-1 ring-primary/30" : ""}`}>
                   {emoji}
                 </button>
               ))}
@@ -300,6 +347,38 @@ function ReportModal({ msg, onClose, onSubmit }: { msg: ChatMessage; onClose: ()
 }
 
 // ════════════════════════════════════════════════════════
+// CATEGORIZED EMOJI PICKER
+// ════════════════════════════════════════════════════════
+function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
+  const [activeCategory, setActiveCategory] = useState(0);
+  return (
+    <motion.div initial={{ opacity: 0, scale: 0.9, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
+      className="absolute bottom-full start-0 mb-2 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl p-3 z-50 w-[260px]">
+      {/* Category tabs */}
+      <div className="flex gap-1 mb-2 pb-2 border-b border-white/5">
+        {EMOJI_CATEGORIES.map((cat, i) => (
+          <button key={i} onClick={() => setActiveCategory(i)}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all ${
+              activeCategory === i ? "bg-primary/20 scale-110" : "hover:bg-white/5"
+            }`}>
+            {cat.icon}
+          </button>
+        ))}
+      </div>
+      {/* Emoji grid */}
+      <div className="grid grid-cols-5 gap-1 max-h-[200px] overflow-y-auto scrollbar-hide">
+        {EMOJI_CATEGORIES[activeCategory].emojis.map(emoji => (
+          <button key={emoji} onClick={() => onSelect(emoji)}
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-xl hover:bg-white/10 transition-colors hover:scale-110">
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
 // MAIN CHAT POPUP MODAL
 // ════════════════════════════════════════════════════════
 interface ChatPopupModalProps {
@@ -318,6 +397,12 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
 
   const chat = useActiveChat(conversations, setConversations, settings);
   const { reportTarget, setReportTarget, handleReport } = useReportModal(chat.activeConv);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedMsgs, setSelectedMsgs] = useState<Set<string>>(new Set());
 
   // Auto-open the initial conversation on mount
   useEffect(() => {
@@ -332,6 +417,62 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
       e.preventDefault();
       chat.sendMessage(t);
     }
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      chat.sendMedia(file, "image", t);
+    }
+    e.target.value = "";
+  };
+
+  const toggleVoiceRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4" });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType });
+        if (blob.size > 0) {
+          chat.sendMedia(blob, "voice", t);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      alert(t("chat.micPermissionDenied", "لا يمكن الوصول إلى الميكروفون"));
+    }
+  };
+
+  const toggleSelectMsg = (msgId: string) => {
+    setSelectedMsgs(prev => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedMsgs);
+    for (const id of ids) {
+      try { await chat.deleteMyMessage(id); } catch {}
+    }
+    setSelectedMsgs(new Set());
+    setSelectMode(false);
   };
 
   const insertEmoji = (emoji: string) => {
@@ -393,6 +534,11 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   <button onClick={() => chat.setShowMsgSearch(!chat.showMsgSearch)}
                     className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${chat.showMsgSearch ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/40"}`}>
                     <Search className="w-3.5 h-3.5" />
+                  </button>
+                  {/* Multi-select toggle */}
+                  <button onClick={() => { setSelectMode(!selectMode); setSelectedMsgs(new Set()); }}
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${selectMode ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/40"}`}>
+                    <CheckCheck className="w-3.5 h-3.5" />
                   </button>
                   {settings?.chat_voice_call_enabled && (
                     <button onClick={() => navigate(`/call?user=${chat.activeConv!.otherUser?.id}&type=voice`)}
@@ -464,7 +610,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           </AnimatePresence>
 
           {/* ── Messages Area (with infinite scroll) ── */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 scrollbar-thin" onScroll={handleMessagesScroll}>
+          <div ref={chat.messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 scrollbar-thin relative" onScroll={handleMessagesScroll}>
             {/* Load older indicator */}
             {chat.loadingMore && (
               <div className="flex justify-center py-2">
@@ -520,23 +666,60 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
               const isMe = msg.senderId === "me" || !!(chat.activeConv?.otherUser && msg.senderId !== chat.activeConv.otherUser.id);
               const showAvatar = !displayMsgs[i - 1] || displayMsgs[i - 1].senderId !== msg.senderId;
               return (
-                <MessageBubble
-                  key={msg.id}
-                  msg={msg}
-                  isMe={isMe}
-                  showAvatar={showAvatar}
-                  otherUser={chat.activeConv?.otherUser}
-                  onReport={m => setReportTarget(m)}
-                  onReply={m => chat.setReplyTo(m)}
-                  onDelete={chat.deleteMyMessage}
-                  lang={lang}
-                />
+                <div key={msg.id} className={`flex items-center gap-2 ${selectMode ? "cursor-pointer" : ""}`}
+                  onClick={selectMode && isMe ? () => toggleSelectMsg(msg.id) : undefined}>
+                  {selectMode && isMe && (
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                      selectedMsgs.has(msg.id) ? "border-primary bg-primary" : "border-white/20"
+                    }`}>
+                      {selectedMsgs.has(msg.id) && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <MessageBubble
+                      msg={msg}
+                      isMe={isMe}
+                      showAvatar={showAvatar}
+                      otherUser={chat.activeConv?.otherUser}
+                      onReport={m => setReportTarget(m)}
+                      onReply={m => chat.setReplyTo(m)}
+                      onDelete={chat.deleteMyMessage}
+                      lang={lang}
+                    />
+                  </div>
+                </div>
               );
             })}
 
             {chat.isTyping && <TypingIndicator />}
             <div ref={chat.messagesEndRef} />
           </div>
+
+          {/* ── New message indicator ── */}
+          {chat.showNewMsgIndicator && (
+            <button
+              onClick={() => chat.scrollToBottom()}
+              className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-white text-xs font-medium shadow-lg animate-bounce"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+              {t("chat.newMessages", "رسالة جديدة")}
+            </button>
+          )}
+
+          {/* ── Bulk delete bar ── */}
+          {selectMode && selectedMsgs.size > 0 && (
+            <div className="px-3 py-2 bg-red-500/10 border-t border-red-500/20 flex items-center justify-between">
+              <span className="text-sm text-white/70">{selectedMsgs.size} {t("chat.selected", "محدد")}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setSelectedMsgs(new Set()); setSelectMode(false); }}
+                  className="px-3 py-1.5 rounded-lg text-xs text-white/50 hover:bg-white/5">{t("chat.cancel", "إلغاء")}</button>
+                <button onClick={handleBulkDelete}
+                  className="px-3 py-1.5 rounded-lg text-xs text-red-400 bg-red-500/20 hover:bg-red-500/30 flex items-center gap-1">
+                  <Trash2 className="w-3 h-3" /> {t("chat.deleteSelected", "حذف المحدد")}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* ── Reply preview ── */}
           <AnimatePresence>
@@ -573,20 +756,33 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   </button>
                   <AnimatePresence>
                     {showEmojiPicker && (
-                      <motion.div initial={{ opacity: 0, scale: 0.9, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
-                        className="absolute bottom-full start-0 mb-2 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl p-3 z-50">
-                        <div className="grid grid-cols-5 gap-1 w-[200px]">
-                          {EMOJI_LIST.map(emoji => (
-                            <button key={emoji} onClick={() => insertEmoji(emoji)}
-                              className="w-9 h-9 rounded-lg flex items-center justify-center text-xl hover:bg-white/10 transition-colors">
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
+                      <EmojiPicker onSelect={insertEmoji} />
                     )}
                   </AnimatePresence>
                 </div>
+
+                {/* Image upload */}
+                {settings?.chat_media_enabled && (
+                  <>
+                    <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+                    <button onClick={() => imageInputRef.current?.click()}
+                      disabled={chat.sendingMsg || chat.blockStatus?.isBlocked}
+                      className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-white/5 text-white/30 hover:text-white/50 transition-all">
+                      <Image className="w-4.5 h-4.5" />
+                    </button>
+                  </>
+                )}
+
+                {/* Voice recording */}
+                {settings?.chat_media_enabled && (
+                  <button onClick={toggleVoiceRecording}
+                    disabled={chat.sendingMsg || chat.blockStatus?.isBlocked}
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                      isRecording ? "bg-red-500/20 text-red-400 animate-pulse" : "hover:bg-white/5 text-white/30 hover:text-white/50"
+                    }`}>
+                    <Mic className="w-4.5 h-4.5" />
+                  </button>
+                )}
 
                 <input ref={chat.inputRef} type="text"
                   value={chat.newMessage} onChange={chat.handleInputChange} onKeyDown={handleKeyDown}

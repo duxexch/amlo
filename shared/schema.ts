@@ -439,6 +439,7 @@ export const conversations = pgTable(
     index("conv_p1_idx").on(table.participant1Id),
     index("conv_p2_idx").on(table.participant2Id),
     index("conv_last_msg_idx").on(table.lastMessageAt),
+    index("conv_participants_idx").on(table.participant1Id, table.participant2Id),
   ],
 );
 
@@ -468,6 +469,7 @@ export const messages = pgTable(
     index("msg_conv_idx").on(table.conversationId),
     index("msg_sender_idx").on(table.senderId),
     index("msg_created_idx").on(table.createdAt),
+    index("msg_conv_created_idx").on(table.conversationId, table.createdAt),
   ],
 );
 
@@ -488,6 +490,7 @@ export const messageReactions = pgTable(
   (table) => [
     index("reaction_msg_idx").on(table.messageId),
     index("reaction_user_idx").on(table.userId),
+    unique("reaction_unique_idx").on(table.messageId, table.userId, table.emoji),
   ],
 );
 

@@ -14,6 +14,8 @@ const log = (msg: string, _src?: string) => chatLog.info(msg);
 const chatLog = createLogger("adminChat");
 import * as schema from "../../shared/schema";
 import { onlineUsersMap, getOnlineUsersCount } from "../onlineUsers";
+import { io } from "../index";
+import { getUserSocketId } from "../onlineUsers";
 
 const router = Router();
 
@@ -42,48 +44,37 @@ router.get("/overview/stats", requireAdmin, async (_req, res) => {
   }
 
   try {
-    // Total conversations
-    const [convCount] = await db.select({ count: count() }).from(schema.conversations);
-    // Total messages
-    const [msgCount] = await db.select({ count: count() }).from(schema.messages);
-    // Total calls
-    const [callCount] = await db.select({ count: count() }).from(schema.calls);
-
-    // Today's stats
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [msgsToday] = await db.select({ count: count() }).from(schema.messages)
-      .where(gte(schema.messages.createdAt, today));
-    const [callsToday] = await db.select({ count: count() }).from(schema.calls)
-      .where(gte(schema.calls.createdAt, today));
-
-    // Call revenue
-    const [callRev] = await db.select({ total: sql<number>`COALESCE(SUM(coins_charged), 0)` }).from(schema.calls);
-    const [callRevToday] = await db.select({ total: sql<number>`COALESCE(SUM(coins_charged), 0)` }).from(schema.calls)
-      .where(gte(schema.calls.createdAt, today));
-
-    // Message revenue
-    const [msgRev] = await db.select({ total: sql<number>`COALESCE(SUM(coins_cost), 0)` }).from(schema.messages);
-    const [msgRevToday] = await db.select({ total: sql<number>`COALESCE(SUM(coins_cost), 0)` }).from(schema.messages)
-      .where(gte(schema.messages.createdAt, today));
-
-    // Call type breakdown
-    const [voiceCalls] = await db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.type, "voice"));
-    const [videoCalls] = await db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.type, "video"));
-
-    // Message type breakdown
-    const [textMsgs] = await db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "text"));
-    const [imageMsgs] = await db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "image"));
-    const [voiceMsgs] = await db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "voice"));
-    const [giftMsgs] = await db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "gift"));
-
-    // Active calls
-    const [activeCalls] = await db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.status, "active"));
-
-    // Average call duration
-    const [avgDur] = await db.select({ avg: sql<number>`COALESCE(AVG(duration_seconds), 0)` }).from(schema.calls)
-      .where(eq(schema.calls.status, "ended"));
+    // Batch all independent queries in parallel
+    const [
+      [convCount], [msgCount], [callCount],
+      [msgsToday], [callsToday],
+      [callRev], [callRevToday],
+      [msgRev], [msgRevToday],
+      [voiceCalls], [videoCalls],
+      [textMsgs], [imageMsgs], [voiceMsgs], [giftMsgs],
+      [activeCalls], [avgDur],
+    ] = await Promise.all([
+      db.select({ count: count() }).from(schema.conversations),
+      db.select({ count: count() }).from(schema.messages),
+      db.select({ count: count() }).from(schema.calls),
+      db.select({ count: count() }).from(schema.messages).where(gte(schema.messages.createdAt, today)),
+      db.select({ count: count() }).from(schema.calls).where(gte(schema.calls.createdAt, today)),
+      db.select({ total: sql<number>`COALESCE(SUM(coins_charged), 0)` }).from(schema.calls),
+      db.select({ total: sql<number>`COALESCE(SUM(coins_charged), 0)` }).from(schema.calls).where(gte(schema.calls.createdAt, today)),
+      db.select({ total: sql<number>`COALESCE(SUM(coins_cost), 0)` }).from(schema.messages),
+      db.select({ total: sql<number>`COALESCE(SUM(coins_cost), 0)` }).from(schema.messages).where(gte(schema.messages.createdAt, today)),
+      db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.type, "voice")),
+      db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.type, "video")),
+      db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "text")),
+      db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "image")),
+      db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "voice")),
+      db.select({ count: count() }).from(schema.messages).where(eq(schema.messages.type, "gift")),
+      db.select({ count: count() }).from(schema.calls).where(eq(schema.calls.status, "active")),
+      db.select({ avg: sql<number>`COALESCE(AVG(duration_seconds), 0)` }).from(schema.calls).where(eq(schema.calls.status, "ended")),
+    ]);
 
     return res.json({
       success: true,
@@ -241,9 +232,40 @@ router.get("/conversations", requireAdmin, async (req, res) => {
   }
 
   try {
-    let query = db.select().from(schema.conversations).orderBy(desc(schema.conversations.lastMessageAt));
-    const [totalResult] = await db.select({ count: count() }).from(schema.conversations);
-    const convs = await query.limit(limit).offset(offset);
+    // If search is provided, first find matching user IDs, then filter conversations
+    let matchingUserIds: string[] = [];
+    if (search) {
+      const searchUsers = await db.select({ id: schema.users.id }).from(schema.users)
+        .where(or(
+          sql`${schema.users.username} ILIKE ${'%' + escapeLike(search) + '%'}`,
+          sql`${schema.users.displayName} ILIKE ${'%' + escapeLike(search) + '%'}`,
+        )).limit(100);
+      matchingUserIds = searchUsers.map(u => u.id);
+      if (matchingUserIds.length === 0) {
+        return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
+      }
+    }
+
+    // Build conditions for conversation query
+    const conditions = search && matchingUserIds.length > 0
+      ? [or(
+          inArray(schema.conversations.participant1Id, matchingUserIds),
+          inArray(schema.conversations.participant2Id, matchingUserIds),
+        )]
+      : [];
+
+    const [totalResult] = conditions.length > 0
+      ? await db.select({ count: count() }).from(schema.conversations).where(and(...conditions))
+      : await db.select({ count: count() }).from(schema.conversations);
+
+    const convs = conditions.length > 0
+      ? await db.select().from(schema.conversations)
+          .where(and(...conditions))
+          .orderBy(desc(schema.conversations.lastMessageAt))
+          .limit(limit).offset(offset)
+      : await db.select().from(schema.conversations)
+          .orderBy(desc(schema.conversations.lastMessageAt))
+          .limit(limit).offset(offset);
 
     // Fetch participant info
     const allUserIds = Array.from(new Set(convs.flatMap(c => [c.participant1Id, c.participant2Id])));
@@ -280,16 +302,9 @@ router.get("/conversations", requireAdmin, async (req, res) => {
       isActive: c.isActive,
     }));
 
-    // Filter by search (participant username/displayName)
-    const filtered = search
-      ? data.filter(d =>
-          d.participant1.username.includes(search) || d.participant1.displayName?.includes(search) ||
-          d.participant2.username.includes(search) || d.participant2.displayName?.includes(search))
-      : data;
-
     return res.json({
       success: true,
-      data: filtered,
+      data,
       pagination: { page, limit, total: totalResult.count, totalPages: Math.ceil(totalResult.count / limit) },
     });
   } catch (err: any) {
@@ -325,10 +340,19 @@ router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
         }).from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
 
-    const data = msgs.map(m => ({
-      ...m,
-      senderName: senders.find(s => s.id === m.senderId)?.displayName || "مجهول",
-    }));
+    const { decryptMessage } = await import("../utils/encryption");
+
+    const data = msgs.map(m => {
+      let content = m.content;
+      if (content && !m.isDeleted) {
+        try { content = decryptMessage(content, m.conversationId); } catch { /* keep original */ }
+      }
+      return {
+        ...m,
+        content,
+        senderName: senders.find(s => s.id === m.senderId)?.displayName || "مجهول",
+      };
+    });
 
     return res.json({ success: true, data: data.reverse() });
   } catch (err: any) {
@@ -384,10 +408,19 @@ router.get("/messages", requireAdmin, async (req, res) => {
           .from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
 
-    const data = msgs.map(m => ({
-      ...m,
-      senderName: senders.find(s => s.id === m.senderId)?.displayName || "مجهول",
-    }));
+    const { decryptMessage } = await import("../utils/encryption");
+
+    const data = msgs.map(m => {
+      let content = m.content;
+      if (content && !m.isDeleted) {
+        try { content = decryptMessage(content, m.conversationId); } catch { /* keep original */ }
+      }
+      return {
+        ...m,
+        content,
+        senderName: senders.find(s => s.id === m.senderId)?.displayName || "مجهول",
+      };
+    });
 
     return res.json({
       success: true,
@@ -496,8 +529,23 @@ router.post("/calls/:id/force-end", requireAdmin, async (req, res) => {
 
   try {
     const callId = p(req.params.id);
+    // Get call info before ending to notify both parties
+    const [call] = await db.select().from(schema.calls)
+      .where(eq(schema.calls.id, callId)).limit(1);
+
     await db.update(schema.calls).set({ status: "ended", endedAt: new Date() }).where(eq(schema.calls.id, callId));
     await storage.addAdminLog(req.session.adminId!, "force_end_call", "call", callId, "إنهاء مكالمة إجبارياً");
+
+    // Notify both parties via socket
+    if (call) {
+      for (const uid of [call.callerId, call.receiverId]) {
+        const socketId = await getUserSocketId(uid);
+        if (socketId) {
+          io.to(socketId).emit("call-ended", { callId, durationSeconds: 0, coinsCharged: 0, forcedByAdmin: true });
+        }
+      }
+    }
+
     return res.json({ success: true, message: "تم إنهاء المكالمة" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -650,13 +698,16 @@ router.put("/settings", requireAdmin, async (req, res) => {
   if (!db) return res.json({ success: true, message: "تم التحديث" });
 
   try {
-    for (const { key, value } of settings) {
-      const existing = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, key)).limit(1);
-      if (existing.length > 0) {
-        await db.update(schema.systemSettings).set({ value: String(value), updatedAt: new Date() }).where(eq(schema.systemSettings.key, key));
-      } else {
-        await db.insert(schema.systemSettings).values({ key, value: String(value), category: "chat" });
-      }
+    // Batch upsert using ON CONFLICT instead of N sequential queries
+    if (settings.length > 0) {
+      await Promise.all(settings.map(({ key, value }: { key: string; value: any }) =>
+        db.insert(schema.systemSettings)
+          .values({ key, value: String(value), category: "chat" })
+          .onConflictDoUpdate({
+            target: schema.systemSettings.key,
+            set: { value: String(value), updatedAt: new Date() },
+          })
+      ));
     }
     await storage.addAdminLog(req.session.adminId!, "update_chat_settings", "settings", "", `تحديث ${settings.length} إعدادات`);
     return res.json({ success: true, message: "تم تحديث الإعدادات" });
@@ -749,7 +800,19 @@ router.post("/streams/:id/end", requireAdmin, async (req, res) => {
 
   if (db) {
     try {
+      // Get stream info before ending to notify the streamer
+      const [stream] = await db.select({ userId: schema.streams.userId })
+        .from(schema.streams).where(eq(schema.streams.id, streamId)).limit(1);
+
       await db.update(schema.streams).set({ status: "ended", endedAt: new Date() }).where(eq(schema.streams.id, streamId));
+
+      // Notify the streamer via socket
+      if (stream) {
+        const socketId = await getUserSocketId(stream.userId);
+        if (socketId) {
+          io.to(socketId).emit("stream-force-ended", { streamId, forcedByAdmin: true });
+        }
+      }
     } catch (err: any) {
       log(`Force end stream error: ${err.message}`, "admin");
     }
@@ -757,76 +820,6 @@ router.post("/streams/:id/end", requireAdmin, async (req, res) => {
 
   await storage.addAdminLog(req.session.adminId!, "force_end_stream", "stream", streamId, "إيقاف بث إجبارياً");
   return res.json({ success: true, message: "تم إيقاف البث" });
-});
-
-// ══════════════════════════════════════════════════════════
-// ADMIN CHAT SETTINGS — إعدادات الدردشة
-// ══════════════════════════════════════════════════════════
-
-// Get all chat settings
-router.get("/settings/chat", requireAdmin, async (_req, res) => {
-  const db = getDb();
-  const defaults = {
-    chat_media_enabled: "true",
-    chat_voice_call_enabled: "true",
-    chat_video_call_enabled: "true",
-    chat_time_limit: "0",
-    message_cost: "0",
-    voice_call_rate: "10",
-    video_call_rate: "20",
-  };
-
-  if (!db) return res.json({ success: true, data: defaults });
-
-  try {
-    const keys = Object.keys(defaults);
-    const settings = await db.select().from(schema.systemSettings)
-      .where(inArray(schema.systemSettings.key, keys));
-
-    const result: Record<string, string> = { ...defaults };
-    settings.forEach(s => { result[s.key] = s.value; });
-    return res.json({ success: true, data: result });
-  } catch {
-    return res.json({ success: true, data: defaults });
-  }
-});
-
-// Update a chat setting
-router.put("/settings/chat", requireAdmin, async (req, res) => {
-  const db = getDb();
-  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
-
-  const { key, value } = req.body;
-  if (!key || value === undefined) return res.status(400).json({ success: false, message: "key و value مطلوبان" });
-
-  const validKeys = [
-    "chat_media_enabled", "chat_voice_call_enabled", "chat_video_call_enabled",
-    "chat_time_limit", "message_cost", "voice_call_rate", "video_call_rate",
-  ];
-  if (!validKeys.includes(key)) return res.status(400).json({ success: false, message: "مفتاح غير صالح" });
-
-  try {
-    const existing = await db.select().from(schema.systemSettings)
-      .where(eq(schema.systemSettings.key, key)).limit(1);
-
-    if (existing.length > 0) {
-      await db.update(schema.systemSettings)
-        .set({ value: String(value), updatedAt: new Date() })
-        .where(eq(schema.systemSettings.key, key));
-    } else {
-      await db.insert(schema.systemSettings).values({
-        key,
-        value: String(value),
-        category: "chat",
-        description: `Chat setting: ${key}`,
-      });
-    }
-
-    await storage.addAdminLog(req.session.adminId!, "update_chat_setting", "setting", key, `${key} = ${value}`);
-    return res.json({ success: true, message: "تم تحديث الإعداد" });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: "خطأ" });
-  }
 });
 
 // ══════════════════════════════════════════════════════════
@@ -1135,7 +1128,7 @@ function toCsv(headers: string[], rows: string[][]): string {
 }
 
 // Export conversations as CSV
-router.get("/export/conversations", async (_req, res) => {
+router.get("/export/conversations", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
@@ -1177,10 +1170,11 @@ router.get("/export/conversations", async (_req, res) => {
 });
 
 // Export messages as CSV
-router.get("/export/messages", async (_req, res) => {
+router.get("/export/messages", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
+    const { decryptMessage } = await import("../utils/encryption");
     const msgs = await db.select({
       id: schema.messages.id,
       conversationId: schema.messages.conversationId,
@@ -1200,14 +1194,21 @@ router.get("/export/messages", async (_req, res) => {
     const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
 
     const headers = ["ID", "Conversation ID", "Sender", "Content", "Type", "Created At"];
-    const rows = msgs.map((m: { id: string; conversationId: string; senderId: string; content: string | null; type: string; createdAt: Date }) => [
-      String(m.id),
-      String(m.conversationId),
-      nameMap.get(m.senderId) ?? String(m.senderId),
-      m.content ?? "",
-      m.type ?? "text",
-      m.createdAt ? new Date(m.createdAt).toISOString() : "",
-    ]);
+    const rows = msgs.map((m: { id: string; conversationId: string; senderId: string; content: string | null; type: string; createdAt: Date }) => {
+      // Decrypt content before export
+      let decryptedContent = m.content ?? "";
+      if (m.content) {
+        try { decryptedContent = decryptMessage(m.content, m.conversationId); } catch { decryptedContent = m.content; }
+      }
+      return [
+        String(m.id),
+        String(m.conversationId),
+        nameMap.get(m.senderId) ?? String(m.senderId),
+        decryptedContent,
+        m.type ?? "text",
+        m.createdAt ? new Date(m.createdAt).toISOString() : "",
+      ];
+    });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=messages.csv");
@@ -1218,7 +1219,7 @@ router.get("/export/messages", async (_req, res) => {
 });
 
 // Export reports as CSV
-router.get("/export/reports", async (_req, res) => {
+router.get("/export/reports", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {

@@ -10,6 +10,9 @@
  *  - Derived keys are cached in-memory (LRU) to avoid blocking scryptSync per call
  */
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, createHash } from "crypto";
+import { createLogger } from "../logger";
+
+const encLog = createLogger("encryption");
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
@@ -22,7 +25,7 @@ function getMasterSecret(): string {
       throw new Error("ENCRYPTION_SECRET env var is required in production");
     }
     // Dev-only fallback with a loud warning
-    console.warn("⚠️  WARNING: Using dev-only ENCRYPTION_SECRET — set ENCRYPTION_SECRET in .env for production");
+    encLog.warn("Using dev-only ENCRYPTION_SECRET — set ENCRYPTION_SECRET in .env for production");
     return "dev-only-encryption-key-NOT-FOR-PRODUCTION-USE";
   }
   return secret;

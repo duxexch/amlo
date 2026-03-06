@@ -8,6 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import { adminAuth } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 // ── Admin Auth Context ────────────────────────────────────
@@ -335,7 +336,9 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <main className="flex-1 p-4 lg:p-8">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

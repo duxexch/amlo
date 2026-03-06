@@ -6,6 +6,20 @@ const API_BASE = "/api/social";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/** Upload a media file (image/voice) for chat */
+export async function uploadMedia(file: File | Blob, filename?: string): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file, filename || (file instanceof File ? file.name : "recording.webm"));
+  const res = await fetch("/api/v1/upload/media", {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.message || "Upload failed");
+  return json.data.url as string;
+}
+
 async function request<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -32,8 +46,8 @@ async function request<T = unknown>(path: string, init?: RequestInit): Promise<T
 
 // ── Friends ──
 export const friendsApi = {
-  list: () => request<any[]>("/friends"),
-  requests: () => request<any[]>("/friends/requests"),
+  list: (page = 1, limit = 50) => request<any[]>(`/friends?page=${page}&limit=${limit}`),
+  requests: (page = 1, limit = 30) => request<any[]>(`/friends/requests?page=${page}&limit=${limit}`),
   sent: () => request<any[]>("/friends/sent"),
   sendRequest: (receiverId: string) =>
     request("/friends/request", { method: "POST", body: JSON.stringify({ receiverId }) }),
@@ -143,10 +157,24 @@ export const walletApi = {
   milesPricing: () => request<{ packages: any[] }>("/miles-pricing"),
   /** Recharge packages from payment system */
   rechargePackages: async () => {
-    const res = await fetch("/api/payments/packages", { credentials: "include" });
-    const json = await res.json();
-    if (!res.ok) throw json;
-    return json;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/payments/packages", {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw { status: res.status, ...json };
+      return json;
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw { status: 408, success: false, message: "انتهت مهلة الطلب" };
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   },
   /** #14: Merged spending summary (totalSpent + breakdown in one call) */
   spendingSummary: () => request<{ totalSpent: number; breakdown: { type: string; total: number; count: number }[] }>("/wallet/spending-summary"),

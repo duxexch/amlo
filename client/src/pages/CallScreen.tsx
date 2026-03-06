@@ -246,6 +246,19 @@ export function CallScreen() {
     };
   }, [userId, callType]);
 
+  // ── Cleanup on tab close / navigation ──
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      webrtcManager.endCall();
+      if (callId) {
+        // Use sendBeacon for reliable delivery during page unload
+        navigator.sendBeacon(`/api/social/calls/${callId}/end`, JSON.stringify({}));
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [callId]);
+
   const endCall = async () => {
     webrtcManager.endCall();
     if (isRandomMatch) {

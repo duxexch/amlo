@@ -34,9 +34,13 @@ interface ChatMessage {
 function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['user']; onClose: () => void; onFollow: (id: string) => void; t: any }) {
   const [stats, setStats] = useState({ followers: 0, following: 0, gifts: 0 });
   useEffect(() => {
+    let cancelled = false;
     if (user.id && user.id !== 'me' && user.id !== 'unknown') {
-      followApi.counts(user.id).then(c => setStats(prev => ({ ...prev, followers: c.followers || 0, following: c.following || 0 }))).catch(() => {});
+      followApi.counts(user.id).then(c => {
+        if (!cancelled) setStats(prev => ({ ...prev, followers: c.followers || 0, following: c.following || 0 }));
+      }).catch(() => {});
     }
+    return () => { cancelled = true; };
   }, [user.id]);
   return (
     <motion.div
@@ -240,6 +244,10 @@ export function Room() {
 
   // Keep max 40 messages in buffer (prevents DOM bloat in long streams)
   const MAX_MESSAGES = conn.quality === 'poor' ? 20 : 40;
+  const maxMessagesRef = useRef(MAX_MESSAGES);
+  maxMessagesRef.current = MAX_MESSAGES;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Cleanup heart timers on unmount
   useEffect(() => {
@@ -320,12 +328,13 @@ export function Room() {
     const handleChatMessage = (data: any) => {
       if (!data?.message) return;
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400', 'text-yellow-400'];
-      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+      const limit = maxMessagesRef.current;
+      setMessages(prev => [...prev.slice(-(limit - 1)), {
         id: data.id || Date.now(),
         type: 'message',
         user: data.user
           ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, username: data.user.username || data.user.id, isFollowed: false }
-          : { id: 'unknown', name: t("room.anonymous", "مجهول"), username: 'unknown', avatar: avatarImg, level: 1, isFollowed: false },
+          : { id: 'unknown', name: tRef.current("room.anonymous", "مجهول"), username: 'unknown', avatar: avatarImg, level: 1, isFollowed: false },
         text: data.message,
         color: colors[Math.floor(Math.random() * colors.length)],
         timestamp: data.ts || Date.now(),
@@ -336,7 +345,8 @@ export function Room() {
 
     const handleGiftReceived = (data: any) => {
       if (!data?.sender?.name || !data?.gift?.price) return;
-      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+      const limit = maxMessagesRef.current;
+      setMessages(prev => [...prev.slice(-(limit - 1)), {
         id: Date.now(),
         type: 'gift',
         user: { id: data.sender.id || 'unknown', name: data.sender.name, username: data.sender.id || 'unknown', avatar: data.sender.avatar || avatarImg, level: 1, isFollowed: false },
@@ -363,7 +373,11 @@ export function Room() {
     const x = Math.random() * 100;
     setHearts(prev => [...prev, {id, x}]);
     setHeartCount(prev => prev + 1);
-    const timer = setTimeout(() => setHearts(prev => prev.filter(h => h.id !== id)), 2000);
+    const timer = setTimeout(() => {
+      setHearts(prev => prev.filter(h => h.id !== id));
+      // Remove completed timer reference to prevent unbounded growth
+      heartTimersRef.current = heartTimersRef.current.filter(t => t !== timer);
+    }, 2000);
     heartTimersRef.current.push(timer);
   };
 

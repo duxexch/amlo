@@ -5,21 +5,26 @@ import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { authApi } from "@/lib/authApi";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [showDownload, setShowDownload] = useState(false);
 
-  // Check auth state and download visibility on mount
-  useEffect(() => {
-    authApi.me()
-      .then(() => setIsLoggedIn(true))
-      .catch(() => setIsLoggedIn(false));
+  // Cached auth check via React Query — shared across all components
+  const { data: authUser } = useQuery({
+    queryKey: ["/api/auth/me"],
+    queryFn: () => authApi.me(),
+    staleTime: 5 * 60 * 1000, // 5 minutes — don't re-fetch on every mount
+    retry: false,
+  });
+  const isLoggedIn = authUser !== undefined ? !!authUser : null;
 
+  // Only fetch download visibility once
+  useEffect(() => {
     fetch("/api/app-download")
       .then(r => r.json())
       .then(res => {

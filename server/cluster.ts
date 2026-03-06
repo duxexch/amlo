@@ -17,11 +17,13 @@
 
 import cluster from "node:cluster";
 import os from "node:os";
+import { createLogger } from "./logger";
 
+const clusterLog = createLogger("cluster");
 const WORKER_COUNT = parseInt(process.env.CLUSTER_WORKERS || String(os.cpus().length), 10);
 
 if (cluster.isPrimary) {
-  console.log(`[cluster] Primary ${process.pid} starting ${WORKER_COUNT} workers...`);
+  clusterLog.info(`Primary ${process.pid} starting ${WORKER_COUNT} workers...`);
 
   // Fork workers
   for (let i = 0; i < WORKER_COUNT; i++) {
@@ -36,10 +38,10 @@ if (cluster.isPrimary) {
   setInterval(() => { restartsInWindow = 0; }, RESTART_WINDOW_MS);
 
   cluster.on("exit", (worker, code, signal) => {
-    console.log(`[cluster] Worker ${worker.process.pid} died (code=${code}, signal=${signal})`);
+    clusterLog.warn(`Worker ${worker.process.pid} died (code=${code}, signal=${signal})`);
     
     if (restartsInWindow >= MAX_RESTARTS_PER_WINDOW) {
-      console.error(`[cluster] Too many restarts (${restartsInWindow}/${MAX_RESTARTS_PER_WINDOW}). Not restarting.`);
+      clusterLog.error(`Too many restarts (${restartsInWindow}/${MAX_RESTARTS_PER_WINDOW}). Not restarting.`);
       return;
     }
 
@@ -47,19 +49,19 @@ if (cluster.isPrimary) {
     const delay = Math.min(1000 * (restartsInWindow + 1), 10_000);
     setTimeout(() => {
       restartsInWindow++;
-      console.log(`[cluster] Restarting worker after ${delay}ms...`);
+      clusterLog.info(`Restarting worker after ${delay}ms...`);
       cluster.fork();
     }, delay);
   });
 
   // Graceful shutdown
   const shutdown = (signal: string) => {
-    console.log(`[cluster] ${signal} received — shutting down all workers...`);
+    clusterLog.info(`${signal} received — shutting down all workers...`);
     for (const id in cluster.workers) {
       cluster.workers[id]?.process.kill(signal as NodeJS.Signals);
     }
     setTimeout(() => {
-      console.log("[cluster] Force exit after 15s");
+      clusterLog.warn("Force exit after 15s");
       process.exit(1);
     }, 15_000).unref();
   };
@@ -72,5 +74,5 @@ if (cluster.isPrimary) {
   // In production (CJS build): ./index.cjs, in dev (TSX): ./index.js
   const entry = process.env.NODE_ENV === "production" ? "./index.cjs" : "./index.js";
   import(entry);
-  console.log(`[cluster] Worker ${process.pid} started`);
+  clusterLog.info(`Worker ${process.pid} started`);
 }

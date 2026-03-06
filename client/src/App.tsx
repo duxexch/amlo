@@ -11,7 +11,7 @@ import { CallPopup } from "@/components/ui/CallPopup";
 import { AnnouncementPopup } from "@/components/ui/AnnouncementPopup";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 
 // ── Lazy-loaded pages (code splitting) ──
 const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })));
@@ -159,8 +159,35 @@ function Router() {
 
 function App() {
   const [incomingCall, setIncomingCall] = useState(false);
-  const [location] = useLocation();
+  const [incomingCallInfo, setIncomingCallInfo] = useState<{ callerName?: string; isVideo?: boolean; callId?: string }>({});
+  const [location, navigate] = useLocation();
   const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
+
+  // ── Listen for incoming calls via Socket.io ──
+  useEffect(() => {
+    let socket: any;
+    import("@/lib/socketManager").then(({ getSocket }) => {
+      socket = getSocket();
+      const handleIncomingCall = (data: any) => {
+        if (data && typeof data === "object") {
+          setIncomingCallInfo({
+            callerName: data.callerName || data.senderName,
+            isVideo: data.type === "video",
+            callId: data.callId,
+          });
+          setIncomingCall(true);
+        }
+      };
+      socket.on("incoming-call", handleIncomingCall);
+      // Store cleanup ref
+      (window as any).__cleanupIncomingCall = () => {
+        socket.off("incoming-call", handleIncomingCall);
+      };
+    });
+    return () => {
+      (window as any).__cleanupIncomingCall?.();
+    };
+  }, []);
 
   return (
     <ErrorBoundary>
@@ -172,7 +199,14 @@ function App() {
           <Router />
           <CallPopup 
             isOpen={incomingCall} 
-            onAccept={() => setIncomingCall(false)} 
+            callerName={incomingCallInfo.callerName}
+            isVideo={incomingCallInfo.isVideo}
+            onAccept={() => {
+              setIncomingCall(false);
+              if (incomingCallInfo.callId) {
+                navigate(`/call?id=${incomingCallInfo.callId}&type=${incomingCallInfo.isVideo ? 'video' : 'audio'}`);
+              }
+            }} 
             onDecline={() => setIncomingCall(false)} 
           />
           {isAppPage && <AnnouncementPopup />}

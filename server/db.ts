@@ -27,8 +27,8 @@ export function getPool(): pg.Pool | null {
   try {
     pool = new Pool({
       connectionString: url,
-      max: parseInt(process.env.DB_POOL_MAX || "50", 10),  // 50 is enough with 3-tier caching
-      min: parseInt(process.env.DB_POOL_MIN || "5", 10),
+      max: parseInt(process.env.DB_POOL_MAX || "15", 10),  // 15 per worker — safe for cluster mode
+      min: parseInt(process.env.DB_POOL_MIN || "2", 10),
       idleTimeoutMillis: 20000,
       connectionTimeoutMillis: 5000,
       allowExitOnIdle: false,

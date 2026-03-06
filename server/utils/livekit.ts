@@ -6,6 +6,9 @@
  * - Security: tokens expire, room-scoped
  */
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
+import { createLogger } from "../logger";
+
+const lkLog = createLogger("livekit");
 
 // ── ENV Configuration ──
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || "ablox_livekit_key";
@@ -111,7 +114,7 @@ export async function createLiveKitRoom(
   } catch (err: any) {
     // Room might already exist — that's fine
     if (err?.message?.includes("already exists")) return;
-    console.error("[LiveKit] Failed to create room:", err?.message);
+    lkLog.error({ err: err?.message }, "Failed to create room");
     throw err;
   }
 }
@@ -125,7 +128,7 @@ export async function deleteLiveKitRoom(roomName: string): Promise<void> {
     await svc.deleteRoom(roomName);
   } catch (err: any) {
     // Room might not exist — that's fine during cleanup
-    console.warn("[LiveKit] Failed to delete room:", roomName, err?.message);
+    lkLog.warn({ room: roomName, err: err?.message }, "Failed to delete room");
   }
 }
 
@@ -149,7 +152,7 @@ export async function removeParticipant(roomName: string, participantId: string)
     const svc = getRoomService();
     await svc.removeParticipant(roomName, participantId);
   } catch (err: any) {
-    console.warn("[LiveKit] Failed to remove participant:", err?.message);
+    lkLog.warn({ err: err?.message }, "Failed to remove participant");
   }
 }
 
@@ -166,7 +169,7 @@ export async function muteParticipant(
     const svc = getRoomService();
     await svc.mutePublishedTrack(roomName, participantId, trackSid, mute);
   } catch (err: any) {
-    console.warn("[LiveKit] Failed to mute participant:", err?.message);
+    lkLog.warn({ err: err?.message }, "Failed to mute participant");
   }
 }
 
@@ -186,6 +189,6 @@ export async function updateParticipantPermissions(
       canSubscribe: true,
     });
   } catch (err: any) {
-    console.warn("[LiveKit] Failed to update permissions:", err?.message);
+    lkLog.warn({ err: err?.message }, "Failed to update permissions");
   }
 }

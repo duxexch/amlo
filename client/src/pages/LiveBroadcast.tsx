@@ -264,10 +264,18 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   const [giftAnimations, setGiftAnimations] = useState<{ id: number; name: string; image: string; sender: string }[]>([]);
   const conn = useConnectionQuality();
   const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
+  const maxMessagesRef = useRef(MAX_MESSAGES);
+  maxMessagesRef.current = MAX_MESSAGES;
+  const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [lkState, setLkState] = useState<StreamState>('idle');
   const [activeSpeakerIds, setActiveSpeakerIds] = useState<Set<string>>(new Set());
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+
+  // Cleanup heart timers on unmount
+  useEffect(() => {
+    return () => { heartTimersRef.current.forEach(t => clearTimeout(t)); };
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -338,7 +346,8 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     const handleChatMessage = (data: any) => {
       if (!data?.message) return;
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
-      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+      const limit = maxMessagesRef.current;
+      setMessages(prev => [...prev.slice(-(limit - 1)), {
         id: data.id || Date.now(),
         type: 'message',
         user: data.user
@@ -442,7 +451,11 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   const addHeart = () => {
     const id = Date.now();
     setHearts(prev => [...prev, { id, x: Math.random() * 100 }]);
-    setTimeout(() => setHearts(prev => prev.filter(h => h.id !== id)), 2000);
+    const timer = setTimeout(() => {
+      setHearts(prev => prev.filter(h => h.id !== id));
+      heartTimersRef.current = heartTimersRef.current.filter(t => t !== timer);
+    }, 2000);
+    heartTimersRef.current.push(timer);
   };
 
   const handleSend = () => {
@@ -1355,8 +1368,16 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const conn = useConnectionQuality();
   const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
+  const maxMessagesRef = useRef(MAX_MESSAGES);
+  maxMessagesRef.current = MAX_MESSAGES;
+  const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [lkState, setLkState] = useState<StreamState>('idle');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+
+  // Cleanup heart timers on unmount
+  useEffect(() => {
+    return () => { heartTimersRef.current.forEach(t => clearTimeout(t)); };
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1416,7 +1437,8 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     const handleChat = (data: any) => {
       if (!data?.message) return;
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
-      setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
+      const limit = maxMessagesRef.current;
+      setMessages(prev => [...prev.slice(-(limit - 1)), {
         id: data.id || Date.now(), type: 'message',
         user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 } : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
         text: data.message, color: colors[Math.floor(Math.random() * colors.length)], timestamp: data.ts || Date.now(),
@@ -1468,7 +1490,11 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   const addHeart = () => {
     const id = Date.now();
     setHearts(prev => [...prev, { id, x: Math.random() * 100 }]);
-    setTimeout(() => setHearts(prev => prev.filter(h => h.id !== id)), 2000);
+    const timer = setTimeout(() => {
+      setHearts(prev => prev.filter(h => h.id !== id));
+      heartTimersRef.current = heartTimersRef.current.filter(t => t !== timer);
+    }, 2000);
+    heartTimersRef.current.push(timer);
   };
 
   const togglePiP = async () => {

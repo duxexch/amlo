@@ -39,10 +39,11 @@ async function request<T>(
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
+    const hasBody = options.body != null;
     const res = await fetch(`${BASE}${endpoint}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
         ...options.headers,
       },
       credentials: "include",
@@ -721,11 +722,6 @@ export const adminChatManagement = {
     chatReq(`/streams/whitelist/${userId}`, { method: "PUT", body: JSON.stringify({ allowed }) }),
   toggleUserCanStream: (userId: string, canStream: boolean) =>
     chatReq(`/users/${userId}/can-stream`, { method: "PUT", body: JSON.stringify({ canStream }) }),
-
-  // ── Chat Settings (Feature Toggles) ──
-  getChatSettings: () => chatReq<Record<string, string>>("/settings/chat"),
-  updateChatSetting: (key: string, value: string) =>
-    chatReq("/settings/chat", { method: "PUT", body: JSON.stringify({ key, value }) }),
 
   // ── Message Reports ──
   getMessageReports: (page = 1, status = "all") =>
