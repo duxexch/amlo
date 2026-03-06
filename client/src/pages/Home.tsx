@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe, MessageCircle } from "lucide-react";
+import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe, MessageCircle, SlidersHorizontal } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import heroBg from "@/assets/images/hero-bg.png";
@@ -141,6 +141,16 @@ function getTimeSince(dateStr: string, t: any): string {
   return `${days} ${t("home.daysAgo")}`;
 }
 
+// ── Random chat filter persistence ──────────────────────
+const RANDOM_FILTERS_KEY = "random_chat_filters";
+function getSavedRandomFilters(): Omit<MatchFilters, 'type'> {
+  try {
+    const saved = localStorage.getItem(RANDOM_FILTERS_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return { genderFilter: "both", ageMin: 18, ageMax: 99, countryFilter: "" };
+}
+
 export function Home() {
   const { t } = useTranslation();
   const [, navigate] = useLocation();
@@ -151,6 +161,14 @@ export function Home() {
   const [filtersType, setFiltersType] = useState<"video" | "audio" | "text">("video");
   const [showMatching, setShowMatching] = useState(false);
   const [matchFilters, setMatchFilters] = useState<MatchFilters | null>(null);
+
+  // Direct start matching (like World section quick search)
+  const handleStartRandom = (type: "video" | "audio" | "text") => {
+    const saved = getSavedRandomFilters();
+    const filters: MatchFilters = { ...saved, type };
+    setMatchFilters(filters);
+    setShowMatching(true);
+  };
 
   useEffect(() => {
     fetch("/api/followed-accounts")
@@ -207,54 +225,69 @@ export function Home() {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-6"
+          className="space-y-4"
         >
-          <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
-            <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="w-28 h-28 rounded-full bg-primary/20 flex items-center justify-center mb-6 neon-border relative">
-              <div className="absolute inset-0 rounded-full animate-pulse-ring" />
-              <Video className="w-14 h-14 text-primary" />
-            </div>
-            <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomVideoTitle")}</h3>
-            <p className="text-muted-foreground mb-8 text-lg">{t("home.randomVideoDesc")}</p>
-            <button
+          {/* Three compact cards — always visible without scrolling */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {/* Video */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleStartRandom("video")}
+              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-primary/30 transition-all duration-300"
+            >
+              <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-primary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-shadow">
+                <Video className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-primary" />
+              </div>
+              <div className="relative z-10">
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomVideoTitle")}</h3>
+                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomVideoDesc")}</p>
+              </div>
+            </motion.button>
+
+            {/* Audio */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleStartRandom("audio")}
+              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-secondary/30 transition-all duration-300"
+            >
+              <div className="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-secondary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(236,72,153,0.3)] transition-shadow">
+                <Mic className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-secondary" />
+              </div>
+              <div className="relative z-10">
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomAudioTitle")}</h3>
+                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomAudioDesc")}</p>
+              </div>
+            </motion.button>
+
+            {/* Text */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleStartRandom("text")}
+              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-emerald-500/30 transition-all duration-300"
+            >
+              <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-emerald-500/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-shadow">
+                <MessageCircle className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-emerald-400" />
+              </div>
+              <div className="relative z-10">
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomTextTitle")}</h3>
+                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomTextDesc")}</p>
+              </div>
+            </motion.button>
+          </div>
+
+          {/* Filter Settings Button */}
+          <div className="flex justify-center">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
               onClick={() => { setFiltersType("video"); setShowFiltersModal(true); }}
-              className="bg-primary hover:bg-primary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all transform hover:scale-105 inline-block"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/[0.06] backdrop-blur-sm border border-white/[0.08] text-white/50 text-sm font-medium hover:bg-white/[0.12] hover:border-primary/30 hover:text-white/80 transition-all"
             >
-              {t("common.startNow")}
-            </button>
-          </div>
-
-          <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
-            <div className="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="w-28 h-28 rounded-full bg-secondary/20 flex items-center justify-center mb-6 neon-border-secondary relative">
-              <div className="absolute inset-0 rounded-full animate-pulse-ring" style={{animationDelay: '1s'}} />
-              <Mic className="w-14 h-14 text-secondary" />
-            </div>
-            <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomAudioTitle")}</h3>
-            <p className="text-muted-foreground mb-8 text-lg">{t("home.randomAudioDesc")}</p>
-            <button
-              onClick={() => { setFiltersType("audio"); setShowFiltersModal(true); }}
-              className="bg-secondary hover:bg-secondary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all transform hover:scale-105 inline-block"
-            >
-              {t("common.startNow")}
-            </button>
-          </div>
-
-          <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
-            <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="w-28 h-28 rounded-full bg-emerald-500/20 flex items-center justify-center mb-6 relative" style={{boxShadow: '0 0 15px rgba(16,185,129,0.3), inset 0 0 15px rgba(16,185,129,0.1)'}}>
-              <div className="absolute inset-0 rounded-full animate-pulse-ring" style={{animationDelay: '2s'}} />
-              <MessageCircle className="w-14 h-14 text-emerald-400" />
-            </div>
-            <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomTextTitle")}</h3>
-            <p className="text-muted-foreground mb-8 text-lg">{t("home.randomTextDesc")}</p>
-            <button
-              onClick={() => { setFiltersType("text"); setShowFiltersModal(true); }}
-              className="bg-emerald-500 hover:bg-emerald-500/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all transform hover:scale-105 inline-block"
-            >
-              {t("common.startNow")}
-            </button>
+              <SlidersHorizontal className="w-4 h-4 text-primary/70" />
+              {t("matching.filtersTitle")}
+            </motion.button>
           </div>
         </motion.div>
       )}
@@ -430,6 +463,14 @@ export function Home() {
         initialType={filtersType}
         onStart={(filters) => {
           setShowFiltersModal(false);
+          try {
+            localStorage.setItem(RANDOM_FILTERS_KEY, JSON.stringify({
+              genderFilter: filters.genderFilter,
+              ageMin: filters.ageMin,
+              ageMax: filters.ageMax,
+              countryFilter: filters.countryFilter,
+            }));
+          } catch {}
           setMatchFilters(filters);
           setShowMatching(true);
         }}

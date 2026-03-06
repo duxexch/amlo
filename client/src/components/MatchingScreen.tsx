@@ -128,6 +128,17 @@ export function MatchingScreen({ isOpen, filters, onClose }: MatchingScreenProps
     };
   }, []);
 
+  // Auto-timeout after 45 seconds — prevents infinite waiting
+  useEffect(() => {
+    if (!isOpen || status !== "searching") return;
+    const timeout = setTimeout(() => {
+      setStatus("timeout");
+      const socket = getSocket();
+      socket.emit("random-match-cancel");
+    }, 45_000);
+    return () => clearTimeout(timeout);
+  }, [isOpen, status]);
+
   const handleCancel = useCallback(() => {
     const socket = getSocket();
     socket.emit("random-match-cancel");
