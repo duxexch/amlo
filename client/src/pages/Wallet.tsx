@@ -6,11 +6,11 @@ import {
   Navigation, Rocket, Plane, Compass, Globe2, Star, Crown,
   Zap, CreditCard, Wallet as WalletIcon, ChevronDown, Eye, EyeOff,
   BadgeDollarSign, Gift, Plus, Minus, RefreshCw, Search, Copy, Check,
-  X, BarChart3, CalendarDays, Share2, Ban, DollarSign,
+  X, BarChart3, CalendarDays, Share2, Ban, DollarSign, Shield,
 } from "lucide-react";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
-import { walletApi } from "@/lib/socialApi";
+import { walletApi, milesApi } from "@/lib/socialApi";
 import { getSocket } from "@/lib/socketManager";
 import { toast } from "sonner";
 
@@ -77,6 +77,8 @@ export function Wallet() {
   const [cancellingWr, setCancellingWr] = useState<string | null>(null);
   const [conversionRate, setConversionRate] = useState(100);
   const [spendingBreakdown, setSpendingBreakdown] = useState<{ type: string; total: number; count: number }[]>([]);
+  // #15: Withdrawal limits
+  const [withdrawLimits, setWithdrawLimits] = useState<{ dailyLimit: number; weeklyLimit: number; dailyUsed: number; weeklyUsed: number; dailyRemaining: number; weeklyRemaining: number; hasActiveRequest: boolean } | null>(null);
 
   // Packages — fetched from API, with hardcoded fallback
   const fallbackPackages: RechargePackage[] = [
@@ -202,7 +204,7 @@ export function Wallet() {
     }
   }, [activeTab, txFilter]);
 
-  // Load income + chart
+  // Load income + chart — #14: use merged spending summary
   useEffect(() => {
     if (activeTab === "income") {
       setIncomeLoading(true);
@@ -210,9 +212,12 @@ export function Wallet() {
         .then(data => setIncome(data || { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 }))
         .catch(() => {})
         .finally(() => setIncomeLoading(false));
-      // #12: Load spending breakdown
-      walletApi.spendingBreakdown()
-        .then((res: any) => setSpendingBreakdown(Array.isArray(res) ? res : res?.data || []))
+      // #14: Load merged spending summary (totalSpent + breakdown in one call)
+      walletApi.spendingSummary()
+        .then((res: any) => {
+          setTotalSpent(res?.totalSpent || 0);
+          setSpendingBreakdown(Array.isArray(res?.breakdown) ? res.breakdown : []);
+        })
         .catch(() => {});
     }
   }, [activeTab]);
@@ -254,13 +259,20 @@ export function Wallet() {
         })
         .catch(() => setWithdrawalRequests([]))
         .finally(() => setWrLoading(false));
+      // #15: Load withdrawal limits
+      walletApi.withdrawLimits()
+        .then((res: any) => setWithdrawLimits(res))
+        .catch(() => {});
     }
   }, [activeTab]);
 
-  // Load total spent for hero card
+  // Load total spent for hero card — #14: now part of spending summary, keep standalone for initial load
   useEffect(() => {
-    walletApi.totalSpent()
-      .then((res: any) => setTotalSpent(res?.totalSpent || res?.data?.totalSpent || 0))
+    walletApi.spendingSummary()
+      .then((res: any) => {
+        setTotalSpent(res?.totalSpent || 0);
+        setSpendingBreakdown(Array.isArray(res?.breakdown) ? res.breakdown : []);
+      })
       .catch(() => {});
     // #4: Fetch conversion rate from API
     walletApi.conversionRate()
@@ -306,7 +318,26 @@ export function Wallet() {
     if (isPulling && !isRefreshing) {
       setIsRefreshing(true);
       setIsPulling(false);
+      // #9: Refresh balance + active tab data
       await loadBalance();
+      if (activeTab === "history") {
+        const typeFilter = txFilter === "all" ? undefined : txFilter;
+        walletApi.transactions(1, typeFilter).then((data: any) => {
+          setTransactions(Array.isArray(data) ? data : data?.data || []);
+          setTxPage(1); setTxHasMore(true);
+        }).catch(() => {});
+      } else if (activeTab === "income") {
+        walletApi.income().then(data => setIncome(data || { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 })).catch(() => {});
+        walletApi.spendingSummary().then((res: any) => {
+          setTotalSpent(res?.totalSpent || 0);
+          setSpendingBreakdown(Array.isArray(res?.breakdown) ? res.breakdown : []);
+        }).catch(() => {});
+      } else if (activeTab === "withdraw") {
+        walletApi.withdrawalRequests(1).then((res: any) => {
+          setWithdrawalRequests(res?.data || []);
+          setWrPage(1); setWrHasMore((res?.data || []).length >= 20);
+        }).catch(() => {});
+      }
       haptic();
       toast.success(t("wallet.title"), { description: t("wallet.refreshed") });
       setIsRefreshing(false);
@@ -415,18 +446,11 @@ export function Wallet() {
     }
   };
 
-  // Purchase miles package with coins
+  // Purchase miles package with coins — #7: Use API client
   const handleMilesPurchase = async (pkg: MilesPackage) => {
     try {
       toast.loading(t("wallet.processing"), { id: "miles-purchase" });
-      const res = await fetch("/api/social/miles/purchase", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageId: pkg.id }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message);
+      await milesApi.purchase(pkg.id);
       haptic([50, 30, 100]);
       toast.success(t("wallet.buyMilesTitle"), { id: "miles-purchase", description: `+${pkg.miles.toLocaleString()} ${t("wallet.milesUnit")}` });
       loadBalance();
@@ -796,19 +820,11 @@ export function Wallet() {
               </div>
             )}
 
-            {/* CSV Export */}
-            <button onClick={() => {
-              const csv = ["ID,Type,Amount,Status,Date", ...filteredTx.map(tx =>
-                `${tx.id},${tx.type},${tx.amount},${tx.status},${tx.createdAt ? new Date(tx.createdAt).toISOString() : ""}`)
-              ].join("\n");
-              const blob = new Blob([csv], { type: "text/csv" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a"); a.href = url; a.download = "wallet_history.csv"; a.click();
-              URL.revokeObjectURL(url);
-            }}
+            {/* #1: Server-side CSV Export */}
+            <a href={walletApi.exportTransactionsCsv()} download
               className="flex items-center gap-2 text-sm text-violet-400 font-bold hover:text-violet-300 transition-colors">
               <Download className="w-4 h-4" /> {t("wallet.exportHistory")}
-            </button>
+            </a>
           </motion.div>
         )}
 
@@ -822,8 +838,8 @@ export function Wallet() {
                 {[
                   { label: t("wallet.incomeTotal"), value: income.totalReceived, color: "text-white", gradient: "from-violet-500/20 to-purple-500/5", border: "border-violet-500/10", icon: <BadgeDollarSign className="w-6 h-6" /> },
                   { label: t("wallet.incomeThisMonth"), value: income.monthReceived, color: "text-emerald-400", gradient: "from-emerald-500/20 to-emerald-500/5", border: "border-emerald-500/10", icon: <TrendingUp className="w-6 h-6" /> },
-                  { label: t("wallet.incomeGifts"), value: income.weekReceived, color: "text-amber-400", gradient: "from-amber-500/20 to-amber-500/5", border: "border-amber-500/10", icon: <Gift className="w-6 h-6" /> },
-                  { label: t("wallet.incomeCommission"), value: income.todayReceived, color: "text-violet-400", gradient: "from-violet-500/20 to-violet-500/5", border: "border-violet-500/10", icon: <Zap className="w-6 h-6" /> },
+                  { label: t("wallet.incomeThisWeek"), value: income.weekReceived, color: "text-amber-400", gradient: "from-amber-500/20 to-amber-500/5", border: "border-amber-500/10", icon: <Gift className="w-6 h-6" /> },
+                  { label: t("wallet.incomeToday"), value: income.todayReceived, color: "text-violet-400", gradient: "from-violet-500/20 to-violet-500/5", border: "border-violet-500/10", icon: <Zap className="w-6 h-6" /> },
                 ].map((card, i) => (
                   <motion.div key={i} initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: i * 0.08 }}>
                     <GlassCard className={`p-6 bg-gradient-to-br ${card.gradient} border ${card.border}`}>
@@ -952,6 +968,40 @@ export function Wallet() {
                 </div>
               </div>
             </GlassCard>
+
+            {/* #15: Withdrawal Limits Display */}
+            {withdrawLimits && (
+              <GlassCard className="p-4 space-y-3">
+                <h4 className="text-xs font-bold text-white/40 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5" /> {t("wallet.withdrawLimits", "حدود السحب")}
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/[0.03] rounded-xl p-3">
+                    <p className="text-[10px] text-white/30 font-bold mb-1">{t("wallet.dailyLimit", "اليومي")}</p>
+                    <div className="w-full bg-white/[0.06] rounded-full h-1.5 mb-1">
+                      <div className="bg-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${Math.min(100, (withdrawLimits.dailyUsed / withdrawLimits.dailyLimit) * 100)}%` }} />
+                    </div>
+                    <p className="text-xs font-bold text-white/50">
+                      <span className="text-violet-400">{withdrawLimits.dailyRemaining.toLocaleString()}</span> / {withdrawLimits.dailyLimit.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-3">
+                    <p className="text-[10px] text-white/30 font-bold mb-1">{t("wallet.weeklyLimit", "الأسبوعي")}</p>
+                    <div className="w-full bg-white/[0.06] rounded-full h-1.5 mb-1">
+                      <div className="bg-emerald-500 h-1.5 rounded-full transition-all" style={{ width: `${Math.min(100, (withdrawLimits.weeklyUsed / withdrawLimits.weeklyLimit) * 100)}%` }} />
+                    </div>
+                    <p className="text-xs font-bold text-white/50">
+                      <span className="text-emerald-400">{withdrawLimits.weeklyRemaining.toLocaleString()}</span> / {withdrawLimits.weeklyLimit.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+                {withdrawLimits.hasActiveRequest && (
+                  <p className="text-[10px] text-amber-400/70 font-bold flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> {t("wallet.hasActiveWithdrawal", "لديك طلب سحب قيد المعالجة")}
+                  </p>
+                )}
+              </GlassCard>
+            )}
 
             {/* Form */}
             <GlassCard className="p-6 md:p-8 space-y-6">

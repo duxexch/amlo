@@ -137,7 +137,23 @@ export const walletApi = {
   totalSpent: () => request<{ totalSpent: number }>("/wallet/total-spent"),
   conversionRate: () => request<{ coinsPerUsd: number }>("/wallet/conversion-rate"),
   spendingBreakdown: () => request<{ type: string; total: number; count: number }[]>("/wallet/spending-breakdown"),
-  exportTransactionsCsv: () => `/api/wallet/transactions/export`,
+  /** #14: Merged spending summary (totalSpent + breakdown in one call) */
+  spendingSummary: () => request<{ totalSpent: number; breakdown: { type: string; total: number; count: number }[] }>("/wallet/spending-summary"),
+  /** #15: Get remaining withdrawal limits */
+  withdrawLimits: () => request<{
+    dailyLimit: number; weeklyLimit: number;
+    dailyUsed: number; weeklyUsed: number;
+    dailyRemaining: number; weeklyRemaining: number;
+    hasActiveRequest: boolean;
+  }>("/wallet/withdraw-limits"),
+  exportTransactionsCsv: () => `${API_BASE}/wallet/transactions/export`,
+};
+
+// ── Miles ──
+export const milesApi = {
+  /** #7: Purchase miles package through API client */
+  purchase: (packageId: string) =>
+    request<{ success: boolean; newBalance: number }>("/miles/purchase", { method: "POST", body: JSON.stringify({ packageId }) }),
 };
 
 // ── Gifts ──

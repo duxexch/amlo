@@ -1615,6 +1615,10 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: `تجاوزت الحد الأسبوعي للسحب (${WEEKLY_WITHDRAW_LIMIT.toLocaleString()} عملة)` });
     }
 
+    // #22: Get conversion rate BEFORE opening transaction (avoid extra DB read inside tx)
+    const convRate = await getConversionRate();
+    const amountUsd = (parsed.data.amount / convRate).toFixed(2);
+
     // Use DB transaction to prevent race conditions (double-withdraw)
     const result = await db.transaction(async (tx) => {
       // Lock user row and check balance atomically
@@ -1633,10 +1637,6 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
       const encryptedDetails = parsed.data.paymentDetails
         ? encryptMessage(parsed.data.paymentDetails, `withdrawal:${userId}`)
         : parsed.data.paymentDetails;
-
-      // #1: Calculate amountUsd
-      const convRate = await getConversionRate();
-      const amountUsd = (parsed.data.amount / convRate).toFixed(2);
 
       const [withdrawal] = await tx.insert(schema.withdrawalRequests).values({
         userId,
@@ -1864,6 +1864,105 @@ router.get("/wallet/spending-breakdown", async (req: Request, res: Response) => 
     return res.json({ success: true, data: breakdown.map(b => ({ type: b.type, total: Number(b.total), count: Number(b.count) })) });
   } catch (err: any) {
     socialLog.error({ err }, "Spending breakdown error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * #14: GET /social/wallet/spending-summary — ملخص الإنفاق (totalSpent + breakdown) في API واحد
+ */
+router.get("/wallet/spending-summary", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: { totalSpent: 0, breakdown: [] } });
+
+    const conditions = and(
+      eq(schema.walletTransactions.userId, userId),
+      sql`${schema.walletTransactions.amount} < 0`,
+      eq(schema.walletTransactions.status, "completed")
+    );
+
+    const [[spentResult], breakdown] = await Promise.all([
+      db.select({ total: sql<number>`COALESCE(SUM(ABS(amount)), 0)` })
+        .from(schema.walletTransactions).where(conditions),
+      db.select({
+        type: schema.walletTransactions.type,
+        total: sql<number>`COALESCE(SUM(ABS(amount)), 0)`,
+        count: sql<number>`COUNT(*)`,
+      }).from(schema.walletTransactions).where(conditions)
+        .groupBy(schema.walletTransactions.type),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        totalSpent: Number(spentResult?.total || 0),
+        breakdown: breakdown.map(b => ({ type: b.type, total: Number(b.total), count: Number(b.count) })),
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Spending summary error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * #15: GET /social/wallet/withdraw-limits — الحدود المتبقية للسحب (يومي + أسبوعي)
+ */
+router.get("/wallet/withdraw-limits", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: { dailyLimit: DAILY_WITHDRAW_LIMIT, weeklyLimit: WEEKLY_WITHDRAW_LIMIT, dailyUsed: 0, weeklyUsed: 0, dailyRemaining: DAILY_WITHDRAW_LIMIT, weeklyRemaining: WEEKLY_WITHDRAW_LIMIT, hasActiveRequest: false } });
+
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStartDate = new Date(dayStart);
+    weekStartDate.setDate(weekStartDate.getDate() - 7);
+
+    const [[dailyResult], [weeklyResult], [activeResult]] = await Promise.all([
+      db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+        .from(schema.withdrawalRequests)
+        .where(and(
+          eq(schema.withdrawalRequests.userId, userId),
+          sql`${schema.withdrawalRequests.createdAt} >= ${dayStart}`,
+          ne(schema.withdrawalRequests.status, "rejected")
+        )),
+      db.select({ total: sql<number>`COALESCE(SUM(amount), 0)` })
+        .from(schema.withdrawalRequests)
+        .where(and(
+          eq(schema.withdrawalRequests.userId, userId),
+          sql`${schema.withdrawalRequests.createdAt} >= ${weekStartDate}`,
+          ne(schema.withdrawalRequests.status, "rejected")
+        )),
+      db.select({ cnt: sql<number>`COUNT(*)` })
+        .from(schema.withdrawalRequests)
+        .where(and(
+          eq(schema.withdrawalRequests.userId, userId),
+          sql`${schema.withdrawalRequests.status} IN ('pending', 'processing')`
+        )),
+    ]);
+
+    const dailyUsed = Number(dailyResult?.total || 0);
+    const weeklyUsed = Number(weeklyResult?.total || 0);
+
+    return res.json({
+      success: true,
+      data: {
+        dailyLimit: DAILY_WITHDRAW_LIMIT,
+        weeklyLimit: WEEKLY_WITHDRAW_LIMIT,
+        dailyUsed,
+        weeklyUsed,
+        dailyRemaining: Math.max(0, DAILY_WITHDRAW_LIMIT - dailyUsed),
+        weeklyRemaining: Math.max(0, WEEKLY_WITHDRAW_LIMIT - weeklyUsed),
+        hasActiveRequest: Number(activeResult?.cnt || 0) > 0,
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Withdraw limits error");
     return res.status(500).json({ success: false, message: "حدث خطأ" });
   }
 });

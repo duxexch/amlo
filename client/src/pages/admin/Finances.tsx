@@ -63,6 +63,8 @@ const TX_TYPE_OPTIONS = [
   { value: "gift_received", labelKey: "admin.finances.txTypeGiftReceived" },
   { value: "withdrawal", labelKey: "admin.finances.txTypeWithdrawal" },
   { value: "refund", labelKey: "admin.finances.txTypeRefund" },
+  { value: "commission", labelKey: "admin.finances.txTypeCommission" },
+  { value: "bonus", labelKey: "admin.finances.txTypeBonus" },
 ];
 
 const TX_STATUS_OPTIONS = [
@@ -2617,8 +2619,33 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                 {selectedWr.paymentDetails && (
                   <div>
                     <span className="text-white/40 block mb-1">{t("admin.finances.wrPaymentDetails")}:</span>
-                    <div className="bg-white/5 rounded-lg p-2 text-white/70 break-all">
-                      {typeof selectedWr.paymentDetails === "string" ? selectedWr.paymentDetails : JSON.stringify(selectedWr.paymentDetails, null, 2)}
+                    <div className="bg-white/5 rounded-lg p-3 space-y-1.5">
+                      {(() => {
+                        try {
+                          const details = typeof selectedWr.paymentDetails === "string"
+                            ? JSON.parse(selectedWr.paymentDetails)
+                            : selectedWr.paymentDetails;
+                          if (typeof details === "object" && details !== null) {
+                            const labels: Record<string, string> = {
+                              bankName: t("wallet.bankName", "البنك"),
+                              accountNumber: t("wallet.accountNumber", "رقم الحساب"),
+                              accountHolder: t("wallet.accountHolder", "صاحب الحساب"),
+                              paypalEmail: t("wallet.paypalEmail", "بريد PayPal"),
+                              network: t("wallet.usdtNetwork", "الشبكة"),
+                              walletAddress: t("wallet.usdtAddress", "عنوان المحفظة"),
+                            };
+                            return Object.entries(details).map(([key, val]) => (
+                              <div key={key} className="flex justify-between items-center">
+                                <span className="text-white/40 text-xs">{labels[key] || key}:</span>
+                                <span className="text-white/80 text-xs font-medium break-all max-w-[60%] text-end">{String(val)}</span>
+                              </div>
+                            ));
+                          }
+                          return <span className="text-white/70 text-xs break-all">{String(details)}</span>;
+                        } catch {
+                          return <span className="text-white/70 text-xs break-all">{String(selectedWr.paymentDetails)}</span>;
+                        }
+                      })()}
                     </div>
                   </div>
                 )}

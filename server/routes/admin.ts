@@ -34,7 +34,7 @@ import {
   milesPricingSchema,
 } from "../../shared/schema";
 import { getDb } from "../db";
-import { eq, asc, desc, count, sql, and, ne, gte, sum } from "drizzle-orm";
+import { eq, asc, desc, count, sql, and, ne, gte, sum, inArray } from "drizzle-orm";
 import * as schema from "../../shared/schema";
 import { getAllPricing, invalidatePricingCache } from "../pricingService";
 import { getQueueStats } from "../matchingEngine";
@@ -842,11 +842,16 @@ router.get("/export/withdrawals", requireAdmin, async (req, res) => {
       .orderBy(sql`${schema.withdrawalRequests.createdAt} DESC`)
       .limit(10000);
 
-    // Enrich with user info
-    const enriched = await Promise.all(rows.map(async (r: any) => {
-      const user = await storage.getUser(r.userId);
+    // #19: Batch user lookup instead of N+1 individual queries
+    const uniqueUserIds = [...new Set(rows.map((r: any) => r.userId).filter(Boolean))];
+    const usersArr = uniqueUserIds.length > 0
+      ? await db.select().from(schema.users).where(inArray(schema.users.id, uniqueUserIds))
+      : [];
+    const userMap = new Map(usersArr.map(u => [u.id, u]));
+    const enriched = rows.map((r: any) => {
+      const user = userMap.get(r.userId);
       return { ...r, username: user?.username || "—" };
-    }));
+    });
 
     const BOM = "\uFEFF";
     const header = "ID,User,Amount,Amount USD,Status,Payment Method,Admin Notes,Created At,Processed At\n";
@@ -978,17 +983,25 @@ router.get("/withdrawal-requests", requireAdmin, async (req, res) => {
 
     const result = await storage.getWithdrawalRequests(page, limit, { status: status || undefined });
 
-    // #3: Decrypt payment details for admin, apply search/date filters
-    let enriched = await Promise.all((result.data || []).map(async (wr: any) => {
+    // #3: Decrypt payment details for admin, #19: batch user lookup
+    const wrData = result.data || [];
+    const uniqueUserIds = [...new Set(wrData.map((wr: any) => wr.userId).filter(Boolean))];
+    const db = getDb();
+    const usersArr = (db && uniqueUserIds.length > 0)
+      ? await db.select().from(schema.users).where(inArray(schema.users.id, uniqueUserIds))
+      : [];
+    const userMap = new Map(usersArr.map(u => [u.id, u]));
+
+    let enriched = wrData.map((wr: any) => {
       let decryptedDetails = wr.paymentDetails;
       if (decryptedDetails && typeof decryptedDetails === "string" && decryptedDetails.includes(":")) {
         try {
           decryptedDetails = decryptMessage(decryptedDetails, `withdrawal:${wr.userId}`);
         } catch { /* keep as-is */ }
       }
-      const user = await storage.getUser(wr.userId);
+      const user = userMap.get(wr.userId);
       return { ...wr, paymentDetails: decryptedDetails, user: user ? { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } : null };
-    }));
+    });
 
     // #7: Apply search filter
     if (search) {
