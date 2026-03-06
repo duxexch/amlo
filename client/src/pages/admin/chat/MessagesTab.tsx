@@ -7,12 +7,14 @@ import { Search, Trash2, MessageSquare } from "lucide-react";
 import { adminChatManagement } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import { EmptyState, PaginationNav, useConfirmDialog, useDebouncedValue, formatDate } from "./AdminChatShared";
+import { toast } from "sonner";
 import type { AdminMessage, Pagination } from "../../chat/chatTypes";
 
 export function MessagesTab() {
   const { t } = useTranslation();
   const [msgs, setMsgs] = useState<AdminMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 400);
   const [typeFilter, setTypeFilter] = useState("");
@@ -23,12 +25,17 @@ export function MessagesTab() {
 
   const loadMessages = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     adminChatManagement.getMessages(page, 30, debouncedSearch, typeFilter)
       .then(res => {
         if (res.success) { setMsgs(res.data); setPagination(res.pagination ?? null); }
       })
+      .catch(() => {
+        setLoadError(t("admin.chatManagement.loadMessagesFailed", "فشل تحميل الرسائل"));
+        toast.error(t("admin.chatManagement.loadMessagesFailed", "فشل تحميل الرسائل"));
+      })
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch, typeFilter]);
+  }, [page, debouncedSearch, typeFilter, t]);
 
   useEffect(() => { loadMessages(); }, [loadMessages]);
 
@@ -49,9 +56,14 @@ export function MessagesTab() {
     if (!ok) return;
     const ids: string[] = [];
     selected.forEach(id => ids.push(id));
-    await adminChatManagement.bulkDeleteMessages(ids);
-    setMsgs(prev => prev.filter(m => !selected.has(m.id)));
-    setSelected(new Set());
+    try {
+      await adminChatManagement.bulkDeleteMessages(ids);
+      setMsgs(prev => prev.filter(m => !selected.has(m.id)));
+      setSelected(new Set());
+      toast.success(t("admin.chatManagement.bulkDeleteSuccess", "تم حذف الرسائل المحددة"));
+    } catch {
+      toast.error(t("admin.chatManagement.bulkDeleteFailed", "فشل حذف الرسائل المحددة"));
+    }
   };
 
   const msgTypes = [
@@ -95,6 +107,15 @@ export function MessagesTab() {
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+          <span className="text-red-300 text-sm">{loadError}</span>
+          <button onClick={loadMessages} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200">
+            {t("common.retry", "إعادة المحاولة")}
+          </button>
+        </div>
+      )}
 
       {/* Messages Table */}
       <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
@@ -152,7 +173,20 @@ export function MessagesTab() {
                     <td className="p-4 text-white/40 text-xs">{formatDate(msg.createdAt)}</td>
                     <td className="p-4">
                       <button
-                        onClick={() => { adminChatManagement.deleteMessage(msg.id); setMsgs(prev => prev.filter(m => m.id !== msg.id)); }}
+                        onClick={async () => {
+                          try {
+                            const ok = await confirm(
+                              t("admin.chatManagement.confirmDelete", "هل تريد حذف هذه الرسالة؟"),
+                              t("admin.chatManagement.deleteDesc", "سيتم حذف الرسالة نهائياً")
+                            );
+                            if (!ok) return;
+                            await adminChatManagement.deleteMessage(msg.id);
+                            setMsgs(prev => prev.filter(m => m.id !== msg.id));
+                            toast.success(t("admin.chatManagement.deleteSuccess", "تم حذف الرسالة"));
+                          } catch {
+                            toast.error(t("admin.chatManagement.deleteFailed", "فشل حذف الرسالة"));
+                          }
+                        }}
                         className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors"
                       >
                         <Trash2 className="w-4 h-4 text-red-400" />

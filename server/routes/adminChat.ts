@@ -14,8 +14,9 @@ const log = (msg: string, _src?: string) => chatLog.info(msg);
 const chatLog = createLogger("adminChat");
 import * as schema from "../../shared/schema";
 import { onlineUsersMap, getOnlineUsersCount } from "../onlineUsers";
-import { io } from "../index";
+import { io, getLiveTelemetrySnapshot } from "../index";
 import { getUserSocketId } from "../onlineUsers";
+import { decryptMessage } from "../utils/encryption";
 
 const router = Router();
 
@@ -210,6 +211,29 @@ router.get("/overview/top-chatters", requireAdmin, async (_req, res) => {
       };
     });
 
+    // Enrich with call counts and total spent per user
+    const callStats = await db.select({
+      userId: schema.calls.callerId,
+      callCount: count(),
+      totalSpent: sql<number>`COALESCE(SUM(${schema.calls.coinsCharged}), 0)`,
+    }).from(schema.calls)
+      .where(inArray(schema.calls.callerId, userIds))
+      .groupBy(schema.calls.callerId);
+
+    const msgSpent = await db.select({
+      userId: schema.messages.senderId,
+      totalMsgSpent: sql<number>`COALESCE(SUM(${schema.messages.coinsCost}), 0)`,
+    }).from(schema.messages)
+      .where(and(inArray(schema.messages.senderId, userIds), eq(schema.messages.isDeleted, false)))
+      .groupBy(schema.messages.senderId);
+
+    for (const r of result) {
+      const cs = callStats.find(c => c.userId === r.userId);
+      const ms = msgSpent.find(m => m.userId === r.userId);
+      r.callCount = cs?.callCount || 0;
+      r.totalSpent = (cs?.totalSpent || 0) + (ms?.totalMsgSpent || 0);
+    }
+
     return res.json({ success: true, data: result });
   } catch (err: any) {
     return res.json({ success: true, data: [] });
@@ -340,8 +364,6 @@ router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
         }).from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
 
-    const { decryptMessage } = await import("../utils/encryption");
-
     const data = msgs.map(m => {
       let content = m.content;
       if (content && !m.isDeleted) {
@@ -367,8 +389,24 @@ router.delete("/conversations/:id", requireAdmin, async (req, res) => {
 
   try {
     const convId = p(req.params.id);
+
+    const [conv] = await db.select({ p1: schema.conversations.participant1Id, p2: schema.conversations.participant2Id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, convId))
+      .limit(1);
+
     await db.update(schema.conversations).set({ isActive: false }).where(eq(schema.conversations.id, convId));
     await db.update(schema.messages).set({ isDeleted: true }).where(eq(schema.messages.conversationId, convId));
+
+    if (conv) {
+      for (const uid of [conv.p1, conv.p2]) {
+        const sid = await getUserSocketId(uid);
+        if (sid) {
+          io.to(sid).emit("conversation-deleted", { conversationId: convId });
+        }
+      }
+    }
+
     await storage.addAdminLog(req.session.adminId!, "delete_conversation", "conversation", convId, "حذف محادثة");
     return res.json({ success: true, message: "تم حذف المحادثة" });
   } catch (err: any) {
@@ -383,7 +421,7 @@ router.delete("/conversations/:id", requireAdmin, async (req, res) => {
 router.get("/messages", requireAdmin, async (req, res) => {
   const db = getDb();
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 30;
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
   const search = (req.query.search as string) || "";
   const type = (req.query.type as string) || "";
   const offset = (page - 1) * limit;
@@ -396,6 +434,25 @@ router.get("/messages", requireAdmin, async (req, res) => {
     const conditions = [eq(schema.messages.isDeleted, false)];
     if (type) conditions.push(eq(schema.messages.type, type));
 
+    // Search by sender name (content is encrypted so we search sender)
+    let senderIdFilter: string[] | null = null;
+    if (search) {
+      const matchedUsers = await db.select({ id: schema.users.id })
+        .from(schema.users)
+        .where(or(
+          like(schema.users.username, `%${escapeLike(search)}%`),
+          like(schema.users.displayName, `%${escapeLike(search)}%`)
+        ))
+        .limit(50);
+      senderIdFilter = matchedUsers.map(u => u.id);
+      if (senderIdFilter.length > 0) {
+        conditions.push(inArray(schema.messages.senderId, senderIdFilter));
+      } else {
+        // No matching senders — return empty
+        return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
+      }
+    }
+
     const [totalResult] = await db.select({ count: count() }).from(schema.messages).where(and(...conditions));
     const msgs = await db.select().from(schema.messages)
       .where(and(...conditions))
@@ -407,8 +464,6 @@ router.get("/messages", requireAdmin, async (req, res) => {
       ? await db.select({ id: schema.users.id, username: schema.users.username, displayName: schema.users.displayName })
           .from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
-
-    const { decryptMessage } = await import("../utils/encryption");
 
     const data = msgs.map(m => {
       let content = m.content;
@@ -439,8 +494,25 @@ router.delete("/messages/:id", requireAdmin, async (req, res) => {
 
   try {
     const msgId = p(req.params.id);
+    // Get message details before deleting (for socket notify)
+    const [msg] = await db.select({ conversationId: schema.messages.conversationId, senderId: schema.messages.senderId })
+      .from(schema.messages).where(eq(schema.messages.id, msgId)).limit(1);
     await db.update(schema.messages).set({ isDeleted: true }).where(eq(schema.messages.id, msgId));
     await storage.addAdminLog(req.session.adminId!, "delete_message", "message", msgId, "حذف رسالة");
+
+    // Notify conversation participants via socket
+    if (msg?.conversationId) {
+      const [conv] = await db.select({ p1: schema.conversations.participant1Id, p2: schema.conversations.participant2Id })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, msg.conversationId))
+        .limit(1);
+      if (conv) {
+        for (const uid of [conv.p1, conv.p2]) {
+          const sid = await getUserSocketId(uid);
+          if (sid) io.to(sid).emit("message-deleted", { messageId: msgId, conversationId: msg.conversationId });
+        }
+      }
+    }
     return res.json({ success: true, message: "تم حذف الرسالة" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -452,10 +524,35 @@ router.post("/messages/bulk-delete", requireAdmin, async (req, res) => {
   const db = getDb();
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ success: false, message: "لا توجد رسائل" });
+  if (ids.length > 500) return res.status(400).json({ success: false, message: "الحد الأقصى 500 رسالة" });
   if (!db) return res.json({ success: true, message: "تم حذف الرسائل" });
 
   try {
+    // Fetch message -> conversation mapping before deleting to notify participants
+    const toDelete = await db.select({ id: schema.messages.id, conversationId: schema.messages.conversationId })
+      .from(schema.messages)
+      .where(inArray(schema.messages.id, ids));
+
     await db.update(schema.messages).set({ isDeleted: true }).where(inArray(schema.messages.id, ids));
+
+    // Notify conversation participants via socket for each deleted message
+    const convIds = Array.from(new Set(toDelete.map(m => m.conversationId)));
+    const convRows = convIds.length > 0
+      ? await db.select({ id: schema.conversations.id, p1: schema.conversations.participant1Id, p2: schema.conversations.participant2Id })
+          .from(schema.conversations)
+          .where(inArray(schema.conversations.id, convIds))
+      : [];
+    const convMap = new Map(convRows.map(c => [c.id, c]));
+
+    for (const msg of toDelete) {
+      const conv = convMap.get(msg.conversationId);
+      if (!conv) continue;
+      for (const uid of [conv.p1, conv.p2]) {
+        const sid = await getUserSocketId(uid);
+        if (sid) io.to(sid).emit("message-deleted", { messageId: msg.id, conversationId: msg.conversationId });
+      }
+    }
+
     await storage.addAdminLog(req.session.adminId!, "bulk_delete_messages", "message", "", `حذف ${ids.length} رسالة`);
     return res.json({ success: true, message: `تم حذف ${ids.length} رسالة` });
   } catch (err: any) {
@@ -720,6 +817,260 @@ router.put("/settings", requireAdmin, async (req, res) => {
 // LIVE STREAMS — البث المباشر
 // ══════════════════════════════════════════════════════════
 
+const defaultStreamAlertConfig = {
+  giftsRateLimited: 10,
+  chatBannedWordBlocked: 12,
+  chatMutedBlocked: 8,
+  giftsSocketRejected: 1,
+  joinImbalanceOffset: 40,
+  cooldownMinutes: 5,
+};
+
+type StreamAlertLevel = "high" | "medium" | "low";
+
+interface StreamAlertEntry {
+  id: string;
+  level: StreamAlertLevel;
+  title: string;
+  detail: string;
+  value: number;
+  threshold: number;
+}
+
+interface StreamAlertHistoryEntry {
+  id: string;
+  level: StreamAlertLevel;
+  title: string;
+  lastDetail: string;
+  hits: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  isActive: boolean;
+}
+
+const streamAlertHistory = new Map<string, StreamAlertHistoryEntry>();
+let streamAlertHistoryHydrated = false;
+
+function buildStreamAlerts(
+  telemetry: {
+    joins: number;
+    leaves: number;
+    chatMutedBlocked: number;
+    chatBannedWordBlocked: number;
+    giftsRateLimited: number;
+    giftsSocketRejected: number;
+  },
+  cfg: typeof defaultStreamAlertConfig,
+): StreamAlertEntry[] {
+  const alerts: StreamAlertEntry[] = [];
+
+  if (telemetry.giftsRateLimited >= cfg.giftsRateLimited) {
+    alerts.push({
+      id: "gift-rate-limit-spike",
+      level: "high",
+      title: "ارتفاع حاد في محاولات الهدايا",
+      detail: `القيمة الحالية ${telemetry.giftsRateLimited} مقابل العتبة ${cfg.giftsRateLimited}`,
+      value: telemetry.giftsRateLimited,
+      threshold: cfg.giftsRateLimited,
+    });
+  }
+
+  if (telemetry.chatBannedWordBlocked >= cfg.chatBannedWordBlocked) {
+    alerts.push({
+      id: "banned-words-spike",
+      level: "medium",
+      title: "ارتفاع رسائل مخالفة الكلمات المحظورة",
+      detail: `القيمة الحالية ${telemetry.chatBannedWordBlocked} مقابل العتبة ${cfg.chatBannedWordBlocked}`,
+      value: telemetry.chatBannedWordBlocked,
+      threshold: cfg.chatBannedWordBlocked,
+    });
+  }
+
+  if (telemetry.chatMutedBlocked >= cfg.chatMutedBlocked) {
+    alerts.push({
+      id: "muted-blocked-spike",
+      level: "medium",
+      title: "نشاط مرتفع لمستخدمين مكتومين",
+      detail: `القيمة الحالية ${telemetry.chatMutedBlocked} مقابل العتبة ${cfg.chatMutedBlocked}`,
+      value: telemetry.chatMutedBlocked,
+      threshold: cfg.chatMutedBlocked,
+    });
+  }
+
+  if (telemetry.giftsSocketRejected >= cfg.giftsSocketRejected) {
+    alerts.push({
+      id: "legacy-socket-gift",
+      level: "low",
+      title: "عملاء قديمة تستخدم مسار هدايا غير مدعوم",
+      detail: `القيمة الحالية ${telemetry.giftsSocketRejected} مقابل العتبة ${cfg.giftsSocketRejected}`,
+      value: telemetry.giftsSocketRejected,
+      threshold: cfg.giftsSocketRejected,
+    });
+  }
+
+  if (telemetry.joins >= telemetry.leaves * 3 + cfg.joinImbalanceOffset) {
+    alerts.push({
+      id: "join-leave-imbalance",
+      level: "low",
+      title: "عدم توازن الانضمام/المغادرة",
+      detail: `انضمام ${telemetry.joins} مقابل مغادرة ${telemetry.leaves} (offset=${cfg.joinImbalanceOffset})`,
+      value: telemetry.joins - telemetry.leaves,
+      threshold: cfg.joinImbalanceOffset,
+    });
+  }
+
+  return alerts;
+}
+
+async function hydrateStreamAlertHistoryIfNeeded() {
+  if (streamAlertHistoryHydrated) return;
+  streamAlertHistoryHydrated = true;
+  try {
+    const cfg = await storage.getSystemConfig("stream_alert_history");
+    if (!cfg?.configData) return;
+    const parsed = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
+    const history = Array.isArray(parsed?.history) ? parsed.history : [];
+    for (const row of history) {
+      if (!row?.id) continue;
+      streamAlertHistory.set(String(row.id), {
+        id: String(row.id),
+        level: row.level === "high" || row.level === "medium" ? row.level : "low",
+        title: String(row.title || "تنبيه"),
+        lastDetail: String(row.lastDetail || ""),
+        hits: Math.max(1, Number(row.hits || 1)),
+        firstSeenAt: String(row.firstSeenAt || new Date().toISOString()),
+        lastSeenAt: String(row.lastSeenAt || new Date().toISOString()),
+        isActive: Boolean(row.isActive),
+      });
+    }
+  } catch (err: any) {
+    chatLog.warn(`Failed to hydrate stream alert history: ${err.message}`);
+  }
+}
+
+async function persistStreamAlertHistory(adminId?: string) {
+  const history = Array.from(streamAlertHistory.values())
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, 200);
+  await storage.upsertSystemConfig("stream_alert_history", { history }, adminId);
+}
+
+async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], adminId?: string): Promise<StreamAlertHistoryEntry[]> {
+  await hydrateStreamAlertHistoryIfNeeded();
+  const nowIso = new Date().toISOString();
+  const activeIds = new Set(activeAlerts.map(a => a.id));
+  let changed = false;
+
+  for (const alert of activeAlerts) {
+    const existing = streamAlertHistory.get(alert.id);
+    if (existing) {
+      streamAlertHistory.set(alert.id, {
+        ...existing,
+        level: alert.level,
+        title: alert.title,
+        lastDetail: alert.detail,
+        hits: existing.hits + 1,
+        lastSeenAt: nowIso,
+        isActive: true,
+      });
+      changed = true;
+    } else {
+      streamAlertHistory.set(alert.id, {
+        id: alert.id,
+        level: alert.level,
+        title: alert.title,
+        lastDetail: alert.detail,
+        hits: 1,
+        firstSeenAt: nowIso,
+        lastSeenAt: nowIso,
+        isActive: true,
+      });
+      changed = true;
+    }
+  }
+
+  for (const [id, entry] of streamAlertHistory.entries()) {
+    if (!activeIds.has(id) && entry.isActive) {
+      streamAlertHistory.set(id, {
+        ...entry,
+        isActive: false,
+      });
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await persistStreamAlertHistory(adminId);
+  }
+
+  return Array.from(streamAlertHistory.values())
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, 100);
+}
+
+function getFilteredStreamAlertHistory(status: "all" | "active" | "resolved", level: "all" | "high" | "medium" | "low") {
+  const sorted = Array.from(streamAlertHistory.values())
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime());
+
+  const statusFiltered = status === "active"
+    ? sorted.filter(entry => entry.isActive)
+    : status === "resolved"
+      ? sorted.filter(entry => !entry.isActive)
+      : sorted;
+
+  if (level === "all") return statusFiltered;
+  return statusFiltered.filter(entry => entry.level === level);
+}
+
+function getStreamAlertSummary(entries: StreamAlertHistoryEntry[]) {
+  let active = 0;
+  let resolved = 0;
+  let high = 0;
+  let medium = 0;
+  let low = 0;
+
+  for (const entry of entries) {
+    if (entry.isActive) active++;
+    else resolved++;
+    if (entry.level === "high") high++;
+    else if (entry.level === "medium") medium++;
+    else low++;
+  }
+
+  return {
+    total: entries.length,
+    active,
+    resolved,
+    high,
+    medium,
+    low,
+  };
+}
+
+async function getStreamAlertConfig(): Promise<typeof defaultStreamAlertConfig> {
+  try {
+    const cfg = await storage.getSystemConfig("stream_alerts");
+    if (cfg?.configData) {
+      const parsed = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
+      return {
+        giftsRateLimited: Math.max(0, Number(parsed.giftsRateLimited ?? defaultStreamAlertConfig.giftsRateLimited)),
+        chatBannedWordBlocked: Math.max(0, Number(parsed.chatBannedWordBlocked ?? defaultStreamAlertConfig.chatBannedWordBlocked)),
+        chatMutedBlocked: Math.max(0, Number(parsed.chatMutedBlocked ?? defaultStreamAlertConfig.chatMutedBlocked)),
+        giftsSocketRejected: Math.max(0, Number(parsed.giftsSocketRejected ?? defaultStreamAlertConfig.giftsSocketRejected)),
+        joinImbalanceOffset: Math.max(0, Number(parsed.joinImbalanceOffset ?? defaultStreamAlertConfig.joinImbalanceOffset)),
+        cooldownMinutes: Math.max(1, Number(parsed.cooldownMinutes ?? defaultStreamAlertConfig.cooldownMinutes)),
+      };
+    }
+  } catch (err: any) {
+    chatLog.warn(`Failed to parse stream alerts config: ${err.message}`);
+  }
+  return { ...defaultStreamAlertConfig };
+}
+
+async function saveStreamAlertConfig(config: typeof defaultStreamAlertConfig, adminId?: string) {
+  await storage.upsertSystemConfig("stream_alerts", config, adminId);
+}
+
 router.get("/streams/active", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
@@ -769,10 +1120,38 @@ router.get("/streams/stats", requireAdmin, async (_req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [activeNow] = await db.select({ count: count() }).from(schema.streams).where(eq(schema.streams.status, "active"));
-    const [totalViewers] = await db.select({ total: sql<number>`COALESCE(SUM(viewer_count), 0)` }).from(schema.streams).where(eq(schema.streams.status, "active"));
-    const [totalToday] = await db.select({ count: count() }).from(schema.streams).where(gte(schema.streams.startedAt, today));
-    const [totalGiftsToday] = await db.select({ total: sql<number>`COALESCE(SUM(total_gifts), 0)` }).from(schema.streams).where(gte(schema.streams.startedAt, today));
+    const [
+      [activeNow],
+      [totalViewers],
+      [totalToday],
+      [totalGiftsToday],
+      [totalRevenueToday],
+      [peakConcurrent],
+      [avgDuration],
+      [avgViewers],
+      topCategories,
+    ] = await Promise.all([
+      db.select({ count: count() }).from(schema.streams).where(eq(schema.streams.status, "active")),
+      db.select({ total: sql<number>`COALESCE(SUM(viewer_count), 0)` }).from(schema.streams).where(eq(schema.streams.status, "active")),
+      db.select({ count: count() }).from(schema.streams).where(gte(schema.streams.startedAt, today)),
+      db.select({ total: sql<number>`COALESCE(SUM(total_gifts), 0)` }).from(schema.streams).where(gte(schema.streams.startedAt, today)),
+      db.select({ total: sql<number>`COALESCE(SUM(total_price), 0)` }).from(schema.giftTransactions)
+        .where(and(gte(schema.giftTransactions.createdAt, today), sql`${schema.giftTransactions.streamId} IS NOT NULL`)),
+      db.select({ peak: sql<number>`COALESCE(MAX(viewer_count), 0)` }).from(schema.streams).where(eq(schema.streams.status, "active")),
+      db.select({
+        avg: sql<number>`COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(${schema.streams.endedAt}, NOW()) - ${schema.streams.startedAt}))), 0)`,
+      }).from(schema.streams).where(gte(schema.streams.startedAt, today)),
+      db.select({ avg: sql<number>`COALESCE(AVG(peak_viewers), 0)` }).from(schema.streams).where(gte(schema.streams.startedAt, today)),
+      db.select({
+        name: sql<string>`COALESCE(${schema.streams.category}, 'other')`,
+        count: count(),
+        viewers: sql<number>`COALESCE(SUM(${schema.streams.peakViewers}), 0)`,
+      }).from(schema.streams)
+        .where(gte(schema.streams.startedAt, today))
+        .groupBy(sql`COALESCE(${schema.streams.category}, 'other')`)
+        .orderBy(sql`COUNT(*) DESC`)
+        .limit(4),
+    ]);
 
     return res.json({
       success: true,
@@ -780,18 +1159,168 @@ router.get("/streams/stats", requireAdmin, async (_req, res) => {
         activeNow: activeNow?.count || 0,
         totalViewers: totalViewers?.total || 0,
         totalToday: totalToday?.count || 0,
-        avgDuration: 0,
-        avgViewers: 0,
+        avgDuration: Math.round(Number(avgDuration?.avg || 0)),
+        avgViewers: Math.round(Number(avgViewers?.avg || 0)),
         totalGiftsToday: totalGiftsToday?.total || 0,
-        totalRevenueToday: 0,
-        peakConcurrent: 0,
-        topCategories: [],
+        totalRevenueToday: Number(totalRevenueToday?.total || 0),
+        peakConcurrent: Number(peakConcurrent?.peak || 0),
+        topCategories: (topCategories || []).map((c: any) => ({
+          name: String(c.name || "other"),
+          count: Number(c.count || 0),
+          viewers: Number(c.viewers || 0),
+        })),
       },
     });
   } catch (err: any) {
     log(`Stream stats error: ${err.message}`, "admin");
     return res.json({ success: true, data: { activeNow: 0, totalViewers: 0, totalToday: 0, avgDuration: 0, avgViewers: 0, totalGiftsToday: 0, totalRevenueToday: 0, peakConcurrent: 0, topCategories: [] } });
   }
+});
+
+router.get("/streams/telemetry", requireAdmin, async (_req, res) => {
+  try {
+    const data = getLiveTelemetrySnapshot();
+    return res.json({ success: true, data });
+  } catch {
+    return res.json({
+      success: true,
+      data: {
+        joins: 0,
+        leaves: 0,
+        chatMessages: 0,
+        chatMutedBlocked: 0,
+        chatBannedWordBlocked: 0,
+        giftsRateLimited: 0,
+        giftsSocketRejected: 0,
+        speakerInvites: 0,
+        speakerAccepts: 0,
+        speakerRejects: 0,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+});
+
+router.get("/streams/telemetry/alert-config", requireAdmin, async (_req, res) => {
+  const data = await getStreamAlertConfig();
+  return res.json({ success: true, data });
+});
+
+router.get("/streams/telemetry/alerts", requireAdmin, async (req, res) => {
+  try {
+    const telemetry = getLiveTelemetrySnapshot();
+    const config = await getStreamAlertConfig();
+    const statusRaw = String(req.query.status || "all");
+    const status: "all" | "active" | "resolved" =
+      statusRaw === "active" || statusRaw === "resolved" ? statusRaw : "all";
+    const levelRaw = String(req.query.level || "all");
+    const level: "all" | "high" | "medium" | "low" =
+      levelRaw === "high" || levelRaw === "medium" || levelRaw === "low" ? levelRaw : "all";
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+    const offset = (page - 1) * limit;
+
+    const activeAlerts = buildStreamAlerts({
+      joins: telemetry.joins,
+      leaves: telemetry.leaves,
+      chatMutedBlocked: telemetry.chatMutedBlocked,
+      chatBannedWordBlocked: telemetry.chatBannedWordBlocked,
+      giftsRateLimited: telemetry.giftsRateLimited,
+      giftsSocketRejected: telemetry.giftsSocketRejected,
+    }, config);
+
+    await updateStreamAlertHistory(activeAlerts, req.session.adminId);
+    const allHistory = Array.from(streamAlertHistory.values());
+    const summary = getStreamAlertSummary(allHistory);
+    const filteredHistory = getFilteredStreamAlertHistory(status, level);
+    const history = filteredHistory.slice(offset, offset + limit);
+    return res.json({
+      success: true,
+      data: {
+        activeAlerts,
+        history,
+        summary,
+        generatedAt: new Date().toISOString(),
+        pagination: {
+          page,
+          limit,
+          total: filteredHistory.length,
+          totalPages: Math.max(1, Math.ceil(filteredHistory.length / limit)),
+        },
+      },
+    });
+  } catch {
+    return res.json({
+      success: true,
+      data: {
+        activeAlerts: [],
+        history: [],
+        summary: { total: 0, active: 0, resolved: 0, high: 0, medium: 0, low: 0 },
+        generatedAt: new Date().toISOString(),
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 1,
+        },
+      },
+    });
+  }
+});
+
+router.delete("/streams/telemetry/alerts/history", requireAdmin, async (req, res) => {
+  try {
+    await hydrateStreamAlertHistoryIfNeeded();
+    const modeRaw = String(req.query.mode || "all");
+    const mode: "all" | "resolved" = modeRaw === "resolved" ? "resolved" : "all";
+
+    if (mode === "all") {
+      streamAlertHistory.clear();
+    } else {
+      for (const [id, entry] of streamAlertHistory.entries()) {
+        if (!entry.isActive) streamAlertHistory.delete(id);
+      }
+    }
+
+    await persistStreamAlertHistory(req.session.adminId);
+    await storage.addAdminLog(req.session.adminId!, "clear_stream_alert_history", "settings", "", mode);
+
+    return res.json({
+      success: true,
+      message: mode === "all" ? "تم مسح سجل التنبيهات" : "تم مسح التنبيهات المحلولة",
+      data: {
+        remaining: streamAlertHistory.size,
+      },
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "تعذر مسح سجل التنبيهات" });
+  }
+});
+
+router.put("/streams/telemetry/alert-config", requireAdmin, async (req, res) => {
+  const current = await getStreamAlertConfig();
+  const allowed: (keyof typeof defaultStreamAlertConfig)[] = [
+    "giftsRateLimited",
+    "chatBannedWordBlocked",
+    "chatMutedBlocked",
+    "giftsSocketRejected",
+    "joinImbalanceOffset",
+    "cooldownMinutes",
+  ];
+
+  const updates: Partial<typeof defaultStreamAlertConfig> = {};
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      const n = Number(req.body[key]);
+      if (!Number.isFinite(n)) continue;
+      updates[key] = key === "cooldownMinutes" ? Math.max(1, Math.floor(n)) : Math.max(0, Math.floor(n));
+    }
+  }
+
+  const next = { ...current, ...updates };
+  await saveStreamAlertConfig(next, req.session.adminId);
+  await storage.addAdminLog(req.session.adminId!, "update_stream_alert_config", "settings", "", JSON.stringify(Object.keys(updates)));
+  return res.json({ success: true, data: next, message: "تم تحديث إعدادات تنبيهات البث" });
 });
 
 router.post("/streams/:id/end", requireAdmin, async (req, res) => {
@@ -804,15 +1333,20 @@ router.post("/streams/:id/end", requireAdmin, async (req, res) => {
       const [stream] = await db.select({ userId: schema.streams.userId })
         .from(schema.streams).where(eq(schema.streams.id, streamId)).limit(1);
 
-      await db.update(schema.streams).set({ status: "ended", endedAt: new Date() }).where(eq(schema.streams.id, streamId));
+      await db.update(schema.streams).set({ status: "ended", endedAt: new Date(), viewerCount: 0 }).where(eq(schema.streams.id, streamId));
+      await db.update(schema.streamViewers).set({ leftAt: new Date() }).where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        sql`left_at IS NULL`,
+      ));
 
-      // Notify the streamer via socket
+      // Notify the streamer and all current room participants.
       if (stream) {
         const socketId = await getUserSocketId(stream.userId);
         if (socketId) {
           io.to(socketId).emit("stream-force-ended", { streamId, forcedByAdmin: true });
         }
       }
+      io.to(`room:${streamId}`).emit("stream-force-ended", { streamId, forcedByAdmin: true });
     } catch (err: any) {
       log(`Force end stream error: ${err.message}`, "admin");
     }
@@ -869,18 +1403,20 @@ router.get("/message-reports", requireAdmin, async (req, res) => {
       : [];
 
     // Get message content (decrypted) for each report
-    const { decryptMessage } = await import("../utils/encryption");
     const messageIds = reports.map((r: any) => r.messageId).filter(Boolean);
     const messages = messageIds.length > 0
       ? await db.select().from(schema.messages).where(inArray(schema.messages.id, messageIds))
       : [];
 
+    const usersMap = new Map(users.map(u => [u.id, u]));
+    const messagesMap = new Map(messages.map(m => [m.id, m]));
+
     const enriched = reports.map((r: any) => ({
       ...r,
-      reporter: users.find(u => u.id === r.reporterId),
-      reportedUser: users.find(u => u.id === r.reportedUserId),
+      reporter: usersMap.get(r.reporterId),
+      reportedUser: usersMap.get(r.reportedUserId),
       message: (() => {
-        const msg = messages.find(m => m.id === r.messageId);
+        const msg = messagesMap.get(r.messageId);
         if (msg) return { ...msg, content: msg.content ? decryptMessage(msg.content, msg.conversationId) : msg.content };
         return null;
       })(),
@@ -932,6 +1468,10 @@ router.put("/message-reports/:id", requireAdmin, async (req, res) => {
   const { status, adminNotes } = req.body;
 
   if (!status) return res.status(400).json({ success: false, message: "الحالة مطلوبة" });
+  const allowedStatuses = new Set(["pending", "reviewed", "resolved", "dismissed"]);
+  if (!allowedStatuses.has(status)) {
+    return res.status(400).json({ success: false, message: "حالة غير صالحة" });
+  }
 
   try {
     const [report] = await db.select().from(schema.messageReports)
@@ -1174,7 +1714,6 @@ router.get("/export/messages", requireAdmin, async (_req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
-    const { decryptMessage } = await import("../utils/encryption");
     const msgs = await db.select({
       id: schema.messages.id,
       conversationId: schema.messages.conversationId,

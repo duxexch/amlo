@@ -394,15 +394,24 @@ export class DatabaseStorage {
   async upsertSystemConfig(category: string, configData: object, updatedBy?: string) {
     if (!this.db) return null;
     const json = JSON.stringify(configData);
+    const memKey = `sysconfig:${category}`;
     const existing = await this.getSystemConfig(category);
     if (existing) {
       const [updated] = await this.db.update(schema.systemConfig)
         .set({ configData: json, updatedBy: updatedBy || null, updatedAt: new Date() })
         .where(eq(schema.systemConfig.id, existing.id)).returning();
+      if (updated) {
+        await cacheSet(memKey, JSON.stringify(updated), 300);
+        memSet(memKey, updated, 120_000);
+      }
       return updated;
     }
     const [created] = await this.db.insert(schema.systemConfig)
       .values({ category, configData: json, updatedBy }).returning();
+    if (created) {
+      await cacheSet(memKey, JSON.stringify(created), 300);
+      memSet(memKey, created, 120_000);
+    }
     return created;
   }
 
@@ -882,24 +891,57 @@ export class DatabaseStorage {
   // ════════════════════════════════════════════════════════════
   async addStreamViewer(streamId: string, userId: string, role = "viewer") {
     if (!this.db) return null;
-    const [viewer] = await this.db.insert(schema.streamViewers)
-      .values({ streamId, userId, role }).returning();
-    // Increment viewer count
+
+    // Ensure a user can rejoin after leaving despite unique(stream_id, user_id).
+    const [existing] = await this.db.select().from(schema.streamViewers)
+      .where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        eq(schema.streamViewers.userId, userId),
+      ))
+      .limit(1);
+
+    // Already active in this stream: no-op, keep counter stable.
+    if (existing && !existing.leftAt) {
+      return existing;
+    }
+
+    let viewer = existing;
+    if (existing) {
+      // Rejoin existing row.
+      const [updated] = await this.db.update(schema.streamViewers)
+        .set({ leftAt: null, joinedAt: new Date(), role })
+        .where(eq(schema.streamViewers.id, existing.id))
+        .returning();
+      viewer = updated || existing;
+    } else {
+      const [created] = await this.db.insert(schema.streamViewers)
+        .values({ streamId, userId, role })
+        .returning();
+      viewer = created || null;
+    }
+
+    // Increment only when transitioning into active state.
     await this.db.update(schema.streams)
       .set({ viewerCount: sql`viewer_count + 1` })
       .where(eq(schema.streams.id, streamId));
+
     return viewer;
   }
 
   async removeStreamViewer(streamId: string, userId: string) {
     if (!this.db) return;
-    await this.db.update(schema.streamViewers)
+    const updated = await this.db.update(schema.streamViewers)
       .set({ leftAt: new Date() })
       .where(and(
         eq(schema.streamViewers.streamId, streamId),
         eq(schema.streamViewers.userId, userId),
         sql`left_at IS NULL`
-      ));
+      ))
+      .returning({ id: schema.streamViewers.id });
+
+    // Nothing active to remove: do not decrement.
+    if (!updated.length) return;
+
     await this.db.update(schema.streams)
       .set({ viewerCount: sql`GREATEST(viewer_count - 1, 0)` })
       .where(eq(schema.streams.id, streamId));

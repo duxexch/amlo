@@ -17,8 +17,10 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { initRedis, createRedisSessionStore, getRedis, createRedisDuplicate } from "./redis";
-import { isDatabaseConnected, getPool } from "./db";
+import { isDatabaseConnected, getPool, getDb } from "./db";
 import { logger, createLogger } from "./logger";
+import { and, eq, or, sql } from "drizzle-orm";
+import * as schema from "../shared/schema";
 
 const serverLog = createLogger("server");
 
@@ -190,7 +192,7 @@ setInterval(() => {
 }, 120_000).unref(); // Every 2 minutes
 
 // Online users — Redis-backed (shared across nodes)
-import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline, getOnlineUsersCount } from "./onlineUsers";
+import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline, getOnlineUsersCount, setLastSeen } from "./onlineUsers";
 
 // Matching engine — random chat queue
 import { joinQueue, leaveQueue, findMatch, endRandomCall, startMatchingLoop, startQueueCleanup, type MatchFilters } from "./matchingEngine";
@@ -211,6 +213,54 @@ const chatThrottle = new Map<string, { count: number; windowStart: number }>();
 const CHAT_MAX_MSGS = 20; // max messages
 const CHAT_WINDOW_MS = 10_000; // per 10 seconds
 
+// ── Gift throttle (separate from chat to stop gift flooding) ──
+const giftThrottle = new Map<string, { count: number; windowStart: number }>();
+const GIFT_MAX_EVENTS = 8; // max gift socket events
+const GIFT_WINDOW_MS = 10_000; // per 10 seconds
+
+// ── Pending speaker invites (roomId + targetUserId), short TTL ──
+const pendingSpeakerInvites = new Map<string, { hostId: string; targetUserId: string; expiresAt: number }>();
+const SPEAKER_INVITE_TTL_MS = 120_000;
+const speakerInviteKey = (roomId: string, targetUserId: string) => `${roomId}:${targetUserId}`;
+
+// ── Banned words cache per stream (TTL) ──
+const streamBannedWordsCache = new Map<string, { words: string[]; expiresAt: number }>();
+const STREAM_BANNED_WORDS_TTL_MS = 30_000;
+
+// ── Lightweight live-stream telemetry counters (reset periodically) ──
+const liveTelemetry = {
+  joins: 0,
+  leaves: 0,
+  chatMessages: 0,
+  chatMutedBlocked: 0,
+  chatBannedWordBlocked: 0,
+  giftsRateLimited: 0,
+  giftsSocketRejected: 0,
+  speakerInvites: 0,
+  speakerAccepts: 0,
+  speakerRejects: 0,
+};
+
+export function getLiveTelemetrySnapshot() {
+  return { ...liveTelemetry, timestamp: new Date().toISOString() };
+}
+
+async function getStreamBannedWords(roomId: string): Promise<string[]> {
+  const cached = streamBannedWordsCache.get(roomId);
+  if (cached && cached.expiresAt > Date.now()) return cached.words;
+  const db = getDb();
+  if (!db) return [];
+  const rows = await db.select({ word: schema.streamBannedWords.word })
+    .from(schema.streamBannedWords)
+    .where(eq(schema.streamBannedWords.streamId, roomId));
+  const words = rows
+    .map(r => (r.word || "").trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 500);
+  streamBannedWordsCache.set(roomId, { words, expiresAt: Date.now() + STREAM_BANNED_WORDS_TTL_MS });
+  return words;
+}
+
 // ── Typing indicator throttle (prevents excessive typing events) ──
 const typingThrottle = new Map<string, number>(); // userId -> last emit timestamp
 const TYPING_THROTTLE_MS = 3000; // max 1 typing event per 3 seconds per user
@@ -227,6 +277,18 @@ function isChatRateLimited(userId: string): boolean {
   return false;
 }
 
+function isGiftRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const entry = giftThrottle.get(userId);
+  if (!entry || now - entry.windowStart > GIFT_WINDOW_MS) {
+    giftThrottle.set(userId, { count: 1, windowStart: now });
+    return false;
+  }
+  if (entry.count >= GIFT_MAX_EVENTS) return true;
+  entry.count++;
+  return false;
+}
+
 // Cleanup chat throttle + typing throttle periodically
 setInterval(() => {
   const now = Date.now();
@@ -239,11 +301,59 @@ setInterval(() => {
   }
   // Step 29: Memory leak protection — cap Map sizes
   if (chatThrottle.size > 50_000) chatThrottle.clear();
+  for (const [userId, entry] of giftThrottle) {
+    if (now - entry.windowStart > GIFT_WINDOW_MS) giftThrottle.delete(userId);
+  }
+  if (giftThrottle.size > 50_000) giftThrottle.clear();
+  for (const [key, invite] of pendingSpeakerInvites) {
+    if (now > invite.expiresAt) pendingSpeakerInvites.delete(key);
+  }
+  if (pendingSpeakerInvites.size > 100_000) pendingSpeakerInvites.clear();
+  for (const [roomId, cached] of streamBannedWordsCache) {
+    if (now > cached.expiresAt) streamBannedWordsCache.delete(roomId);
+  }
+  if (streamBannedWordsCache.size > 20_000) streamBannedWordsCache.clear();
   if (typingThrottle.size > 50_000) typingThrottle.clear();
   if (viewerCountDebounce.size > 10_000) viewerCountDebounce.clear();
 }, 30_000).unref();
 
+// ── Stream telemetry log every minute (non-blocking observability) ──
+setInterval(() => {
+  serverLog.info({ ...liveTelemetry }, "live-telemetry");
+  liveTelemetry.joins = 0;
+  liveTelemetry.leaves = 0;
+  liveTelemetry.chatMessages = 0;
+  liveTelemetry.chatMutedBlocked = 0;
+  liveTelemetry.chatBannedWordBlocked = 0;
+  liveTelemetry.giftsRateLimited = 0;
+  liveTelemetry.giftsSocketRejected = 0;
+  liveTelemetry.speakerInvites = 0;
+  liveTelemetry.speakerAccepts = 0;
+  liveTelemetry.speakerRejects = 0;
+}, 60_000).unref();
+
+// ── Reconcile stream viewer counters from active viewer rows (safety net) ──
+setInterval(async () => {
+  try {
+    const db = getDb();
+    if (!db) return;
+    await db.execute(sql`
+      UPDATE streams s
+      SET viewer_count = COALESCE((
+        SELECT COUNT(*)::int
+        FROM stream_viewers sv
+        WHERE sv.stream_id = s.id
+          AND sv.left_at IS NULL
+      ), 0)
+      WHERE s.status = 'active'
+    `);
+  } catch (err: any) {
+    serverLog.warn({ err: err?.message || err }, "stream viewer reconciliation failed");
+  }
+}, 60_000).unref();
+
 io.on("connection", (socket) => {
+  socket.data.joinedStreamRooms = new Set<string>();
 
   // ── Validate incoming data helper ──
   function isStr(v: unknown, maxLen = 200): v is string {
@@ -274,30 +384,131 @@ io.on("connection", (socket) => {
   });
 
   // ── Rooms (live streams) ──
-  socket.on("join-room", (roomId: unknown) => {
+  socket.on("join-room", async (roomId: unknown) => {
     if (!isStr(roomId, 100)) return;
+
+    // Join is only allowed for active stream rooms.
+    const db = getDb();
+    if (!db) return;
+    const [stream] = await db
+      .select({ id: schema.streams.id, status: schema.streams.status, userId: schema.streams.userId })
+      .from(schema.streams)
+      .where(eq(schema.streams.id, roomId))
+      .limit(1);
+    if (!stream || stream.status !== "active") {
+      socket.emit("error", { type: "stream_unavailable", message: "البث غير متاح" });
+      return;
+    }
+
     socket.join(`room:${roomId}`);
+    liveTelemetry.joins++;
+    (socket.data.joinedStreamRooms as Set<string>).add(roomId);
+
+    // Keep DB presence in sync for authenticated viewers/speakers/hosts.
+    const currentUserId = socket.data.userId;
+    if (isStr(currentUserId, 100)) {
+      const role = stream.userId === currentUserId ? "host" : "viewer";
+      const [existing] = await db.select({ id: schema.streamViewers.id, leftAt: schema.streamViewers.leftAt })
+        .from(schema.streamViewers)
+        .where(and(
+          eq(schema.streamViewers.streamId, roomId),
+          eq(schema.streamViewers.userId, currentUserId),
+        ))
+        .limit(1);
+      if (existing) {
+        if (existing.leftAt) {
+          await db.update(schema.streamViewers)
+            .set({ leftAt: null, joinedAt: new Date(), role })
+            .where(eq(schema.streamViewers.id, existing.id));
+          await db.update(schema.streams)
+            .set({ viewerCount: sql`viewer_count + 1` })
+            .where(eq(schema.streams.id, roomId));
+        }
+      } else {
+        await db.insert(schema.streamViewers).values({ streamId: roomId, userId: currentUserId, role });
+        await db.update(schema.streams)
+          .set({ viewerCount: sql`viewer_count + 1` })
+          .where(eq(schema.streams.id, roomId));
+      }
+    }
+
     // Debounced viewer-count: prevents flooding in popular rooms (50K viewers = 50K broadcasts)
     scheduleViewerCountBroadcast(roomId);
   });
 
-  socket.on("leave-room", (roomId: unknown) => {
+  socket.on("leave-room", async (roomId: unknown) => {
     if (!isStr(roomId, 100)) return;
     socket.leave(`room:${roomId}`);
+    liveTelemetry.leaves++;
+    (socket.data.joinedStreamRooms as Set<string>).delete(roomId);
+
+    // Keep DB presence in sync.
+    const currentUserId = socket.data.userId;
+    if (isStr(currentUserId, 100)) {
+      const db = getDb();
+      if (db) {
+        const updated = await db.update(schema.streamViewers)
+          .set({ leftAt: new Date() })
+          .where(and(
+            eq(schema.streamViewers.streamId, roomId),
+            eq(schema.streamViewers.userId, currentUserId),
+            sql`left_at IS NULL`,
+          ))
+          .returning({ id: schema.streamViewers.id });
+        if (updated.length) {
+          await db.update(schema.streams)
+            .set({ viewerCount: sql`GREATEST(viewer_count - 1, 0)` })
+            .where(eq(schema.streams.id, roomId));
+        }
+      }
+    }
+
     scheduleViewerCountBroadcast(roomId);
   });
 
-  socket.on("chat-message", (data: unknown) => {
+  socket.on("chat-message", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { roomId, message, user } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(message, 5000)) return;
     // Verify socket actually joined this room
     if (!socket.rooms.has(`room:${roomId}`)) return;
+
+    // Enforce stream-level mute in live room chat.
+    if (socket.data.userId) {
+      const db = getDb();
+      if (db) {
+        const [muted] = await db.select({ id: schema.streamMutedUsers.id })
+          .from(schema.streamMutedUsers)
+          .where(and(
+            eq(schema.streamMutedUsers.streamId, roomId),
+            eq(schema.streamMutedUsers.userId, socket.data.userId),
+          ))
+          .limit(1);
+        if (muted) {
+          liveTelemetry.chatMutedBlocked++;
+          socket.emit("error", { type: "muted", message: "تم كتمك في هذا البث" });
+          return;
+        }
+      }
+    }
+
     // ── Throttle: prevent spam flooding ──
     if (socket.data.userId && isChatRateLimited(socket.data.userId)) {
       socket.emit("error", { type: "rate_limited", message: "أنت ترسل بسرعة كبيرة. انتظر قليلاً" });
       return;
     }
+    // Enforce stream banned words policy.
+    const normalized = message.toLowerCase();
+    const bannedWords = await getStreamBannedWords(roomId);
+    const matchedWord = bannedWords.find(w => normalized.includes(w));
+    if (matchedWord) {
+      liveTelemetry.chatBannedWordBlocked++;
+      socket.emit("error", { type: "banned_word", message: "الرسالة تحتوي على كلمة محظورة" });
+      return;
+    }
+
+    liveTelemetry.chatMessages++;
+
     const chatMsg = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       roomId,
@@ -315,14 +526,17 @@ io.on("connection", (socket) => {
 
   socket.on("send-gift", (data: unknown) => {
     if (!data || typeof data !== "object") return;
-    const { roomId, gift, sender } = data as Record<string, unknown>;
+    const { roomId } = data as Record<string, unknown>;
     if (!isStr(roomId, 100)) return;
     // Verify socket is in the room
     if (!socket.rooms.has(`room:${roomId}`)) return;
-    // Only allow gift object with known fields
-    const safeGift = typeof gift === "object" && gift ? { id: (gift as any).id, name: (gift as any).name, icon: (gift as any).icon, price: (gift as any).price } : null;
-    const safeSender = typeof sender === "object" && sender ? { id: (sender as any).id, name: (sender as any).name, avatar: (sender as any).avatar } : null;
-    io.to(`room:${roomId}`).emit("gift-received", { roomId, gift: safeGift, sender: safeSender });
+    if (socket.data.userId && isGiftRateLimited(socket.data.userId)) {
+      liveTelemetry.giftsRateLimited++;
+      socket.emit("error", { type: "rate_limited", message: "عدد كبير من الهدايا بسرعة عالية. انتظر قليلاً" });
+      return;
+    }
+    liveTelemetry.giftsSocketRejected++;
+    socket.emit("error", { type: "gift_socket_disabled", message: "إرسال الهدايا يتم عبر API فقط" });
   });
 
   // ── Speaker Invitation (Audio Rooms) ──
@@ -330,10 +544,27 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { roomId, targetUserId, hostName } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(targetUserId, 100)) return;
-    // Only host (room creator) can invite — verify socket is in room
+    // Only host (stream owner) can invite + must be in room.
     if (!socket.rooms.has(`room:${roomId}`)) return;
+    const currentUserId = socket.data.userId;
+    if (!isStr(currentUserId, 100)) return;
+    const db = getDb();
+    if (!db) return;
+    const [stream] = await db
+      .select({ userId: schema.streams.userId, status: schema.streams.status })
+      .from(schema.streams)
+      .where(eq(schema.streams.id, roomId))
+      .limit(1);
+    if (!stream || stream.status !== "active" || stream.userId !== currentUserId) return;
+
     const targetSocketId = await getUserSocketId(targetUserId);
     if (targetSocketId) {
+      liveTelemetry.speakerInvites++;
+      pendingSpeakerInvites.set(speakerInviteKey(roomId, targetUserId), {
+        hostId: currentUserId,
+        targetUserId,
+        expiresAt: Date.now() + SPEAKER_INVITE_TTL_MS,
+      });
       io.to(targetSocketId).emit("speaker-invite", {
         roomId,
         hostId: socket.data.userId,
@@ -346,10 +577,23 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { roomId, userName } = data as Record<string, unknown>;
     if (!isStr(roomId, 100)) return;
+    if (!socket.rooms.has(`room:${roomId}`)) return;
+    const currentUserId = socket.data.userId;
+    if (!isStr(currentUserId, 100)) return;
+    const key = speakerInviteKey(roomId, currentUserId);
+    const pending = pendingSpeakerInvites.get(key);
+    if (!pending || pending.expiresAt < Date.now()) {
+      pendingSpeakerInvites.delete(key);
+      socket.emit("error", { type: "invite_invalid", message: "الدعوة غير صالحة أو منتهية" });
+      return;
+    }
+    pendingSpeakerInvites.delete(key);
+    liveTelemetry.speakerAccepts++;
+
     // Broadcast to the room that a new speaker joined
     io.to(`room:${roomId}`).emit("speaker-joined", {
       roomId,
-      userId: socket.data.userId,
+      userId: currentUserId,
       userName: typeof userName === "string" ? userName : "مستخدم",
     });
   });
@@ -358,6 +602,11 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { roomId, hostId } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(hostId, 100)) return;
+    const currentUserId = socket.data.userId;
+    if (isStr(currentUserId, 100)) {
+      pendingSpeakerInvites.delete(speakerInviteKey(roomId, currentUserId));
+    }
+    liveTelemetry.speakerRejects++;
     const hostSocketId = await getUserSocketId(hostId);
     if (hostSocketId) {
       io.to(hostSocketId).emit("speaker-declined", {
@@ -367,11 +616,23 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("remove-speaker", (data: unknown) => {
+  socket.on("remove-speaker", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { roomId, targetUserId } = data as Record<string, unknown>;
     if (!isStr(roomId, 100) || !isStr(targetUserId, 100)) return;
     if (!socket.rooms.has(`room:${roomId}`)) return;
+
+    const currentUserId = socket.data.userId;
+    if (!isStr(currentUserId, 100)) return;
+    const db = getDb();
+    if (!db) return;
+    const [stream] = await db
+      .select({ userId: schema.streams.userId, status: schema.streams.status })
+      .from(schema.streams)
+      .where(eq(schema.streams.id, roomId))
+      .limit(1);
+    if (!stream || stream.status !== "active" || stream.userId !== currentUserId) return;
+
     io.to(`room:${roomId}`).emit("speaker-removed", {
       roomId,
       userId: targetUserId,
@@ -420,6 +681,49 @@ io.on("connection", (socket) => {
       io.to(receiverSocketId).emit("messages-read", {
         conversationId,
         readerId: socket.data.userId,
+      });
+    }
+  });
+
+  // ── Private Chat (delivery receipt) ──
+  socket.on("message-delivered", async (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { messageId, conversationId } = data as Record<string, unknown>;
+    if (!isStr(messageId, 100) || !isStr(conversationId, 100)) return;
+
+    const receiverId = socket.data.userId;
+    if (!isStr(receiverId, 100)) return;
+
+    const db = getDb();
+    if (!db) return;
+
+    // Trust DB state, not client-provided senderId.
+    const [msg] = await db
+      .select({ senderId: schema.messages.senderId, conversationId: schema.messages.conversationId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.id, messageId), eq(schema.messages.conversationId, conversationId)))
+      .limit(1);
+    if (!msg) return;
+
+    const [conv] = await db
+      .select({ p1: schema.conversations.participant1Id, p2: schema.conversations.participant2Id })
+      .from(schema.conversations)
+      .where(and(
+        eq(schema.conversations.id, conversationId),
+        or(eq(schema.conversations.participant1Id, receiverId), eq(schema.conversations.participant2Id, receiverId)),
+      ))
+      .limit(1);
+    if (!conv) return;
+
+    // Receiver must be the opposite participant (not the original sender).
+    if (msg.senderId === receiverId) return;
+
+    const senderSocketId = await getUserSocketId(msg.senderId);
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("message-delivered", {
+        messageId,
+        conversationId,
+        deliveredAt: new Date().toISOString(),
       });
     }
   });
@@ -584,6 +888,34 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Disconnecting (before rooms are fully left) ──
+  socket.on("disconnecting", async () => {
+    const userId = socket.data.userId;
+    if (!isStr(userId, 100)) return;
+    const joinedRooms = socket.data.joinedStreamRooms as Set<string>;
+    if (!joinedRooms || joinedRooms.size === 0) return;
+    const db = getDb();
+    if (!db) return;
+
+    for (const roomId of joinedRooms) {
+      const updated = await db.update(schema.streamViewers)
+        .set({ leftAt: new Date() })
+        .where(and(
+          eq(schema.streamViewers.streamId, roomId),
+          eq(schema.streamViewers.userId, userId),
+          sql`left_at IS NULL`,
+        ))
+        .returning({ id: schema.streamViewers.id });
+      if (updated.length) {
+        await db.update(schema.streams)
+          .set({ viewerCount: sql`GREATEST(viewer_count - 1, 0)` })
+          .where(eq(schema.streams.id, roomId));
+      }
+      scheduleViewerCountBroadcast(roomId);
+    }
+    joinedRooms.clear();
+  });
+
   // ── Disconnect ──
   socket.on("disconnect", async () => {
     const userId = socket.data.userId;
@@ -591,6 +923,7 @@ io.on("connection", (socket) => {
       await leaveQueue(userId);
       await endRandomCall(userId);
       await removeUserOnline(userId);
+      await setLastSeen(userId);
 
       // ── World session disconnect notification ──
       // Notify any world session partner that this user disconnected
@@ -601,12 +934,13 @@ io.on("connection", (socket) => {
         }
       }
     }
-    // Also update viewer-count for all rooms this socket was in
-    for (const room of socket.rooms) {
-      if (room.startsWith("room:")) {
-        const roomId = room.slice(5);
+    // Fallback viewer count updates for any remaining room markers.
+    const joinedRooms = socket.data.joinedStreamRooms as Set<string>;
+    if (joinedRooms && joinedRooms.size > 0) {
+      for (const roomId of joinedRooms) {
         scheduleViewerCountBroadcast(roomId);
       }
+      joinedRooms.clear();
     }
   });
 });

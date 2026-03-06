@@ -13,7 +13,7 @@ import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => socialLog.info(msg);
 const socialLog = createLogger("social");
 import { io } from "../index";
-import { getUserSocketId, isUserOnline, areUsersOnline } from "../onlineUsers";
+import { getUserSocketId, isUserOnline, areUsersOnline, getLastSeen, getLastSeenBatch } from "../onlineUsers";
 import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
 import { storage } from "../storage";
@@ -501,6 +501,7 @@ router.get("/conversations", async (req, res) => {
 
     // Batch online status check (single HMGET instead of N HEXISTS)
     const onlineMap = await areUsersOnline(participantIds);
+    const lastSeenMap = await getLastSeenBatch(participantIds);
 
     const result = convs.map(c => {
       const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
@@ -509,6 +510,7 @@ router.get("/conversations", async (req, res) => {
         id: c.id,
         otherUser: participants.find(p => p.id === otherId),
         isOnline: onlineMap.get(otherId) || false,
+        lastSeen: lastSeenMap.get(otherId) || null,
         unreadCount: unread,
         lastMessage: lastMessages.find(m => m.id === c.lastMessageId),
         lastMessageAt: c.lastMessageAt,
@@ -547,6 +549,19 @@ router.post("/conversations", async (req, res) => {
       ).limit(1);
 
     if (blocked.length > 0) return res.status(403).json({ success: false, message: "لا يمكن بدء محادثة مع هذا المستخدم" });
+
+    // Limit: max 200 active conversations per user
+    const [convCount] = await db.select({ count: count() }).from(schema.conversations)
+      .where(and(
+        or(
+          eq(schema.conversations.participant1Id, userId),
+          eq(schema.conversations.participant2Id, userId),
+        ),
+        eq(schema.conversations.isActive, true),
+      ));
+    if (convCount.count >= 200) {
+      return res.status(429).json({ success: false, message: "وصلت للحد الأقصى من المحادثات (200)" });
+    }
 
     // Check if conversation already exists
     const existing = await db.select().from(schema.conversations)
@@ -603,6 +618,7 @@ router.get("/conversations/:id/messages", async (req, res) => {
         and(
           eq(schema.messages.conversationId, req.params.id),
           eq(schema.messages.isDeleted, false),
+          sql`NOT (${schema.messages.hiddenFor} @> ARRAY[${userId}]::text[])`,
         )
       )
       .orderBy(desc(schema.messages.createdAt))
@@ -642,12 +658,33 @@ router.get("/conversations/:id/messages", async (req, res) => {
   }
 });
 
+// ── Message send rate limiter ──
+const MESSAGE_RATE_MAX = 15;
+const MESSAGE_RATE_WINDOW_SEC = 60;
+async function isMessageRateLimited(userId: string): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return false;
+  try {
+    const key = `msg_rl:${userId}`;
+    const cnt = await redis.incr(key);
+    if (cnt === 1) await redis.expire(key, MESSAGE_RATE_WINDOW_SEC);
+    return cnt > MESSAGE_RATE_MAX;
+  } catch { return false; }
+}
+
+const MAX_MESSAGE_LENGTH = 5000;
+
 // Send a message
 router.post("/conversations/:id/messages", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+  // Rate limit: max 15 messages per minute per user
+  if (await isMessageRateLimited(userId)) {
+    return res.status(429).json({ success: false, message: "أنت ترسل بسرعة كبيرة، انتظر قليلاً" });
+  }
 
   try {
     // Verify participant
@@ -675,6 +712,10 @@ router.post("/conversations/:id/messages", async (req, res) => {
     if (!parsed.success) return res.status(400).json({ success: false, message: "بيانات الرسالة غير صالحة" });
     const { content, type, mediaUrl, giftId, replyToId } = parsed.data;
     if (!content && (type === "text" || !type)) return res.status(400).json({ success: false, message: "الرسالة فارغة" });
+    // Content length validation
+    if (content && content.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({ success: false, message: `الرسالة طويلة جداً (الحد ${MAX_MESSAGE_LENGTH} حرف)` });
+    }
 
     // Check feature toggles
     const pricing = await getAllPricing();
@@ -750,19 +791,44 @@ router.post("/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// Delete a message (soft delete)
+// Delete a message (soft delete or hide for me)
 router.delete("/messages/:id", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+  const mode = req.query.mode === "forMe" ? "forMe" : "forEveryone";
 
   try {
     const [msg] = await db.select().from(schema.messages)
-      .where(and(eq(schema.messages.id, req.params.id), eq(schema.messages.senderId, userId)))
+      .where(eq(schema.messages.id, req.params.id))
       .limit(1);
 
     if (!msg) return res.status(404).json({ success: false, message: "الرسالة غير موجودة" });
+
+    // Verify user is a participant
+    const [conv] = await db.select().from(schema.conversations)
+      .where(and(
+        eq(schema.conversations.id, msg.conversationId),
+        or(
+          eq(schema.conversations.participant1Id, userId),
+          eq(schema.conversations.participant2Id, userId),
+        ),
+      )).limit(1);
+    if (!conv) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    if (mode === "forMe") {
+      // Hide the message only for this user — atomic array_append to prevent race condition
+      await db.execute(
+        sql`UPDATE ${schema.messages} SET hidden_for = array_append(hidden_for, ${userId}) WHERE id = ${msg.id} AND NOT (hidden_for @> ARRAY[${userId}]::text[])`
+      );
+      return res.json({ success: true, message: "تم إخفاء الرسالة" });
+    }
+
+    // Delete for everyone — only the sender can do this
+    if (msg.senderId !== userId) {
+      return res.status(403).json({ success: false, message: "لا يمكنك حذف رسالة شخص آخر" });
+    }
 
     await db.update(schema.messages).set({ isDeleted: true }).where(eq(schema.messages.id, msg.id));
 
@@ -916,6 +982,131 @@ router.get("/messages/:id/reactions", async (req, res) => {
     return res.json({ success: true, data: reactions });
   } catch {
     return res.json({ success: true, data: [] });
+  }
+});
+
+// Batch get reactions for multiple messages (avoids N+1)
+router.post("/messages/reactions/batch", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.json({ success: true, data: {} });
+
+  try {
+    const { messageIds } = req.body;
+    if (!Array.isArray(messageIds) || messageIds.length === 0 || messageIds.length > 100) {
+      return res.status(400).json({ success: false, message: "messageIds مطلوبة (1-100)" });
+    }
+    // Filter valid UUIDs only
+    const validIds = messageIds.filter((id: unknown) => typeof id === "string" && isValidUuid(id));
+    if (validIds.length === 0) return res.json({ success: true, data: {} });
+
+    // Verify user is a participant in at least one conversation containing these messages
+    const msgConvs = await db.selectDistinct({ conversationId: schema.messages.conversationId })
+      .from(schema.messages)
+      .where(inArray(schema.messages.id, validIds));
+    const convIds = msgConvs.map(m => m.conversationId);
+    if (convIds.length > 0) {
+      const participantCheck = await db.select({ id: schema.conversations.id })
+        .from(schema.conversations)
+        .where(and(
+          inArray(schema.conversations.id, convIds),
+          or(
+            eq(schema.conversations.participant1Id, userId),
+            eq(schema.conversations.participant2Id, userId),
+          ),
+        ));
+      if (participantCheck.length === 0) {
+        return res.status(403).json({ success: false, message: "غير مصرح" });
+      }
+      // Filter to only messages in conversations user participates in
+      const allowedConvIds = new Set(participantCheck.map(c => c.id));
+      const allowedMsgConvs = msgConvs.filter(m => allowedConvIds.has(m.conversationId));
+      // Get message IDs that belong to allowed conversations
+      const allowedMsgIds = await db.select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(and(
+          inArray(schema.messages.id, validIds),
+          inArray(schema.messages.conversationId, allowedMsgConvs.map(m => m.conversationId)),
+        ));
+      const filteredIds = allowedMsgIds.map(m => m.id);
+      if (filteredIds.length === 0) return res.json({ success: true, data: {} });
+      // Use filtered IDs for the reaction query
+      validIds.length = 0;
+      validIds.push(...filteredIds);
+    }
+
+    const reactions = await db.select({
+      id: schema.messageReactions.id,
+      messageId: schema.messageReactions.messageId,
+      emoji: schema.messageReactions.emoji,
+      userId: schema.messageReactions.userId,
+      username: schema.users.username,
+    })
+      .from(schema.messageReactions)
+      .leftJoin(schema.users, eq(schema.messageReactions.userId, schema.users.id))
+      .where(inArray(schema.messageReactions.messageId, validIds))
+      .orderBy(schema.messageReactions.createdAt);
+
+    // Group by messageId
+    const grouped: Record<string, Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>> = {};
+    for (const r of reactions) {
+      if (!grouped[r.messageId]) grouped[r.messageId] = [];
+      grouped[r.messageId].push({
+        emoji: r.emoji,
+        userId: r.userId,
+        username: r.username || undefined,
+        isMine: r.userId === userId,
+      });
+    }
+
+    return res.json({ success: true, data: grouped });
+  } catch {
+    return res.json({ success: true, data: {} });
+  }
+});
+
+// Bulk delete messages (user-side)
+router.post("/messages/bulk-delete", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+  try {
+    const { messageIds } = req.body;
+    if (!Array.isArray(messageIds) || messageIds.length === 0 || messageIds.length > 50) {
+      return res.status(400).json({ success: false, message: "messageIds مطلوبة (1-50)" });
+    }
+    const validIds = messageIds.filter((id: unknown) => typeof id === "string" && isValidUuid(id));
+    if (validIds.length === 0) return res.status(400).json({ success: false, message: "لا توجد IDs صالحة" });
+
+    // Only delete messages sent by the user
+    const deleted = await db.update(schema.messages)
+      .set({ isDeleted: true })
+      .where(and(
+        inArray(schema.messages.id, validIds),
+        eq(schema.messages.senderId, userId),
+      ))
+      .returning({ id: schema.messages.id, conversationId: schema.messages.conversationId });
+
+    // Notify other participants via socket
+    for (const msg of deleted) {
+      const otherId = await getConversationOtherId(db, msg.conversationId, userId);
+      if (otherId) {
+        const otherSocketId = await getUserSocketId(otherId);
+        if (otherSocketId) {
+          io.to(otherSocketId).emit("message-deleted", {
+            messageId: msg.id,
+            conversationId: msg.conversationId,
+          });
+        }
+      }
+    }
+
+    return res.json({ success: true, deletedCount: deleted.length });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الحذف" });
   }
 });
 
@@ -2243,6 +2434,37 @@ router.post("/gifts/send", async (req: Request, res: Response) => {
       ip,
     }, `Gift sent: ${userId} → ${receiverId} (gift ${giftId} x${quantity})`);
 
+    // Authoritative realtime gift event (server-origin) for stream UIs.
+    if (streamId && io) {
+      const [senderUser] = await db.select({
+        id: schema.users.id,
+        displayName: schema.users.displayName,
+        username: schema.users.username,
+        avatar: schema.users.avatar,
+      }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+      const senderName = senderUser?.displayName || senderUser?.username || "مستخدم";
+      const payload = {
+        streamId,
+        roomId: streamId,
+        gift: {
+          id: gift.id,
+          name: gift.name || gift.nameAr,
+          icon: gift.icon || null,
+          price: gift.price,
+        },
+        sender: {
+          id: senderUser?.id || userId,
+          name: senderName,
+          avatar: senderUser?.avatar || null,
+        },
+        giftName: gift.name || gift.nameAr,
+        giftImage: gift.icon || null,
+        senderName,
+      };
+      io.to(`room:${streamId}`).emit("gift-received", payload);
+    }
+
     return res.json({ success: true, message: "تم إرسال الهدية بنجاح", newBalance: result });
   } catch (err: any) {
     if (err.message === "INSUFFICIENT_BALANCE") {
@@ -2726,7 +2948,7 @@ router.post("/streams/:id/token", async (req: Request, res: Response) => {
       displayName,
       isHost,
       isSpeaker,
-      4 * 60 * 60 // 4 hours TTL
+      12 * 60 * 60 // 12 hours TTL (mitigates long-session expiry)
     );
 
     const wsUrl = getLiveKitPublicUrl();
@@ -2979,8 +3201,11 @@ router.post("/streams/:id/pin", async (req: Request, res: Response) => {
     if (stream.userId !== userId) return res.status(403).json({ success: false, message: "فقط المضيف" });
     const { message } = req.body;
     await storage.updateStream(streamId, { pinnedMessage: message || null } as any);
-    // Broadcast to room
-    if (io) io.to(`stream-${streamId}`).emit("pinned-message", { message: message || null });
+    // Broadcast to socket room used by live pages + keep legacy event for compatibility.
+    if (io) {
+      io.to(`room:${streamId}`).emit("stream-pinned", { streamId, message: message || null });
+      io.to(`room:${streamId}`).emit("pinned-message", { message: message || null });
+    }
     return res.json({ success: true });
   } catch (err: any) {
     socialLog.error({ err }, "Pin message error");
@@ -2996,7 +3221,10 @@ router.delete("/streams/:id/pin", async (req: Request, res: Response) => {
     const stream = await storage.getStream(streamId);
     if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
     await storage.updateStream(streamId, { pinnedMessage: null } as any);
-    if (io) io.to(`stream-${streamId}`).emit("pinned-message", { message: null });
+    if (io) {
+      io.to(`room:${streamId}`).emit("stream-pinned", { streamId, message: null });
+      io.to(`room:${streamId}`).emit("pinned-message", { message: null });
+    }
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false });
@@ -3031,7 +3259,11 @@ router.post("/streams/:id/poll", async (req: Request, res: Response) => {
       votes: JSON.stringify(initialVotes),
       voterIds: "[]",
     }).returning();
-    if (io) io.to(`stream-${streamId}`).emit("poll-created", { poll: { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes) } });
+    if (io) {
+      const pollPayload = { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes) };
+      io.to(`room:${streamId}`).emit("stream-poll-update", { streamId, poll: pollPayload });
+      io.to(`room:${streamId}`).emit("poll-created", { poll: pollPayload });
+    }
     return res.json({ success: true, data: { ...poll, options: JSON.parse(poll.options), votes: JSON.parse(poll.votes) } });
   } catch (err: any) {
     socialLog.error({ err }, "Create poll error");
@@ -3087,7 +3319,21 @@ router.post("/streams/:id/poll/:pollId/vote", async (req: Request, res: Response
 
     const votes = JSON.parse(updated.votes);
     const newVoterIds: string[] = JSON.parse(updated.voterIds);
-    if (io) io.to(`stream-${streamId}`).emit("poll-updated", { pollId, votes, totalVoters: newVoterIds.length });
+    if (io) {
+      const [activePoll] = await db.select().from(schema.streamPolls)
+        .where(and(eq(schema.streamPolls.id, pollId), eq(schema.streamPolls.streamId, streamId)))
+        .limit(1);
+      const pollPayload = activePoll
+        ? {
+            ...activePoll,
+            options: JSON.parse(activePoll.options),
+            votes: JSON.parse(activePoll.votes),
+            voterIds: JSON.parse(activePoll.voterIds),
+          }
+        : null;
+      io.to(`room:${streamId}`).emit("stream-poll-update", { streamId, poll: pollPayload });
+      io.to(`room:${streamId}`).emit("poll-updated", { pollId, votes, totalVoters: newVoterIds.length });
+    }
     return res.json({ success: true, data: { votes, totalVoters: newVoterIds.length } });
   } catch (err: any) {
     socialLog.error({ err }, "Vote poll error");
@@ -3106,7 +3352,10 @@ router.post("/streams/:id/poll/:pollId/end", async (req: Request, res: Response)
     const db = getDb();
     if (!db) return res.status(500).json({ success: false });
     await db.update(schema.streamPolls).set({ isActive: false }).where(eq(schema.streamPolls.id, pollId));
-    if (io) io.to(`stream-${streamId}`).emit("poll-ended", { pollId });
+    if (io) {
+      io.to(`room:${streamId}`).emit("stream-poll-update", { streamId, poll: null });
+      io.to(`room:${streamId}`).emit("poll-ended", { pollId });
+    }
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false });
@@ -3128,7 +3377,7 @@ router.post("/streams/:id/mute", async (req: Request, res: Response) => {
     const db = getDb();
     if (!db) return res.status(500).json({ success: false });
     await db.insert(schema.streamMutedUsers).values({ streamId, userId: targetUserId, mutedBy: userId, reason: reason || null });
-    if (io) io.to(`stream-${streamId}`).emit("user-muted", { userId: targetUserId });
+    if (io) io.to(`room:${streamId}`).emit("user-muted", { userId: targetUserId });
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false });
@@ -3146,7 +3395,7 @@ router.delete("/streams/:id/mute/:targetId", async (req: Request, res: Response)
     const db = getDb();
     if (!db) return res.status(500).json({ success: false });
     await db.delete(schema.streamMutedUsers).where(and(eq(schema.streamMutedUsers.streamId, streamId), eq(schema.streamMutedUsers.userId, targetId)));
-    if (io) io.to(`stream-${streamId}`).emit("user-unmuted", { userId: targetId });
+    if (io) io.to(`room:${streamId}`).emit("user-unmuted", { userId: targetId });
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false });

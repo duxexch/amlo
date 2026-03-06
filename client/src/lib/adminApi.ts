@@ -711,6 +711,26 @@ export const adminChatManagement = {
   // Live Streams
   getActiveStreams: () => chatReq<any>("/streams/active"),
   getStreamStats: () => chatReq<any>("/streams/stats"),
+  getStreamTelemetry: () => chatReq<any>("/streams/telemetry"),
+  getStreamAlertConfig: () => chatReq<any>("/streams/telemetry/alert-config"),
+  getStreamAlertStatus: (
+    status: "all" | "active" | "resolved" = "all",
+    level: "all" | "high" | "medium" | "low" = "all",
+    page = 1,
+    limit = 20,
+  ) =>
+    chatReq<any>(`/streams/telemetry/alerts?status=${status}&level=${level}&page=${page}&limit=${limit}`),
+  clearStreamAlertHistory: (mode: "all" | "resolved" = "resolved") =>
+    chatReq(`/streams/telemetry/alerts/history?mode=${mode}`, { method: "DELETE" }),
+  updateStreamAlertConfig: (data: {
+    giftsRateLimited: number;
+    chatBannedWordBlocked: number;
+    chatMutedBlocked: number;
+    giftsSocketRejected: number;
+    joinImbalanceOffset: number;
+    cooldownMinutes: number;
+  }) =>
+    chatReq("/streams/telemetry/alert-config", { method: "PUT", body: JSON.stringify(data) }),
   forceEndStream: (id: string) =>
     chatReq(`/streams/${id}/end`, { method: "POST" }),
 

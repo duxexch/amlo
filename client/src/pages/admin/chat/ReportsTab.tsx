@@ -8,20 +8,24 @@ import { Flag, AlertTriangle, Eye, CheckCircle2, XCircle, Loader2 } from "lucide
 import { adminChatManagement } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import { StatCard, LoadingSkeleton, EmptyState, formatDate } from "./AdminChatShared";
+import { toast } from "sonner";
 import type { MessageReport, ReportStats } from "../../chat/chatTypes";
 
 export function ReportsTab() {
   const { t } = useTranslation();
   const [reports, setReports] = useState<MessageReport[]>([]);
   const [reportStats, setReportStats] = useState<ReportStats | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [reportFilter, setReportFilter] = useState("all");
   const [reportPage, setReportPage] = useState(1);
   const [reportTotal, setReportTotal] = useState(0);
   const [updatingReportId, setUpdatingReportId] = useState<string | null>(null);
+  const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [statsRes, reportsRes] = await Promise.all([
         adminChatManagement.getMessageReportStats(),
@@ -29,19 +33,25 @@ export function ReportsTab() {
       ]);
       setReportStats(statsRes.data || statsRes);
       setReports(reportsRes.data || []);
-      setReportTotal(reportsRes.pagination?.total || 0);
-    } catch (err) { console.error(err); }
+      setReportTotal((reportsRes as any).total ?? reportsRes.pagination?.total ?? 0);
+    } catch {
+      setLoadError(t("admin.chats.loadReportsFailed", "فشل تحميل البلاغات"));
+      toast.error(t("admin.chats.loadReportsFailed", "فشل تحميل البلاغات"));
+    }
     setLoading(false);
-  }, [reportPage, reportFilter]);
+  }, [reportPage, reportFilter, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const handleUpdateReport = async (id: string, status: string) => {
     setUpdatingReportId(id);
     try {
-      await adminChatManagement.updateMessageReport(id, status);
+      await adminChatManagement.updateMessageReport(id, status, adminNotes[id]);
+      toast.success(t("admin.chats.updateReportSuccess", "تم تحديث البلاغ"));
       loadData();
-    } catch (err) { console.error(err); }
+    } catch {
+      toast.error(t("admin.chats.updateReportFailed", "فشل تحديث البلاغ"));
+    }
     setUpdatingReportId(null);
   };
 
@@ -83,6 +93,15 @@ export function ReportsTab() {
         ))}
       </div>
 
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+          <span className="text-red-300 text-sm">{loadError}</span>
+          <button onClick={loadData} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200">
+            {t("common.retry", "إعادة المحاولة")}
+          </button>
+        </div>
+      )}
+
       {/* Reports list */}
       {reports.length > 0 ? (
         <div className="space-y-3">
@@ -117,9 +136,9 @@ export function ReportsTab() {
                 <span className="text-white/20 text-[10px]">{formatDate(report.createdAt)}</span>
               </div>
 
-              {report.messageContent && (
+              {(report.message?.content || report.messageContent) && (
                 <div className="bg-white/3 rounded-xl p-3 border border-white/5">
-                  <p className="text-white/50 text-xs truncate">{report.messageContent}</p>
+                  <p className="text-white/50 text-xs truncate">{report.message?.content || report.messageContent}</p>
                 </div>
               )}
 
@@ -128,7 +147,15 @@ export function ReportsTab() {
               )}
 
               {report.status === "pending" && (
-                <div className="flex items-center gap-2 pt-1">
+                <div className="space-y-2 pt-1">
+                  <textarea
+                    value={adminNotes[report.id] || ""}
+                    onChange={e => setAdminNotes(prev => ({ ...prev, [report.id]: e.target.value }))}
+                    placeholder={t("admin.chats.adminNotes", "ملاحظات الإدارة...")}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/30 resize-none"
+                    rows={2}
+                  />
+                  <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleUpdateReport(report.id, "resolved")}
                     disabled={updatingReportId === report.id}
@@ -153,6 +180,7 @@ export function ReportsTab() {
                     <XCircle className="w-3 h-3" />
                     {t("admin.chats.dismiss")}
                   </button>
+                  </div>
                 </div>
               )}
             </motion.div>

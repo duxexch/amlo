@@ -462,6 +462,7 @@ export const messages = pgTable(
     isRead: boolean("is_read").notNull().default(false),
     readAt: timestamp("read_at"),
     isDeleted: boolean("is_deleted").notNull().default(false),
+    hiddenFor: text("hidden_for").array().notNull().default(sql`'{}'::text[]`),
     coinsCost: integer("coins_cost").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

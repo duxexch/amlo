@@ -80,12 +80,22 @@ export const chatApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  deleteMessage: (id: string) =>
-    request(`/messages/${id}`, { method: "DELETE" }),
+  deleteMessage: (id: string, mode: "forMe" | "forEveryone" = "forEveryone") =>
+    request(`/messages/${id}?mode=${mode}`, { method: "DELETE" }),
+  bulkDelete: (messageIds: string[]) =>
+    request<{ deletedCount: number }>("/messages/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ messageIds }),
+    }),
   toggleReaction: (messageId: string, emoji: string) =>
     request(`/messages/${messageId}/reactions`, { method: "POST", body: JSON.stringify({ emoji }) }),
   getReactions: (messageId: string) =>
     request<any[]>(`/messages/${messageId}/reactions`),
+  getBatchReactions: (messageIds: string[]) =>
+    request<Record<string, Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>>>(
+      "/messages/reactions/batch",
+      { method: "POST", body: JSON.stringify({ messageIds }) },
+    ),
   unreadCount: () => request<{ unread: number; friendRequests: number }>("/unread-count"),
   settings: () => request<{
     chat_media_enabled: boolean;

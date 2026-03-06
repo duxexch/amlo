@@ -8,12 +8,14 @@ import { Search, Trash2, Eye, MessageSquare, RefreshCw } from "lucide-react";
 import { adminChatManagement } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import { LoadingSkeleton, EmptyState, PaginationNav, useConfirmDialog, useDebouncedValue, formatDate, formatTime } from "./AdminChatShared";
+import { toast } from "sonner";
 import type { AdminConversation, AdminMessage, Pagination } from "../../chat/chatTypes";
 
 export function ConversationsTab() {
   const { t } = useTranslation();
   const [convs, setConvs] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 400);
   const [page, setPage] = useState(1);
@@ -25,12 +27,17 @@ export function ConversationsTab() {
 
   const loadConvs = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     adminChatManagement.getConversations(page, 20, debouncedSearch)
       .then(res => {
         if (res.success) { setConvs(res.data); setPagination(res.pagination ?? null); }
       })
+      .catch(() => {
+        setLoadError(t("admin.chatManagement.loadConversationsFailed", "فشل تحميل المحادثات"));
+        toast.error(t("admin.chatManagement.loadConversationsFailed", "فشل تحميل المحادثات"));
+      })
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch]);
+  }, [page, debouncedSearch, t]);
 
   useEffect(() => { loadConvs(); }, [loadConvs]);
 
@@ -39,15 +46,21 @@ export function ConversationsTab() {
     setMsgLoading(true);
     adminChatManagement.getConversationMessages(id)
       .then(res => { if (res.success) setMessages(res.data); })
+      .catch(() => toast.error(t("admin.chatManagement.loadMessagesFailed", "فشل تحميل الرسائل")))
       .finally(() => setMsgLoading(false));
   };
 
   const deleteConv = async (id: string) => {
     const ok = await confirm(t("admin.chatManagement.confirmDelete"), t("admin.chatManagement.deleteConversationDesc", "سيتم حذف المحادثة وجميع رسائلها نهائياً"));
     if (!ok) return;
-    await adminChatManagement.deleteConversation(id);
-    setConvs(prev => prev.filter(c => c.id !== id));
-    if (selectedConv === id) { setSelectedConv(null); setMessages([]); }
+    try {
+      await adminChatManagement.deleteConversation(id);
+      setConvs(prev => prev.filter(c => c.id !== id));
+      if (selectedConv === id) { setSelectedConv(null); setMessages([]); }
+      toast.success(t("admin.chatManagement.deleteConversationSuccess", "تم حذف المحادثة"));
+    } catch {
+      toast.error(t("admin.chatManagement.deleteConversationFailed", "فشل حذف المحادثة"));
+    }
   };
 
   return (
@@ -69,6 +82,15 @@ export function ConversationsTab() {
           <RefreshCw className="w-4 h-4 text-white/60" />
         </button>
       </div>
+
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+          <span className="text-red-300 text-sm">{loadError}</span>
+          <button onClick={loadConvs} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200">
+            {t("common.retry", "إعادة المحاولة")}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Conversations List */}
@@ -159,7 +181,20 @@ export function ConversationsTab() {
                     <p className="text-white/60 text-sm mt-1">{msg.isDeleted ? <span className="italic text-red-400/50">({t("admin.chatManagement.deleted")})</span> : msg.content}</p>
                   </div>
                   <button
-                    onClick={() => { adminChatManagement.deleteMessage(msg.id); setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, isDeleted: true } : m)); }}
+                    onClick={async () => {
+                      const ok = await confirm(
+                        t("admin.chatManagement.confirmDeleteMessage", "حذف الرسالة؟"),
+                        t("admin.chatManagement.deleteMessageDesc", "سيتم حذف هذه الرسالة نهائياً")
+                      );
+                      if (!ok) return;
+                      try {
+                        await adminChatManagement.deleteMessage(msg.id);
+                        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, isDeleted: true } : m));
+                        toast.success(t("admin.chatManagement.deleteSuccess", "تم حذف الرسالة"));
+                      } catch {
+                        toast.error(t("admin.chatManagement.deleteFailed", "فشل حذف الرسالة"));
+                      }
+                    }}
                     className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 rounded transition-all"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-red-400" />

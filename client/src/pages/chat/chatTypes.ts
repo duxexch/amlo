@@ -38,6 +38,10 @@ export interface ChatMessage {
   replyToSenderName?: string | null;
   /** Optimistic send marker */
   _pending?: boolean;
+  /** Failed send marker (for retry) */
+  _failed?: boolean;
+  /** Delivery confirmation */
+  _delivered?: boolean;
 }
 
 // ── Conversation types ──
@@ -45,6 +49,7 @@ export interface Conversation {
   id: string;
   otherUser?: ChatUser;
   isOnline?: boolean;
+  lastSeen?: string | null;
   unreadCount: number;
   lastMessage?: ChatMessage | null;
   lastMessageAt?: string | null;
@@ -251,6 +256,69 @@ export interface StreamStats {
   totalRevenueToday: number;
   peakConcurrent: number;
   topCategories: { name: string; count: number; viewers: number }[];
+}
+
+export interface StreamTelemetry {
+  joins: number;
+  leaves: number;
+  chatMessages: number;
+  chatMutedBlocked: number;
+  chatBannedWordBlocked: number;
+  giftsRateLimited: number;
+  giftsSocketRejected: number;
+  speakerInvites: number;
+  speakerAccepts: number;
+  speakerRejects: number;
+  timestamp: string;
+}
+
+export interface StreamAlertConfig {
+  giftsRateLimited: number;
+  chatBannedWordBlocked: number;
+  chatMutedBlocked: number;
+  giftsSocketRejected: number;
+  joinImbalanceOffset: number;
+  cooldownMinutes: number;
+}
+
+export interface StreamAlertItem {
+  id: string;
+  level: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  value: number;
+  threshold: number;
+}
+
+export interface StreamAlertHistoryEntry {
+  id: string;
+  level: "high" | "medium" | "low";
+  title: string;
+  lastDetail: string;
+  hits: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  isActive: boolean;
+}
+
+export interface StreamAlertStatus {
+  activeAlerts: StreamAlertItem[];
+  history: StreamAlertHistoryEntry[];
+  summary?: {
+    total: number;
+    active: number;
+    resolved: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  generatedAt: string;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface MessageReport {

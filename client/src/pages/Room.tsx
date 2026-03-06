@@ -9,6 +9,7 @@ import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 import { walletApi, giftsApi, followApi, streamsApi } from "@/lib/socialApi";
 import { livekitStreamManager, type StreamState } from "@/lib/livekitStreamManager";
+import { toast } from "sonner";
 
 interface ChatMessage {
   id: number;
@@ -356,17 +357,25 @@ export function Room() {
       }]);
     };
 
+    const handleStreamForceEnded = (data: any) => {
+      if (String(data?.streamId || "") !== String(roomId)) return;
+      toast.error(tRef.current("live.streamEndedByAdmin", "تم إنهاء البث من الإدارة"));
+      setLocation("/live");
+    };
+
     socket.on('chat-message', handleChatMessage);
     socket.on('viewer-count', handleViewerCount);
     socket.on('gift-received', handleGiftReceived);
+    socket.on('stream-force-ended', handleStreamForceEnded);
 
     return () => {
       socket.emit('leave-room', roomId);
       socket.off('chat-message', handleChatMessage);
       socket.off('viewer-count', handleViewerCount);
       socket.off('gift-received', handleGiftReceived);
+      socket.off('stream-force-ended', handleStreamForceEnded);
     };
-  }, [roomId]);
+  }, [roomId, setLocation]);
 
   const addHeart = () => {
     const id = Date.now();
@@ -569,13 +578,14 @@ export function Room() {
         {/* Mic toggle — Real LiveKit control */}
         <button 
           onClick={async () => {
+            if (!isHost) return;
             try {
               const isMuted = await livekitStreamManager.toggleMicrophone();
               setMicOn(!isMuted);
             } catch { setMicOn(m => !m); }
           }}
           aria-label={micOn ? t("room.micOff", "إيقاف المايك") : t("room.micOn", "تشغيل المايك")}
-          className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
+          className={`flex flex-col items-center gap-1 active:scale-90 transition-transform ${!isHost ? 'opacity-30 pointer-events-none' : ''}`}
         >
           <div className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${micOn ? 'bg-black/30 border-white/10 text-white' : 'bg-destructive/50 border-destructive/40 text-white'}`}>
             {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
@@ -694,8 +704,6 @@ export function Room() {
                       try {
                         const res = await giftsApi.send({ giftId: gift.id, receiverId, streamId: roomId });
                         if (res?.newBalance !== undefined) setCoinBalance(res.newBalance);
-                        // Broadcast via socket so everyone sees it
-                        socketManager.emit('send-gift', { roomId, gift: { id: gift.id, name: gift.name || gift.nameAr, price: gift.price }, sender: { id: 'me', name: t("room.you", "أنت") } });
                       } catch {
                         // Insufficient balance or error — silently handled
                       }

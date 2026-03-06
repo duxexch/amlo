@@ -10,6 +10,7 @@ import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 import { streamsApi, walletApi, giftsApi, translateApi } from "@/lib/socialApi";
 import { authApi } from "@/lib/authApi";
 import { livekitStreamManager, type StreamState, type StreamRole } from "@/lib/livekitStreamManager";
+import { toast } from "sonner";
 
 // Stream categories
 const STREAM_CATEGORIES = ["chat", "gaming", "music", "education", "sports", "cooking", "art", "other"] as const;
@@ -284,6 +285,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   // Determine if current user is host + connect LiveKit audio
   useEffect(() => {
     let cancelled = false;
+    let joinedAsViewer = false;
 
     const initLiveKit = async () => {
       try {
@@ -294,6 +296,12 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
         const hostMode = !!(userId && stream.userId && userId === stream.userId);
         setIsHost(hostMode);
+
+        // Keep DB viewer metrics in sync for non-host audience.
+        if (!hostMode) {
+          joinedAsViewer = true;
+          streamsApi.join(stream.id).catch(() => {});
+        }
 
         // Fetch LiveKit token
         setLkState('connecting');
@@ -333,6 +341,9 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
 
     return () => {
       cancelled = true;
+      if (joinedAsViewer) {
+        streamsApi.leave(stream.id).catch(() => {});
+      }
       livekitStreamManager.disconnect();
     };
   }, [stream.id, stream.userId]);
@@ -415,6 +426,12 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       if (data?.streamId === roomId) setActivePoll(data.poll || null);
     };
 
+    const handleStreamForceEnded = (data: any) => {
+      if (String(data?.streamId || "") !== String(roomId)) return;
+      toast.error(t("live.streamEndedByAdmin", "تم إنهاء البث من الإدارة"));
+      onClose();
+    };
+
     socket.on('chat-message', handleChatMessage);
     socket.on('speaker-joined', handleSpeakerJoined);
     socket.on('speaker-removed', handleSpeakerRemoved);
@@ -423,6 +440,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     socket.on('gift-received', handleGiftReceived);
     socket.on('stream-pinned', handlePinned);
     socket.on('stream-poll-update', handlePollUpdate);
+    socket.on('stream-force-ended', handleStreamForceEnded);
 
     return () => {
       socket.emit('leave-room', roomId);
@@ -434,8 +452,9 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       socket.off('gift-received', handleGiftReceived);
       socket.off('stream-pinned', handlePinned);
       socket.off('stream-poll-update', handlePollUpdate);
+      socket.off('stream-force-ended', handleStreamForceEnded);
     };
-  }, []);
+  }, [onClose, stream.id, t]);
 
   // Fetch viewers when invite modal opens
   useEffect(() => {
@@ -1386,6 +1405,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   // Initialize LiveKit video connection
   useEffect(() => {
     let cancelled = false;
+    let joinedAsViewer = false;
     const init = async () => {
       try {
         const res = await authApi.me();
@@ -1395,6 +1415,12 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
         const hostMode = !!(userId && stream.userId && userId === stream.userId);
         setIsHost(hostMode);
+
+        // Keep DB viewer metrics in sync for non-host audience.
+        if (!hostMode) {
+          joinedAsViewer = true;
+          streamsApi.join(stream.id).catch(() => {});
+        }
 
         setLkState('connecting');
         const tokenRes = await streamsApi.token(stream.id);
@@ -1426,7 +1452,13 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     streamsApi.detail(stream.id).then((d: any) => { if (d?.pinnedMessage) setPinnedMessage(d.pinnedMessage); }).catch(() => {});
     streamsApi.getActivePoll(stream.id).then((p: any) => { if (p?.id) setActivePoll(p); }).catch(() => {});
 
-    return () => { cancelled = true; livekitStreamManager.disconnect(); };
+    return () => {
+      cancelled = true;
+      if (joinedAsViewer) {
+        streamsApi.leave(stream.id).catch(() => {});
+      }
+      livekitStreamManager.disconnect();
+    };
   }, [stream.id, stream.userId]);
 
   // Socket events
@@ -1459,10 +1491,17 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       if (data?.streamId === stream.id) setActivePoll(data.poll || null);
     };
 
+    const handleStreamForceEnded = (data: any) => {
+      if (String(data?.streamId || "") !== String(stream.id)) return;
+      toast.error(t("live.streamEndedByAdmin", "تم إنهاء البث من الإدارة"));
+      onClose();
+    };
+
     socket.on('chat-message', handleChat);
     socket.on('gift-received', handleGiftReceived);
     socket.on('stream-pinned', handlePinned);
     socket.on('stream-poll-update', handlePollUpdate);
+    socket.on('stream-force-ended', handleStreamForceEnded);
 
     return () => {
       socket.emit('leave-room', stream.id);
@@ -1470,8 +1509,9 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       socket.off('gift-received', handleGiftReceived);
       socket.off('stream-pinned', handlePinned);
       socket.off('stream-poll-update', handlePollUpdate);
+      socket.off('stream-force-ended', handleStreamForceEnded);
     };
-  }, []);
+  }, [onClose, stream.id, t]);
 
   const handleSend = () => {
     if (!inputValue.trim()) return;

@@ -21,7 +21,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60 * 1000, // 5 minutes — don't re-fetch on every mount
     retry: false,
   });
-  const isLoggedIn = authUser !== undefined ? !!authUser : null;
+  const isLoggedIn = Boolean(authUser);
 
   // Only fetch download visibility once
   useEffect(() => {
@@ -108,10 +108,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
              {showDownload && (
                <Link href="/download"><button className="w-10 h-10 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center hover:bg-green-500/20 transition-all" aria-label={t("nav.download")}><Download className="w-5 h-5 text-green-400" /></button></Link>
              )}
-             {isLoggedIn === false && (
+             {!isLoggedIn && (
                <Link href="/auth"><button className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-sm font-bold border border-primary/20 flex items-center gap-1.5" aria-label={t("common.login")}><LogIn className="w-4 h-4" />{t("common.login")}</button></Link>
              )}
-             {isLoggedIn === true && (
+             {isLoggedIn && (
                <Link href="/profile"><button className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center hover:bg-primary/20 transition-all" aria-label={t("nav.profile")}><User className="w-5 h-5 text-primary" /></button></Link>
              )}
            </div>

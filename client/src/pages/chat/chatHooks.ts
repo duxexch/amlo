@@ -13,9 +13,9 @@ import type {
   ChatBlockedPayload, ReportCategory,
 } from "./chatTypes";
 
-// ── Typing throttle: client-side (complementary to server-side throttle) ──
+// ── Typing throttle: per-conversation (fixes shared global state issue) ──
 const TYPING_THROTTLE_MS = 2500;
-let lastTypingEmit = 0;
+const lastTypingEmitMap = new Map<string, number>();
 
 // ── Notification sound ──
 let notifAudio: HTMLAudioElement | null = null;
@@ -30,12 +30,19 @@ function playNotificationSound() {
   } catch {}
 }
 
+function revokeBlobUrlIfNeeded(url?: string | null) {
+  if (url && url.startsWith("blob:")) {
+    try { URL.revokeObjectURL(url); } catch {}
+  }
+}
+
 /** Hook: Manage conversations list + settings */
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [settings, setSettings] = useState<ChatSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [typingConvIds, setTypingConvIds] = useState<Set<string>>(new Set());
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     const load = async () => {
@@ -61,15 +68,24 @@ export function useConversations() {
     const s = getSocket();
     const onTyping = (data: TypingPayload) => {
       setTypingConvIds(prev => new Set(prev).add(data.conversationId));
-      setTimeout(() => {
+      const existing = typingTimeoutsRef.current.get(data.conversationId);
+      if (existing) clearTimeout(existing);
+      const timeout = setTimeout(() => {
         setTypingConvIds(prev => {
           const next = new Set(prev);
           next.delete(data.conversationId);
           return next;
         });
-      }, 3000);
+        typingTimeoutsRef.current.delete(data.conversationId);
+      }, 4000);
+      typingTimeoutsRef.current.set(data.conversationId, timeout);
     };
     const onStopTyping = (data: TypingPayload) => {
+      const existing = typingTimeoutsRef.current.get(data.conversationId);
+      if (existing) {
+        clearTimeout(existing);
+        typingTimeoutsRef.current.delete(data.conversationId);
+      }
       setTypingConvIds(prev => {
         const next = new Set(prev);
         next.delete(data.conversationId);
@@ -78,7 +94,12 @@ export function useConversations() {
     };
     s.on("typing", onTyping);
     s.on("stop-typing", onStopTyping);
-    return () => { s.off("typing", onTyping); s.off("stop-typing", onStopTyping); };
+    return () => {
+      s.off("typing", onTyping);
+      s.off("stop-typing", onStopTyping);
+      typingTimeoutsRef.current.forEach(t => clearTimeout(t));
+      typingTimeoutsRef.current.clear();
+    };
   }, []);
 
   const totalUnread = useMemo(() =>
@@ -112,9 +133,22 @@ export function useActiveChat(
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showNewMsgIndicator, setShowNewMsgIndicator] = useState(false);
+  const [reactionVersion, setReactionVersion] = useState(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Revoke any leftover local blob URLs on unmount.
+  useEffect(() => {
+    return () => {
+      for (const m of messagesRef.current) revokeBlobUrlIfNeeded(m.mediaUrl);
+    };
+  }, []);
 
   const isNearBottom = () => {
     const el = messagesContainerRef.current;
@@ -130,12 +164,27 @@ export function useActiveChat(
   const [typingConvIds, setTypingConvIds] = useState<Set<string>>(new Set());
   const typingTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  // Socket listeners
+  // Ref to avoid stale closures in socket handlers
+  const activeConvRef = useRef(activeConv);
+  activeConvRef.current = activeConv;
+
+  // Socket listeners — uses refs to avoid stale closures
   useEffect(() => {
     const s = getSocket();
 
     const handleNewMessage = (data: NewMessagePayload) => {
-      if (activeConv?.id === data.conversationId) {
+      const conv = activeConvRef.current;
+
+      // Acknowledge delivery to the sender
+      if (data.message.senderId !== "me") {
+        s.emit("message-delivered", {
+          messageId: data.message.id,
+          conversationId: data.conversationId,
+          senderId: data.message.senderId,
+        });
+      }
+
+      if (conv?.id === data.conversationId) {
         setMessages(prev => {
           if (prev.some(m => m.id === data.message.id)) return prev;
           return [...prev, data.message];
@@ -147,7 +196,7 @@ export function useActiveChat(
         }
         s.emit("messages-read", {
           conversationId: data.conversationId,
-          receiverId: activeConv.otherUser?.id,
+          receiverId: conv.otherUser?.id,
         });
       } else {
         // Play sound for messages in other conversations
@@ -161,7 +210,7 @@ export function useActiveChat(
               ...c,
               lastMessage: data.message,
               lastMessageAt: data.message.createdAt,
-              unreadCount: activeConv?.id === data.conversationId ? 0 : (c.unreadCount || 0) + 1,
+              unreadCount: activeConvRef.current?.id === data.conversationId ? 0 : (c.unreadCount || 0) + 1,
             };
           }
           return c;
@@ -170,10 +219,8 @@ export function useActiveChat(
     };
 
     const handleTyping = (data: TypingPayload) => {
-      if (data.conversationId === activeConv?.id) setIsTyping(true);
-      // Show typing in conversation list
+      if (data.conversationId === activeConvRef.current?.id) setIsTyping(true);
       setTypingConvIds(prev => new Set(prev).add(data.conversationId));
-      // Auto-clear typing after 4s
       const existing = typingTimeouts.current.get(data.conversationId);
       if (existing) clearTimeout(existing);
       typingTimeouts.current.set(data.conversationId, setTimeout(() => {
@@ -182,12 +229,12 @@ export function useActiveChat(
           next.delete(data.conversationId);
           return next;
         });
-        if (data.conversationId === activeConv?.id) setIsTyping(false);
+        if (data.conversationId === activeConvRef.current?.id) setIsTyping(false);
       }, 4000));
     };
 
     const handleStopTyping = (data: { conversationId: string }) => {
-      if (data.conversationId === activeConv?.id) setIsTyping(false);
+      if (data.conversationId === activeConvRef.current?.id) setIsTyping(false);
       setTypingConvIds(prev => {
         const next = new Set(prev);
         next.delete(data.conversationId);
@@ -196,21 +243,42 @@ export function useActiveChat(
     };
 
     const handleMessagesRead = (data: MessagesReadPayload) => {
-      if (data.conversationId === activeConv?.id) {
+      if (data.conversationId === activeConvRef.current?.id) {
         setMessages(prev => prev.map(m => ({ ...m, isRead: true })));
       }
     };
 
     const handleChatBlocked = (data: ChatBlockedPayload) => {
-      if (activeConv?.otherUser?.id === data.blockerId) {
+      if (activeConvRef.current?.otherUser?.id === data.blockerId) {
         setBlockStatus({ isBlocked: true, blockedByThem: true, blockedByMe: false });
       }
     };
 
     const handleMessageDeleted = (data: { messageId: string; conversationId: string }) => {
-      if (activeConv?.id === data.conversationId) {
+      if (activeConvRef.current?.id === data.conversationId) {
         setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, isDeleted: true, content: null } : m));
       }
+    };
+
+    const handleMessageDelivered = (data: { messageId: string; conversationId: string }) => {
+      if (activeConvRef.current?.id === data.conversationId) {
+        setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, _delivered: true } : m));
+      }
+    };
+
+    const handleConversationDeleted = (data: { conversationId: string }) => {
+      if (activeConvRef.current?.id === data.conversationId) {
+        setView("list");
+        setActiveConv(null);
+        setMessages([]);
+        setBlockStatus(null);
+        setShowBlockMenu(false);
+        setReplyTo(null);
+        setMsgSearch("");
+        setShowMsgSearch(false);
+        setIsTyping(false);
+      }
+      setConversations(prev => prev.filter(c => c.id !== data.conversationId));
     };
 
     s.on("new-message", handleNewMessage);
@@ -219,6 +287,13 @@ export function useActiveChat(
     s.on("messages-read", handleMessagesRead);
     s.on("chat-blocked", handleChatBlocked);
     s.on("message-deleted", handleMessageDeleted);
+    s.on("message-delivered", handleMessageDelivered);
+    s.on("conversation-deleted", handleConversationDeleted);
+
+    const handleReactionUpdated = () => {
+      setReactionVersion(v => v + 1);
+    };
+    s.on("reaction-updated", handleReactionUpdated);
 
     return () => {
       s.off("new-message", handleNewMessage);
@@ -227,8 +302,12 @@ export function useActiveChat(
       s.off("messages-read", handleMessagesRead);
       s.off("chat-blocked", handleChatBlocked);
       s.off("message-deleted", handleMessageDeleted);
+      s.off("message-delivered", handleMessageDelivered);
+      s.off("conversation-deleted", handleConversationDeleted);
+      s.off("reaction-updated", handleReactionUpdated);
     };
-  }, [activeConv, setConversations]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setConversations]);
 
   const openConversation = async (conv: Conversation) => {
     setActiveConv(conv);
@@ -288,6 +367,7 @@ export function useActiveChat(
   }, [activeConv, msgPage, loadingMore, hasMoreMessages]);
 
   const goBack = () => {
+    for (const m of messagesRef.current) revokeBlobUrlIfNeeded(m.mediaUrl);
     setView("list");
     setActiveConv(null);
     setMessages([]);
@@ -296,9 +376,11 @@ export function useActiveChat(
     setReplyTo(null);
     setMsgSearch("");
     setShowMsgSearch(false);
+    // Cleanup per-conversation typing throttle entries
+    lastTypingEmitMap.clear();
   };
 
-  const sendMessage = useCallback(async (t: (key: string, fallback?: string) => string) => {
+  const sendMessage = useCallback(async (t: any) => {
     if (!newMessage.trim() || !activeConv || sendingMsg) return;
     if (blockStatus?.isBlocked) return;
 
@@ -349,7 +431,8 @@ export function useActiveChat(
         )
       );
     } catch (err: any) {
-      setMessages(prev => prev.filter(m => m.id !== tempId));
+      // Mark as failed instead of removing (allows retry)
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
       if (err.status === 402) {
         toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
       } else if (err.status === 403) {
@@ -361,7 +444,7 @@ export function useActiveChat(
   }, [newMessage, activeConv, sendingMsg, blockStatus, replyTo, setConversations]);
 
   /** Send a media message (image or voice) */
-  const sendMedia = useCallback(async (file: File | Blob, type: "image" | "voice", t: (key: string, fallback?: string) => string) => {
+  const sendMedia = useCallback(async (file: File | Blob, type: "image" | "voice", t: any) => {
     if (!activeConv || sendingMsg) return;
     if (blockStatus?.isBlocked) return;
 
@@ -399,6 +482,7 @@ export function useActiveChat(
       setMessages(prev =>
         prev.map(m => m.id === tempId ? { ...sentMsg, senderId: "me", _pending: false } : m)
       );
+      revokeBlobUrlIfNeeded(localUrl);
 
       setConversations(prev =>
         prev.map(c => c.id === activeConv.id
@@ -407,8 +491,8 @@ export function useActiveChat(
         )
       );
     } catch (err: any) {
-      setMessages(prev => prev.filter(m => m.id !== tempId));
-      URL.revokeObjectURL(localUrl);
+      // Mark as failed instead of removing (allows retry) — keep blob URL alive for retry
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
       if (err.status === 402) {
         toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
       } else {
@@ -419,13 +503,59 @@ export function useActiveChat(
     }
   }, [activeConv, sendingMsg, blockStatus, setConversations]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /** Retry a failed message — directly calls API instead of relying on setState */
+  const retryMessage = useCallback(async (failedMsg: ChatMessage, t: any) => {
+    if (!activeConv || sendingMsg) return;
+
+    // Mark as pending (retrying)
+    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _failed: false, _pending: true } : m));
+
+    if (failedMsg.type === "text" && failedMsg.content) {
+      try {
+        setSendingMsg(true);
+        const sentMsg = await chatApi.sendMessage(activeConv.id, {
+          content: failedMsg.content,
+          type: "text",
+          ...(failedMsg.replyToId ? { replyToId: failedMsg.replyToId } : {}),
+        }) as any;
+        setMessages(prev =>
+          prev.map(m => m.id === failedMsg.id ? { ...sentMsg, senderId: "me", _pending: false } : m)
+        );
+        setConversations(prev =>
+          prev.map(c => c.id === activeConv.id
+            ? { ...c, lastMessage: { ...sentMsg, content: failedMsg.content }, lastMessageAt: sentMsg.createdAt }
+            : c
+          )
+        );
+      } catch (err: any) {
+        setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _pending: false, _failed: true } : m));
+        if (err.status === 402) toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
+      } finally {
+        setSendingMsg(false);
+      }
+    } else if ((failedMsg.type === "image" || failedMsg.type === "voice") && failedMsg.mediaUrl) {
+      try {
+        const resp = await fetch(failedMsg.mediaUrl);
+        const blob = await resp.blob();
+        // Remove failed and re-send via sendMedia
+        setMessages(prev => prev.filter(m => m.id !== failedMsg.id));
+        revokeBlobUrlIfNeeded(failedMsg.mediaUrl);
+        sendMedia(blob, failedMsg.type, t);
+      } catch {
+        setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _pending: false, _failed: true } : m));
+        toast.error(t("chat.retryFailed", "فشل في إعادة المحاولة"));
+      }
+    }
+  }, [activeConv, sendingMsg, sendMedia, setConversations]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setNewMessage(e.target.value);
     if (!activeConv) return;
 
     const now = Date.now();
-    if (now - lastTypingEmit >= TYPING_THROTTLE_MS) {
-      lastTypingEmit = now;
+    const lastEmit = lastTypingEmitMap.get(activeConv.id) || 0;
+    if (now - lastEmit >= TYPING_THROTTLE_MS) {
+      lastTypingEmitMap.set(activeConv.id, now);
       socketManager.emitVolatile("typing", {
         conversationId: activeConv.id,
         receiverId: activeConv.otherUser?.id,
@@ -457,14 +587,21 @@ export function useActiveChat(
     }
   };
 
-  const handleReport = async (category: string, reason: string) => {
-    // This will be called with reportTarget set externally
-  };
-
-  const deleteMyMessage = useCallback(async (msgId: string) => {
+  const deleteMyMessage = useCallback(async (msgId: string, mode: "forMe" | "forEveryone" = "forEveryone") => {
     try {
-      await chatApi.deleteMessage(msgId);
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isDeleted: true, content: null } : m));
+      await chatApi.deleteMessage(msgId, mode);
+      if (mode === "forMe") {
+        // Just remove from local view
+        let removedMediaUrl: string | null | undefined;
+        setMessages(prev => {
+          const target = prev.find(m => m.id === msgId);
+          removedMediaUrl = target?.mediaUrl;
+          return prev.filter(m => m.id !== msgId);
+        });
+        revokeBlobUrlIfNeeded(removedMediaUrl);
+      } else {
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isDeleted: true, content: null } : m));
+      }
     } catch (err) {
       toast.error("فشل في حذف الرسالة");
     }
@@ -488,7 +625,7 @@ export function useActiveChat(
     showBlockMenu, setShowBlockMenu,
     replyTo, setReplyTo,
     messagesEndRef, messagesTopRef, messagesContainerRef, inputRef,
-    openConversation, goBack, sendMessage, sendMedia, handleInputChange, handleToggleBlock,
+    openConversation, goBack, sendMessage, sendMedia, retryMessage, handleInputChange, handleToggleBlock,
     deleteMyMessage,
     typingConvIds,
     showNewMsgIndicator, scrollToBottom,
@@ -496,6 +633,8 @@ export function useActiveChat(
     loadOlderMessages, hasMoreMessages, loadingMore,
     // In-conversation search
     msgSearch, setMsgSearch, showMsgSearch, setShowMsgSearch, filteredMessages,
+    // Reaction version (incremented on socket reaction-updated events)
+    reactionVersion,
   };
 }
 
@@ -541,7 +680,7 @@ export function useMessageTranslation(content: string | null, i18nLang: string) 
       setTranslatedText(result.translatedText);
       setShowTranslation(true);
     } catch {
-      // silently fail
+      toast.error("فشل في الترجمة");
     } finally {
       setIsTranslating(false);
     }

@@ -148,6 +148,53 @@ export async function getOnlineUserIds(): Promise<string[]> {
   return Array.from(localMap.keys());
 }
 
+// ── Last Seen tracking (Redis-backed) ──
+const LAST_SEEN_PREFIX = "ablox:last_seen:";
+const LAST_SEEN_TTL = 30 * 24 * 3600; // 30 days
+
+/** Store when user was last online */
+export async function setLastSeen(userId: string): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(`${LAST_SEEN_PREFIX}${userId}`, Date.now().toString(), "EX", LAST_SEEN_TTL);
+    } catch (err) {
+      onlineLog.warn(`Redis setLastSeen failed for ${userId}: ${err}`);
+    }
+  }
+}
+
+/** Get when user was last online (returns ISO string or null) */
+export async function getLastSeen(userId: string): Promise<string | null> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const ts = await redis.get(`${LAST_SEEN_PREFIX}${userId}`);
+      if (ts) return new Date(parseInt(ts, 10)).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Batch get last seen for multiple users */
+export async function getLastSeenBatch(userIds: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (userIds.length === 0) return result;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const keys = userIds.map(id => `${LAST_SEEN_PREFIX}${id}`);
+      const values = await redis.mget(...keys);
+      for (let i = 0; i < userIds.length; i++) {
+        if (values[i]) result.set(userIds[i], new Date(parseInt(values[i]!, 10)).toISOString());
+      }
+    } catch { /* ignore */ }
+  }
+  return result;
+}
+
 // ── Cleanup ──
 let _cleanupTimer: ReturnType<typeof setInterval> | null = null;
 

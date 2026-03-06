@@ -23,6 +23,19 @@ import type { ChatMessage, Conversation, ChatSettings } from "./chatTypes";
 import { chatApi } from "@/lib/socialApi";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
+import { toast } from "sonner";
+
+// ── Date label helper ──
+function formatDateLabel(dateStr: string, t: any): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = (today.getTime() - msgDay.getTime()) / 86400000;
+  if (diff === 0) return t("chat.today", "اليوم");
+  if (diff === 1) return t("chat.yesterday", "الأمس");
+  return d.toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+}
 
 // ── Common emojis ──
 const EMOJI_CATEGORIES = [
@@ -36,65 +49,112 @@ const EMOJI_CATEGORIES = [
 
 // ── Message Bubble with full context menu ──
 const MessageBubble = memo(function MessageBubble({
-  msg, isMe, showAvatar, otherUser, onReport, onReply, onDelete, lang,
+  msg, isMe, showAvatar, otherUser, onReport, onReply, onDelete, onDeleteForMe, onRetry, onOpenImage, lang,
+  batchReactions,
 }: {
   msg: ChatMessage; isMe: boolean; showAvatar: boolean; otherUser: any;
   onReport: (msg: ChatMessage) => void; onReply: (msg: ChatMessage) => void;
-  onDelete: (msgId: string) => void; lang: string;
+  onDelete: (msgId: string) => void; onDeleteForMe: (msgId: string) => void;
+  onOpenImage: (url: string) => void;
+  onRetry?: (msg: ChatMessage) => void; lang: string;
+  batchReactions?: Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>;
 }) {
   const { t, i18n } = useTranslation();
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
-  const [reactions, setReactions] = useState<Array<{ emoji: string; userId: string; username?: string }>>([]);
-  const [myReaction, setMyReaction] = useState<string | null>(null);
+  const [reactions, setReactions] = useState<Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>>(batchReactions || []);
+  const [myReaction, setMyReaction] = useState<string | null>(() => {
+    const mine = batchReactions?.find(r => r.userId === "me" || r.isMine);
+    return mine?.emoji || null;
+  });
   const { translatedText, isTranslating, showTranslation, handleTranslate } = useMessageTranslation(msg.content, i18n.language);
   const [swipeX, setSwipeX] = useState(0);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Load reactions from API on mount
+  // Update reactions when batch data changes
   useEffect(() => {
-    if (msg.isDeleted || msg.id.startsWith("temp-")) return;
-    chatApi.getReactions(msg.id).then((res: any) => {
-      const data = res?.data || res || [];
-      if (Array.isArray(data)) {
-        setReactions(data);
-        const mine = data.find((r: any) => r.userId === "me" || r.isMine);
-        if (mine) setMyReaction(mine.emoji);
-      }
-    }).catch(() => {});
-  }, [msg.id, msg.isDeleted]);
+    if (batchReactions) {
+      setReactions(batchReactions);
+      const mine = batchReactions.find(r => r.userId === "me" || r.isMine);
+      setMyReaction(mine?.emoji || null);
+    }
+  }, [batchReactions]);
+
+  // Click-outside to close context menu
+  useEffect(() => {
+    if (!showMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showMenu]);
 
   if (msg.isDeleted) {
     return (
       <div className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
         <div className="w-7 h-7 shrink-0 invisible" />
-        <div className="rounded-2xl px-4 py-2.5 bg-white/5 border border-white/5">
-          <p className="text-white/30 text-sm italic">{t("chat.messageDeleted", "تم حذف الرسالة")}</p>
+        <div className="rounded-2xl px-4 py-2.5 bg-white/[0.03] border border-white/5">
+          <p className="text-white/25 text-xs italic flex items-center gap-1.5">
+            <Ban className="w-3 h-3" />
+            {t("chat.messageDeleted", "تم حذف هذه الرسالة")}
+          </p>
         </div>
       </div>
     );
   }
 
-  const handleCopy = () => {
-    if (msg.content) navigator.clipboard.writeText(msg.content);
-    setShowMenu(false);
+  // Failed message: show retry button
+  if (msg._failed) {
+    return (
+      <div className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+        <div className="w-7 h-7 shrink-0 invisible" />
+        <div className="rounded-2xl px-4 py-2.5 bg-red-500/10 border border-red-500/20">
+          <p className="text-sm text-white/60">{msg.content || (msg.type === "image" ? "📷" : "🎙️")}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-red-400">{t("chat.sendFailed", "فشل الإرسال")}</span>
+            {onRetry && (
+              <button onClick={() => onRetry(msg)} className="text-[10px] text-primary hover:underline">
+                {t("chat.retry", "إعادة المحاولة")}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleCopy = async () => {
+    if (!msg.content) return;
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      toast.success(t("chat.copied", "تم النسخ"));
+    } catch {
+      toast.error(t("chat.copyFailed", "فشل النسخ"));
+    } finally {
+      setShowMenu(false);
+    }
   };
 
   const handleReaction = async (emoji: string) => {
     setShowReactions(false);
     const prevReaction = myReaction;
+    const prevReactions = reactions;
     // Optimistic update
     if (myReaction === emoji) {
       setMyReaction(null);
       setReactions(prev => prev.filter(r => !(r.emoji === emoji && (r.userId === "me" || r.isMine))));
     } else {
       setMyReaction(emoji);
-      setReactions(prev => [...prev.filter(r => !(r.userId === "me" || r.isMine)), { emoji, userId: "me" }]);
+      setReactions(prev => [...prev.filter(r => !(r.userId === "me" || r.isMine)), { emoji, userId: "me", isMine: true }]);
     }
     try {
       await chatApi.toggleReaction(msg.id, emoji);
     } catch {
       setMyReaction(prevReaction); // revert on error
+      setReactions(prevReactions); // revert optimistic reactions list too
+      toast.error(t("chat.reactionFailed", "فشل تحديث التفاعل"));
     }
   };
 
@@ -157,7 +217,7 @@ const MessageBubble = memo(function MessageBubble({
           onContextMenu={e => { e.preventDefault(); setShowMenu(true); }}
         >
           {msg.type === "image" && msg.mediaUrl && (
-            <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2" />
+            <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2 cursor-zoom-in hover:opacity-90 transition-opacity" onClick={(e) => { e.stopPropagation(); onOpenImage(msg.mediaUrl!); }} />
           )}
           {msg.content && <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>}
           {showTranslation && translatedText && (
@@ -177,25 +237,36 @@ const MessageBubble = memo(function MessageBubble({
             )}
             <span className="text-[10px] opacity-50">{formatTime(new Date(msg.createdAt), lang)}</span>
             {msg.isEncrypted && <Lock className="w-2.5 h-2.5 opacity-30" />}
-            {isMe && (msg.isRead ? <CheckCheck className="w-3 h-3 opacity-70" /> : <Check className="w-3 h-3 opacity-40" />)}
+            {isMe && (
+              msg._pending
+                ? <Clock className="w-3 h-3 opacity-40 animate-pulse" />
+                : msg.isRead
+                  ? <CheckCheck className="w-3 h-3 text-blue-400 opacity-90" />
+                  : msg._delivered
+                    ? <CheckCheck className="w-3 h-3 opacity-50" />
+                    : <Check className="w-3 h-3 opacity-40" />
+            )}
           </div>
         </div>
 
         {/* Reaction badges */}
         {reactions.length > 0 && (
           <div className="absolute -bottom-3 start-2 flex gap-0.5">
-            {Object.entries(reactions.reduce((acc: Record<string, number>, r: any) => {
-              acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+            {Object.entries(reactions.reduce((acc: Record<string, { count: number; names: string[] }>, r: any) => {
+              if (!acc[r.emoji]) acc[r.emoji] = { count: 0, names: [] };
+              acc[r.emoji].count++;
+              acc[r.emoji].names.push(r.username || (r.isMine ? "أنت" : "مستخدم"));
               return acc;
-            }, {} as Record<string, number>)).map(([emoji, cnt]) => (
+            }, {} as Record<string, { count: number; names: string[] }>)).map(([emoji, data]) => (
               <button
                 key={emoji}
                 className={`bg-white/10 border rounded-full px-1.5 py-0.5 text-xs hover:scale-110 transition-transform ${
                   myReaction === emoji ? "border-primary/40 bg-primary/10" : "border-white/10"
                 }`}
                 onClick={() => handleReaction(emoji)}
+                title={(data as { count: number; names: string[] }).names.join("، ")}
               >
-                {emoji}{(cnt as number) > 1 && <span className="text-[9px] ml-0.5 text-white/50">{cnt as number}</span>}
+                {emoji}{(data as { count: number; names: string[] }).count > 1 && <span className="text-[9px] ml-0.5 text-white/50">{(data as { count: number; names: string[] }).count}</span>}
               </button>
             ))}
           </div>
@@ -213,11 +284,11 @@ const MessageBubble = memo(function MessageBubble({
         <AnimatePresence>
           {showMenu && (
             <motion.div
+              ref={menuRef}
               initial={{ opacity: 0, scale: 0.9, y: -5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
               className="absolute top-full left-0 rtl:left-auto rtl:right-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[160px]"
-              onMouseLeave={() => setShowMenu(false)}
             >
               <button onClick={() => { onReply(msg); setShowMenu(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/5 transition-colors">
@@ -234,9 +305,13 @@ const MessageBubble = memo(function MessageBubble({
               {isMe && (
                 <button onClick={() => { onDelete(msg.id); setShowMenu(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
-                  <Trash2 className="w-4 h-4" /> {t("chat.deleteMessage", "حذف")}
+                  <Trash2 className="w-4 h-4" /> {t("chat.deleteForAll", "حذف للجميع")}
                 </button>
               )}
+              <button onClick={() => { onDeleteForMe(msg.id); setShowMenu(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-orange-400 hover:bg-orange-500/10 transition-colors">
+                <Trash2 className="w-4 h-4" /> {t("chat.deleteForMe", "حذف لي فقط")}
+              </button>
               {!isMe && (
                 <button onClick={() => { onReport(msg); setShowMenu(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
@@ -334,7 +409,14 @@ function ReportModal({ msg, onClose, onSubmit }: { msg: ChatMessage; onClose: ()
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/50 font-medium text-sm hover:bg-white/10 transition-colors">
             {t("common.cancel", "إلغاء")}
           </button>
-          <button onClick={async () => { setLoading(true); await onSubmit(category, reason); setLoading(false); }}
+          <button onClick={async () => {
+            setLoading(true);
+            try {
+              await onSubmit(category, reason);
+            } finally {
+              setLoading(false);
+            }
+          }}
             disabled={loading}
             className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Flag className="w-4 h-4" />}
@@ -403,6 +485,60 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   const audioChunksRef = useRef<Blob[]>([]);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedMsgs, setSelectedMsgs] = useState<Set<string>>(new Set());
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const [reactionsMap, setReactionsMap] = useState<Record<string, Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>>>({});
+  const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Batch-fetch reactions when messages change — debounced to avoid excessive calls
+  useEffect(() => {
+    if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    reactionsTimerRef.current = setTimeout(() => {
+      const ids = chat.messages
+        .filter(m => !m.isDeleted && !m.id.startsWith("temp-"))
+        .map(m => m.id);
+      if (ids.length === 0) return;
+      chatApi.getBatchReactions(ids).then((res: any) => {
+        const data = res?.data || res || {};
+        if (typeof data === "object") setReactionsMap(data);
+      }).catch(() => {});
+    }, 300);
+    return () => { if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current); };
+  }, [chat.messages.length, chat.reactionVersion]);
+
+  // Cleanup audio recording on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      mediaRecorderRef.current?.stream?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  // Click-outside to close emoji picker
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showEmojiPicker]);
+
+  // ESC to close emoji picker & lightbox
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (lightboxUrl) setLightboxUrl(null);
+        else if (showEmojiPicker) setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [showEmojiPicker, lightboxUrl]);
 
   // Auto-open the initial conversation on mount
   useEffect(() => {
@@ -467,9 +603,16 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   };
 
   const handleBulkDelete = async () => {
+    if (!confirm(t("chat.confirmBulkDelete", `هل تريد حذف ${selectedMsgs.size} رسالة؟`))) return;
     const ids = Array.from(selectedMsgs);
-    for (const id of ids) {
-      try { await chat.deleteMyMessage(id); } catch {}
+    try {
+      await chatApi.bulkDelete(ids);
+      chat.setMessages((prev: ChatMessage[]) => prev.map(m => ids.includes(m.id) ? { ...m, isDeleted: true, content: null } : m));
+    } catch {
+      // Fallback to sequential delete
+      for (const id of ids) {
+        try { await chat.deleteMyMessage(id); } catch {}
+      }
     }
     setSelectedMsgs(new Set());
     setSelectMode(false);
@@ -515,7 +658,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
             </button>
             {chat.activeConv && (
               <>
-                <UserAvatar user={chat.activeConv.otherUser} size="sm" />
+                <UserAvatar user={chat.activeConv.otherUser ?? null} size="sm" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-white font-bold text-sm truncate">{chat.activeConv.otherUser?.displayName || chat.activeConv.otherUser?.username}</p>
@@ -525,7 +668,11 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                     {chat.isTyping ? (
                       <span className="text-primary animate-pulse">{t("social.typing", "يكتب...")}</span>
                     ) : (
-                      chat.activeConv.otherUser?.isOnline ? t("social.online", "متصل") : t("social.offline", "غير متصل")
+                      chat.activeConv.otherUser?.isOnline
+                        ? t("social.online", "متصل")
+                        : chat.activeConv.lastSeen
+                          ? `${t("social.lastSeen", "آخر ظهور")} ${formatTime(new Date(chat.activeConv.lastSeen), lang)}`
+                          : t("social.offline", "غير متصل")
                     )}
                   </p>
                 </div>
@@ -665,9 +812,23 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
             {displayMsgs.map((msg, i) => {
               const isMe = msg.senderId === "me" || !!(chat.activeConv?.otherUser && msg.senderId !== chat.activeConv.otherUser.id);
               const showAvatar = !displayMsgs[i - 1] || displayMsgs[i - 1].senderId !== msg.senderId;
+
+              // Date separator
+              const msgDate = new Date(msg.createdAt).toDateString();
+              const prevDate = i > 0 ? new Date(displayMsgs[i - 1].createdAt).toDateString() : null;
+              const showDateSep = i === 0 || msgDate !== prevDate;
+
               return (
-                <div key={msg.id} className={`flex items-center gap-2 ${selectMode ? "cursor-pointer" : ""}`}
-                  onClick={selectMode && isMe ? () => toggleSelectMsg(msg.id) : undefined}>
+                <div key={msg.id}>
+                  {showDateSep && (
+                    <div className="flex justify-center my-3">
+                      <span className="text-[10px] text-white/25 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+                        {formatDateLabel(msg.createdAt, t)}
+                      </span>
+                    </div>
+                  )}
+                  <div className={`flex items-center gap-2 ${selectMode ? "cursor-pointer" : ""}`}
+                    onClick={selectMode && isMe ? () => toggleSelectMsg(msg.id) : undefined}>
                   {selectMode && isMe && (
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
                       selectedMsgs.has(msg.id) ? "border-primary bg-primary" : "border-white/20"
@@ -683,10 +844,15 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                       otherUser={chat.activeConv?.otherUser}
                       onReport={m => setReportTarget(m)}
                       onReply={m => chat.setReplyTo(m)}
-                      onDelete={chat.deleteMyMessage}
+                      onDelete={id => chat.deleteMyMessage(id, "forEveryone")}
+                      onDeleteForMe={id => chat.deleteMyMessage(id, "forMe")}
+                      onRetry={m => chat.retryMessage(m, t)}
+                      onOpenImage={url => setLightboxUrl(url)}
                       lang={lang}
+                      batchReactions={reactionsMap[msg.id]}
                     />
                   </div>
+                </div>
                 </div>
               );
             })}
@@ -749,7 +915,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
             ) : (
               <div className="flex items-center gap-2">
                 {/* Emoji picker */}
-                <div className="relative">
+                <div className="relative" ref={emojiPickerRef}>
                   <button onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                     className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showEmojiPicker ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/30"}`}>
                     <Smile className="w-4.5 h-4.5" />
@@ -784,11 +950,13 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   </button>
                 )}
 
-                <input ref={chat.inputRef} type="text"
+                <textarea ref={chat.inputRef as React.RefObject<HTMLTextAreaElement>}
                   value={chat.newMessage} onChange={chat.handleInputChange} onKeyDown={handleKeyDown}
                   placeholder={t("social.typeMessage", "اكتب رسالة...")}
-                  className="flex-1 bg-white/5 border border-white/8 rounded-xl py-2.5 px-4 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/30 transition-all"
-                  disabled={chat.blockStatus?.isBlocked} />
+                  rows={1}
+                  className="flex-1 bg-white/5 border border-white/8 rounded-xl py-2.5 px-4 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/30 transition-all resize-none max-h-24 overflow-y-auto"
+                  disabled={chat.blockStatus?.isBlocked}
+                  onInput={(e) => { const el = e.currentTarget; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 96) + 'px'; }} />
 
                 <button onClick={() => chat.sendMessage(t)}
                   disabled={!chat.newMessage.trim() || chat.sendingMsg || chat.blockStatus?.isBlocked}
@@ -809,6 +977,32 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
       <AnimatePresence>
         {reportTarget && (
           <ReportModal msg={reportTarget} onClose={() => setReportTarget(null)} onSubmit={handleReport} />
+        )}
+      </AnimatePresence>
+
+      {/* Image Lightbox */}
+      <AnimatePresence>
+        {lightboxUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md cursor-pointer"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <motion.img
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              src={lightboxUrl}
+              alt=""
+              className="max-w-[90vw] max-h-[85vh] rounded-2xl object-contain shadow-2xl cursor-default"
+              onClick={e => e.stopPropagation()}
+            />
+            <button onClick={() => setLightboxUrl(null)} className="absolute top-4 end-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+              <X className="w-5 h-5 text-white" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </>
