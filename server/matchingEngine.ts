@@ -20,12 +20,13 @@ import { io } from "./index";
 import { getUserSocketId, getOnlineUserIds, isUserOnline } from "./onlineUsers";
 import { getAllPricing } from "./pricingService";
 import { createLogger } from "./logger";
+import crypto from "crypto";
 
 const log = createLogger("matching");
 
 // ── Types ──
 export interface MatchFilters {
-  type: "video" | "audio";        // call type
+  type: "video" | "audio" | "text";  // call type (text = random text chat)
   genderFilter: "both" | "male" | "female";
   ageMin: number;
   ageMax: number;
@@ -302,23 +303,30 @@ export async function findMatch(userId: string): Promise<MatchResult> {
     }
   }
 
-  // Create call session in DB
-  const [session] = await db.insert(schema.calls).values({
-    callerId: userId,
-    receiverId: matched.userId,
-    type: filters.type === "video" ? "video" : "voice",
-    status: "active",
-    startedAt: new Date(),
-    coinRate: cost,
-  }).returning();
+  // Create call session in DB (skip for text chat — no call record needed)
+  let sessionId: string;
+  if (filters.type === "text") {
+    // For text chat, generate a session ID without creating a call record
+    sessionId = crypto.randomUUID();
+  } else {
+    const [session] = await db.insert(schema.calls).values({
+      callerId: userId,
+      receiverId: matched.userId,
+      type: filters.type === "video" ? "video" : "voice",
+      status: "active",
+      startedAt: new Date(),
+      coinRate: cost,
+    }).returning();
+    sessionId = session.id;
+  }
 
   // Remove both from queue
   await leaveQueue(userId);
   await leaveQueue(matched.userId);
 
   // Set both as active
-  await setActiveCall(userId, session.id);
-  await setActiveCall(matched.userId, session.id);
+  await setActiveCall(userId, sessionId);
+  await setActiveCall(matched.userId, sessionId);
 
   // Mark as recently matched
   await markRecentMatch(userId, matched.userId);
@@ -333,7 +341,7 @@ export async function findMatch(userId: string): Promise<MatchResult> {
 
   if (mySocketId) {
     io.to(mySocketId).emit("random-match-found", {
-      sessionId: session.id,
+      sessionId: sessionId,
       callType: filters.type,
       matchedUser: matchedUserInfo ? {
         id: matched.userId,
@@ -350,7 +358,7 @@ export async function findMatch(userId: string): Promise<MatchResult> {
 
   if (matchedSocketId) {
     io.to(matchedSocketId).emit("random-match-found", {
-      sessionId: session.id,
+      sessionId: sessionId,
       callType: matched.filters.type,
       matchedUser: myUserInfo ? {
         id: userId,
@@ -365,7 +373,7 @@ export async function findMatch(userId: string): Promise<MatchResult> {
     });
   }
 
-  log.info(`Match found: ${userId} <-> ${matched.userId} (session: ${session.id})`);
+  log.info(`Match found: ${userId} <-> ${matched.userId} (session: ${sessionId}, type: ${filters.type})`);
 
   return {
     success: true,
@@ -378,7 +386,7 @@ export async function findMatch(userId: string): Promise<MatchResult> {
       gender: matchedUserInfo.gender,
       level: matchedUserInfo.level,
     } : undefined,
-    sessionId: session.id,
+    sessionId: sessionId,
     cost,
   };
 }

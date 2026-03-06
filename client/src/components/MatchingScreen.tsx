@@ -12,7 +12,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Users, Loader2, Video, Mic, Coins,
-  UserCheck, Zap, Clock as ClockIcon,
+  UserCheck, Zap, Clock as ClockIcon, MessageCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getSocket } from "@/lib/socketManager";
@@ -69,16 +69,21 @@ export function MatchingScreen({ isOpen, filters, onClose }: MatchingScreenProps
     // Listen for match found
     const handleMatchFound = (data: {
       matchedUser: MatchedUser;
-      callSessionId: string;
-      type: "video" | "audio";
+      sessionId: string;
+      callType: "video" | "audio" | "text";
     }) => {
       setMatchedUser(data.matchedUser);
-      setCallSessionId(data.callSessionId);
+      setCallSessionId(data.sessionId);
       setStatus("found");
 
-      // Navigate to call screen after brief animation
+      // Navigate to appropriate screen after brief animation
       setTimeout(() => {
-        navigate(`/call?user=${data.matchedUser.id}&type=${data.type}&session=${data.callSessionId}&random=1`);
+        if (data.callType === "text") {
+          // Random text chat — open chat with matched user
+          navigate(`/chat?partner=${data.matchedUser.id}&random=1`);
+        } else {
+          navigate(`/call?user=${data.matchedUser.id}&type=${data.callType}&session=${data.sessionId}&random=1`);
+        }
         onClose();
       }, 1500);
     };
@@ -187,11 +192,13 @@ export function MatchingScreen({ isOpen, filters, onClose }: MatchingScreenProps
         <div className="absolute top-6 right-6 flex items-center gap-2 bg-white/5 backdrop-blur-sm px-3 py-1.5 rounded-full">
           {filters?.type === "video" ? (
             <Video className="w-4 h-4 text-primary" />
+          ) : filters?.type === "text" ? (
+            <MessageCircle className="w-4 h-4 text-emerald-400" />
           ) : (
             <Mic className="w-4 h-4 text-secondary" />
           )}
           <span className="text-white/60 text-xs font-bold">
-            {filters?.type === "video" ? t("matching.video") : t("matching.audio")}
+            {filters?.type === "video" ? t("matching.video") : filters?.type === "text" ? t("matching.text") : t("matching.audio")}
           </span>
         </div>
 
@@ -225,11 +232,15 @@ export function MatchingScreen({ isOpen, filters, onClose }: MatchingScreenProps
                     transition={{ duration: 2, repeat: Infinity, delay: 1 }}
                   />
                   <div className={`w-24 h-24 rounded-full flex items-center justify-center ${
-                    filters?.type === "video" ? "bg-primary/20" : "bg-secondary/20"
+                    filters?.type === "video" ? "bg-primary/20" : filters?.type === "text" ? "bg-emerald-500/20" : "bg-secondary/20"
                   }`}>
-                    <Users className={`w-12 h-12 ${
-                      filters?.type === "video" ? "text-primary" : "text-secondary"
-                    }`} />
+                    {filters?.type === "text" ? (
+                      <MessageCircle className="w-12 h-12 text-emerald-400" />
+                    ) : (
+                      <Users className={`w-12 h-12 ${
+                        filters?.type === "video" ? "text-primary" : "text-secondary"
+                      }`} />
+                    )}
                   </div>
                 </div>
 

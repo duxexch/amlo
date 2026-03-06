@@ -447,7 +447,7 @@ io.on("connection", (socket) => {
     const { type, genderFilter, ageMin, ageMax, countryFilter } = data as Record<string, unknown>;
     if (!isStr(type as string, 10)) return;
     const filters: MatchFilters = {
-      type: (type === "video" ? "video" : "audio") as "video" | "audio",
+      type: (["video", "audio", "text"].includes(type as string) ? type : "video") as "video" | "audio" | "text",
       genderFilter: (["both", "male", "female"].includes(genderFilter as string) ? genderFilter : "both") as "both" | "male" | "female",
       ageMin: typeof ageMin === "number" ? Math.max(18, Math.min(100, ageMin)) : 18,
       ageMax: typeof ageMax === "number" ? Math.max(18, Math.min(100, ageMax)) : 60,

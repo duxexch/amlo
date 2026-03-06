@@ -12,7 +12,7 @@ import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Video, Mic, X, Coins, Users, Globe,
-  Loader2, ChevronDown, Search as SearchIcon,
+  Loader2, ChevronDown, Search as SearchIcon, MessageCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { callsApi } from "@/lib/socialApi";
@@ -31,11 +31,11 @@ interface RandomFiltersModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStart: (filters: MatchFilters) => void;
-  initialType?: "video" | "audio";
+  initialType?: "video" | "audio" | "text";
 }
 
 export interface MatchFilters {
-  type: "video" | "audio";
+  type: "video" | "audio" | "text";
   genderFilter: "both" | "male" | "female";
   ageMin: number;
   ageMax: number;
@@ -70,7 +70,7 @@ const COUNTRIES = [
 
 export function RandomFiltersModal({ isOpen, onClose, onStart, initialType = "video" }: RandomFiltersModalProps) {
   const { t } = useTranslation();
-  const [type, setType] = useState<"video" | "audio">(initialType);
+  const [type, setType] = useState<"video" | "audio" | "text">(initialType);
   const [gender, setGender] = useState<"both" | "male" | "female">("both");
   const [ageMin, setAgeMin] = useState(18);
   const [ageMax, setAgeMax] = useState(99);
@@ -204,6 +204,17 @@ export function RandomFiltersModal({ isOpen, onClose, onStart, initialType = "vi
                   >
                     <Mic className="w-4 h-4" />
                     {t("matching.audio")}
+                  </button>
+                  <button
+                    onClick={() => setType("text")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
+                      type === "text"
+                        ? "bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]"
+                        : "bg-white/5 text-white/40 hover:text-white/60"
+                    }`}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    {t("matching.text")}
                   </button>
                 </div>
               </div>
@@ -391,7 +402,9 @@ export function RandomFiltersModal({ isOpen, onClose, onStart, initialType = "vi
                 className={`w-full py-4 rounded-2xl font-black text-lg transition-all ${
                   type === "video"
                     ? "bg-primary hover:bg-primary/90 text-white shadow-[0_0_25px_rgba(168,85,247,0.4)]"
-                    : "bg-secondary hover:bg-secondary/90 text-white shadow-[0_0_25px_rgba(236,72,153,0.4)]"
+                    : type === "audio"
+                    ? "bg-secondary hover:bg-secondary/90 text-white shadow-[0_0_25px_rgba(236,72,153,0.4)]"
+                    : "bg-emerald-500 hover:bg-emerald-500/90 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]"
                 }`}
               >
                 {t("matching.startSearch")}

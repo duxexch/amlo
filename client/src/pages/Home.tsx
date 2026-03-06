@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe } from "lucide-react";
+import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import heroBg from "@/assets/images/hero-bg.png";
@@ -148,7 +148,7 @@ export function Home() {
   const [followedAccounts, setFollowedAccounts] = useState<any[]>([]);
   const [liveFilter, setLiveFilter] = useState<'all' | 'videoLive' | 'audioLive' | 'offline'>('all');
   const [showFiltersModal, setShowFiltersModal] = useState(false);
-  const [filtersType, setFiltersType] = useState<"video" | "audio">("video");
+  const [filtersType, setFiltersType] = useState<"video" | "audio" | "text">("video");
   const [showMatching, setShowMatching] = useState(false);
   const [matchFilters, setMatchFilters] = useState<MatchFilters | null>(null);
 
@@ -207,7 +207,7 @@ export function Home() {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col md:flex-row gap-6"
+          className="grid grid-cols-1 md:grid-cols-3 gap-6"
         >
           <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
             <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
@@ -236,6 +236,22 @@ export function Home() {
             <button
               onClick={() => { setFiltersType("audio"); setShowFiltersModal(true); }}
               className="bg-secondary hover:bg-secondary/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all transform hover:scale-105 inline-block"
+            >
+              {t("common.startNow")}
+            </button>
+          </div>
+
+          <div className="glass p-8 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden group">
+            <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="w-28 h-28 rounded-full bg-emerald-500/20 flex items-center justify-center mb-6 relative" style={{boxShadow: '0 0 15px rgba(16,185,129,0.3), inset 0 0 15px rgba(16,185,129,0.1)'}}>
+              <div className="absolute inset-0 rounded-full animate-pulse-ring" style={{animationDelay: '2s'}} />
+              <MessageCircle className="w-14 h-14 text-emerald-400" />
+            </div>
+            <h3 className="text-3xl font-bold text-white mb-2">{t("home.randomTextTitle")}</h3>
+            <p className="text-muted-foreground mb-8 text-lg">{t("home.randomTextDesc")}</p>
+            <button
+              onClick={() => { setFiltersType("text"); setShowFiltersModal(true); }}
+              className="bg-emerald-500 hover:bg-emerald-500/90 text-white font-bold text-xl py-4 px-10 rounded-full w-full max-w-[250px] shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all transform hover:scale-105 inline-block"
             >
               {t("common.startNow")}
             </button>
