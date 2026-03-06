@@ -1440,6 +1440,7 @@ router.get("/wallet/balance", async (req: Request, res: Response) => {
       data: {
         coins: user.coins,
         diamonds: user.diamonds,
+        miles: user.miles,
       },
     });
   } catch (err: any) {
@@ -1544,7 +1545,7 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
     if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
 
     // Minimum withdrawal amount
-    const MIN_WITHDRAW = 100;
+    const MIN_WITHDRAW = 1000;
     if (parsed.data.amount < MIN_WITHDRAW) {
       return res.status(400).json({ success: false, message: `الحد الأدنى للسحب هو ${MIN_WITHDRAW} عملة` });
     }
@@ -1624,6 +1625,21 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
     });
 
     socialLog.info({ audit: "withdrawal_requested", userId, amount: parsed.data.amount, withdrawalId: result.id }, "Withdrawal requested");
+
+    // Notify all connected admin sockets about the new withdrawal
+    try {
+      for (const [, s] of io.sockets.sockets) {
+        if ((s as any).adminId) {
+          s.emit("admin:new-withdrawal", {
+            id: result.id,
+            userId,
+            amount: parsed.data.amount,
+            createdAt: result.createdAt,
+          });
+        }
+      }
+    } catch { /* non-critical */ }
+
     return res.json({ success: true, data: result, message: "تم إرسال طلب السحب بنجاح" });
   } catch (err: any) {
     if (err.message === "USER_NOT_FOUND") {

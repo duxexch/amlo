@@ -490,6 +490,36 @@ export const adminWallets = {
     });
     return request<any>(`/wallets/${userId}?${params}`);
   },
+
+  adjust: (userId: string, data: { amount: number; reason: string; currency?: "coins" | "diamonds" }) =>
+    request(`/wallets/${userId}/adjust`, { method: "POST", body: JSON.stringify(data) }),
+};
+
+// ── Financial Stats ──────────────────────────────────────
+
+export const adminFinanceStats = {
+  get: () => request<any>("/financial-stats"),
+};
+
+// ── Withdrawal Requests ──────────────────────────────────
+
+export interface WithdrawalFilters {
+  page?: number;
+  limit?: number;
+  status?: string;
+}
+
+export const adminWithdrawals = {
+  list: (filters: WithdrawalFilters = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== "") params.set(k, String(v));
+    });
+    return request<any>(`/withdrawal-requests?${params}`);
+  },
+
+  update: (id: string, data: { status: string; adminNotes?: string }) =>
+    request(`/withdrawal-requests/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 };
 
 // ── Logs ─────────────────────────────────────────────────

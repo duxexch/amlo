@@ -119,7 +119,7 @@ export const callsApi = {
 
 // ── Wallet ──
 export const walletApi = {
-  balance: () => request<{ coins: number; diamonds: number }>("/wallet/balance"),
+  balance: () => request<{ coins: number; diamonds: number; miles: number }>("/wallet/balance"),
   transactions: (page = 1, type?: string) => {
     const params = new URLSearchParams({ page: String(page) });
     if (type) params.set("type", type);

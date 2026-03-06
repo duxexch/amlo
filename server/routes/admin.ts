@@ -34,7 +34,7 @@ import {
   milesPricingSchema,
 } from "../../shared/schema";
 import { getDb } from "../db";
-import { eq, asc, desc, count } from "drizzle-orm";
+import { eq, asc, desc, count, sql, and, ne, gte, sum } from "drizzle-orm";
 import * as schema from "../../shared/schema";
 import { getAllPricing, invalidatePricingCache } from "../pricingService";
 import { getQueueStats } from "../matchingEngine";
@@ -761,6 +761,245 @@ router.get("/wallets/:userId", requireAdmin, async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// FINANCIAL DASHBOARD — لوحة الإحصائيات المالية
+// ══════════════════════════════════════════════════════════
+
+router.get("/financial-stats", requireAdmin, async (_req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: {} });
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 7);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // Revenue stats (purchases/recharges)
+    const [revenueStats] = await db.select({
+      totalRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0)`,
+      todayRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${todayStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      weekRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${weekStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      monthRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${monthStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      totalGiftVolume: sql<number>`COALESCE(SUM(CASE WHEN type = 'gift_sent' AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0)`,
+      totalWithdrawn: sql<number>`COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0)`,
+      totalTransactions: sql<number>`COUNT(*)`,
+    }).from(schema.walletTransactions);
+
+    // Withdrawal requests stats
+    const [wrStats] = await db.select({
+      pendingCount: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0)`,
+      pendingAmount: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0)`,
+      processingCount: sql<number>`COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0)`,
+      completedCount: sql<number>`COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)`,
+      rejectedCount: sql<number>`COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0)`,
+      totalRequests: sql<number>`COUNT(*)`,
+    }).from(schema.withdrawalRequests);
+
+    // Total coins in circulation
+    const [coinStats] = await db.select({
+      totalCoins: sql<number>`COALESCE(SUM(coins), 0)`,
+      totalDiamonds: sql<number>`COALESCE(SUM(diamonds), 0)`,
+    }).from(schema.users);
+
+    return res.json({
+      success: true,
+      data: {
+        revenue: {
+          total: Number(revenueStats?.totalRevenue || 0),
+          today: Number(revenueStats?.todayRevenue || 0),
+          week: Number(revenueStats?.weekRevenue || 0),
+          month: Number(revenueStats?.monthRevenue || 0),
+        },
+        giftVolume: Number(revenueStats?.totalGiftVolume || 0),
+        withdrawn: Number(revenueStats?.totalWithdrawn || 0),
+        totalTransactions: Number(revenueStats?.totalTransactions || 0),
+        withdrawals: {
+          pending: Number(wrStats?.pendingCount || 0),
+          pendingAmount: Number(wrStats?.pendingAmount || 0),
+          processing: Number(wrStats?.processingCount || 0),
+          completed: Number(wrStats?.completedCount || 0),
+          rejected: Number(wrStats?.rejectedCount || 0),
+          total: Number(wrStats?.totalRequests || 0),
+        },
+        circulation: {
+          totalCoins: Number(coinStats?.totalCoins || 0),
+          totalDiamonds: Number(coinStats?.totalDiamonds || 0),
+        },
+      },
+    });
+  } catch (err: any) {
+    log(`Financial stats error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل الإحصائيات المالية" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// WITHDRAWAL REQUESTS — إدارة طلبات السحب
+// ══════════════════════════════════════════════════════════
+
+router.get("/withdrawal-requests", requireAdmin, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const status = (req.query.status as string) || "";
+
+    const result = await storage.getWithdrawalRequests(page, limit, { status: status || undefined });
+
+    return res.json({
+      success: true,
+      data: result.data,
+      pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) },
+    });
+  } catch (err: any) {
+    log(`Withdrawal requests error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل طلبات السحب" });
+  }
+});
+
+router.patch("/withdrawal-requests/:id", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const wrId = paramStr(req.params.id);
+    const { status, adminNotes } = req.body;
+
+    if (!status || !["completed", "rejected", "processing"].includes(status)) {
+      return res.status(400).json({ success: false, message: "حالة غير صالحة" });
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const [wr] = await tx.select().from(schema.withdrawalRequests).where(eq(schema.withdrawalRequests.id, wrId)).limit(1);
+      if (!wr) throw new Error("NOT_FOUND");
+      if (wr.status === "completed") throw new Error("ALREADY_COMPLETED");
+
+      const updateData: any = {
+        status,
+        processedBy: req.session.adminId,
+        processedAt: new Date(),
+      };
+      if (adminNotes) updateData.adminNotes = adminNotes;
+
+      // If rejecting a pending request, refund coins
+      if (status === "rejected" && (wr.status === "pending" || wr.status === "processing")) {
+        const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, wr.userId)).limit(1);
+        if (user) {
+          const newBalance = user.coins + wr.amount;
+          await tx.update(schema.users).set({ coins: newBalance }).where(eq(schema.users.id, wr.userId));
+          // Create refund transaction
+          await tx.insert(schema.walletTransactions).values({
+            userId: wr.userId,
+            type: "refund",
+            amount: wr.amount,
+            balanceAfter: newBalance,
+            currency: "coins",
+            description: `استرجاع طلب سحب مرفوض #${wr.id}`,
+            referenceId: wr.id,
+            status: "completed",
+          });
+        }
+      }
+
+      // If completing, also update the related wallet transaction
+      if (status === "completed") {
+        await tx.update(schema.walletTransactions)
+          .set({ status: "completed" })
+          .where(and(
+            eq(schema.walletTransactions.referenceId, wrId),
+            eq(schema.walletTransactions.type, "withdrawal"),
+          ));
+      }
+
+      await tx.update(schema.withdrawalRequests).set(updateData).where(eq(schema.withdrawalRequests.id, wrId));
+
+      return { ...wr, ...updateData };
+    });
+
+    await storage.addAdminLog(req.session.adminId!, "update_withdrawal", "withdrawal", wrId, `Status → ${status}`);
+
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    if (err.message === "NOT_FOUND") return res.status(404).json({ success: false, message: "الطلب غير موجود" });
+    if (err.message === "ALREADY_COMPLETED") return res.status(400).json({ success: false, message: "الطلب مكتمل بالفعل" });
+    log(`Update withdrawal error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تحديث طلب السحب" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// ADJUST USER BALANCE — تعديل رصيد المستخدم
+// ══════════════════════════════════════════════════════════
+
+router.post("/wallets/:userId/adjust", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const adjustSchema = z.object({
+      amount: z.number().int().min(-1000000).max(1000000),
+      reason: z.string().min(1).max(500),
+      currency: z.enum(["coins", "diamonds"]).default("coins"),
+    });
+
+    const parsed = adjustSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.issues });
+
+    const { amount, reason, currency } = parsed.data;
+    const userId = paramStr(req.params.userId);
+
+    const result = await db.transaction(async (tx) => {
+      const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!user) throw new Error("USER_NOT_FOUND");
+
+      let newBalance: number;
+      if (currency === "coins") {
+        newBalance = user.coins + amount;
+        if (newBalance < 0) throw new Error("NEGATIVE_BALANCE");
+        await tx.update(schema.users).set({ coins: newBalance }).where(eq(schema.users.id, userId));
+      } else {
+        newBalance = user.diamonds + amount;
+        if (newBalance < 0) throw new Error("NEGATIVE_BALANCE");
+        await tx.update(schema.users).set({ diamonds: newBalance }).where(eq(schema.users.id, userId));
+      }
+
+      // Record transaction
+      await tx.insert(schema.walletTransactions).values({
+        userId,
+        type: amount > 0 ? "bonus" : "withdrawal",
+        amount,
+        balanceAfter: newBalance,
+        currency,
+        description: `تعديل يدوي بواسطة الأدمن: ${reason}`,
+        paymentMethod: "admin_adjustment",
+        status: "completed",
+      });
+
+      return { newBalance, username: user.username };
+    });
+
+    await storage.addAdminLog(
+      req.session.adminId!,
+      amount > 0 ? "add_balance" : "deduct_balance",
+      "user",
+      userId,
+      `${amount > 0 ? "+" : ""}${amount} ${currency} — ${reason} (new: ${result.newBalance})`,
+    );
+
+    return res.json({
+      success: true,
+      data: { newBalance: result.newBalance, currency },
+      message: `تم تعديل رصيد @${result.username} بنجاح`,
+    });
+  } catch (err: any) {
+    if (err.message === "USER_NOT_FOUND") return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    if (err.message === "NEGATIVE_BALANCE") return res.status(400).json({ success: false, message: "لا يمكن أن يصبح الرصيد سالباً" });
+    log(`Adjust balance error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تعديل الرصيد" });
   }
 });
 

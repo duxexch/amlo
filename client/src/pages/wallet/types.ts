@@ -8,6 +8,7 @@ export type DateRange = "all" | "today" | "week" | "month";
 export interface WalletBalance {
   coins: number;
   diamonds: number;
+  miles: number;
 }
 
 export interface IncomeStats {

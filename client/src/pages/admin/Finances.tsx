@@ -8,7 +8,7 @@ import {
   MoreHorizontal, FileText, Save, Search, TrendingUp, TrendingDown,
   Users, ArrowUpDown, Coins, Diamond, ChevronDown, Phone,
 } from "lucide-react";
-import { adminTransactions, adminPaymentMethods, adminWallets, adminPricing } from "@/lib/adminApi";
+import { adminTransactions, adminPaymentMethods, adminWallets, adminPricing, adminFinanceStats, adminWithdrawals } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 
 // ════════════════════════════════════════════════════════════
@@ -99,13 +99,14 @@ const COUNTRY_OPTIONS = [
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
 
-type FinanceTab = "transactions" | "wallets" | "payment-methods" | "currencies";
+type FinanceTab = "transactions" | "wallets" | "payment-methods" | "currencies" | "withdrawals";
 
 const SEARCH_PLACEHOLDERS: Record<FinanceTab, string> = {
   transactions: "admin.finances.searchTransactions",
   wallets: "admin.finances.searchWallets",
   "payment-methods": "admin.finances.searchPaymentMethods",
   currencies: "admin.finances.searchPaymentMethods",
+  withdrawals: "admin.finances.searchTransactions",
 };
 
 export function FinancesPage() {
@@ -130,6 +131,7 @@ export function FinancesPage() {
 
   const tabs: { key: FinanceTab; labelKey: string; icon: React.ElementType }[] = [
     { key: "transactions", labelKey: "admin.finances.tabTransactions", icon: Wallet },
+    { key: "withdrawals", labelKey: "admin.finances.tabWithdrawals", icon: ArrowUpRight },
     { key: "wallets", labelKey: "admin.finances.tabWallets", icon: DollarSign },
     { key: "payment-methods", labelKey: "admin.finances.tabPaymentMethods", icon: CreditCard },
     { key: "currencies", labelKey: "admin.finances.tabCurrencies", icon: Coins },
@@ -137,6 +139,9 @@ export function FinancesPage() {
 
   return (
     <div className="space-y-2.5">
+      {/* Financial Dashboard */}
+      <FinancialDashboard />
+
       {/* Header with Search & Filter */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
         <h1 className="text-xl font-black text-white" style={{ fontFamily: "Outfit" }}>
@@ -216,6 +221,16 @@ export function FinancesPage() {
             transition={{ duration: 0.2 }}
           >
             <WalletsTab search={search} showFilters={showFilters} />
+          </motion.div>
+        ) : activeTab === "withdrawals" ? (
+          <motion.div
+            key="withdrawals"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+          >
+            <WithdrawalsTab search={search} showFilters={showFilters} />
           </motion.div>
         ) : activeTab === "currencies" ? (
           <motion.div
@@ -916,6 +931,7 @@ function WalletsTab({ search, showFilters }: { search: string; showFilters: bool
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState("balance_desc");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [adjustUser, setAdjustUser] = useState<{ id: string; username: string } | null>(null);
 
   // Reset page on search change
   useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [search]);
@@ -1008,13 +1024,14 @@ function WalletsTab({ search, showFilters }: { search: string; showFilters: bool
                 <th className="text-right text-white/40 font-medium py-2 px-3 text-xs hidden lg:table-cell">{t("admin.finances.withdrawalsCol")}</th>
                 <th className="text-right text-white/40 font-medium py-2 px-3 text-xs hidden xl:table-cell">{t("admin.finances.operationsCol")}</th>
                 <th className="text-center text-white/40 font-medium py-2 px-3 text-xs">{t("admin.finances.statusLabel")}</th>
+                <th className="text-center text-white/40 font-medium py-2 px-3 text-xs">{t("admin.finances.actions")}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 10 }).map((_, i) => (
                   <tr key={i} className="border-b border-white/[0.02] animate-pulse">
-                    {Array.from({ length: 8 }).map((_, j) => (
+                    {Array.from({ length: 9 }).map((_, j) => (
                       <td key={j} className={`py-2 px-3 ${j === 4 ? "hidden md:table-cell" : ""} ${j === 5 ? "hidden lg:table-cell" : ""} ${j === 6 ? "hidden xl:table-cell" : ""}`}>
                         <div className="w-16 h-3 bg-white/5 rounded" />
                       </td>
@@ -1022,7 +1039,7 @@ function WalletsTab({ search, showFilters }: { search: string; showFilters: bool
                   </tr>
                 ))
               ) : wallets.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-10 text-white/20">{t("admin.finances.noWallets")}</td></tr>
+                <tr><td colSpan={9} className="text-center py-10 text-white/20">{t("admin.finances.noWallets")}</td></tr>
               ) : (
                 wallets.map((w) => (
                   <tr
@@ -1077,6 +1094,15 @@ function WalletsTab({ search, showFilters }: { search: string; showFilters: bool
                         </span>
                       )}
                     </td>
+                    <td className="py-2 px-3 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setAdjustUser({ id: w.userId, username: w.username }); }}
+                        className="p-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                        title={t("admin.finances.adjustBalance")}
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1103,6 +1129,16 @@ function WalletsTab({ search, showFilters }: { search: string; showFilters: bool
       <AnimatePresence>
         {selectedUserId && (
           <WalletDetailModal userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {adjustUser && (
+          <AdjustBalanceModal
+            userId={adjustUser.id}
+            username={adjustUser.username}
+            onClose={() => setAdjustUser(null)}
+            onSuccess={fetchData}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -2192,5 +2228,414 @@ function FormField({ label, value, onChange, placeholder, type = "text" }: {
         onChange={(e) => onChange(e.target.value)}
       />
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════
+// FINANCIAL DASHBOARD — لوحة الإحصائيات المالية
+// ════════════════════════════════════════════════════════════
+
+function FinancialDashboard() {
+  const { t } = useTranslation();
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await adminFinanceStats.get();
+      if (res?.data) setStats(res.data);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-6">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!stats) return null;
+
+  const cards = [
+    { label: t("admin.finances.dashTotalRevenue"), value: stats.revenue?.total || 0, icon: DollarSign, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+    { label: t("admin.finances.dashTodayRevenue"), value: stats.revenue?.today || 0, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
+    { label: t("admin.finances.dashMonthRevenue"), value: stats.revenue?.month || 0, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-500/10" },
+    { label: t("admin.finances.dashTotalWithdrawn"), value: stats.withdrawn || 0, icon: ArrowUpRight, color: "text-red-400", bg: "bg-red-500/10" },
+    { label: t("admin.finances.dashPendingWithdrawals"), value: stats.withdrawals?.pending || 0, icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", suffix: ` (${(stats.withdrawals?.pendingAmount || 0).toLocaleString()} ${t("admin.finances.coins")})` },
+    { label: t("admin.finances.dashGiftVolume"), value: stats.giftVolume || 0, icon: Gift, color: "text-pink-400", bg: "bg-pink-500/10" },
+    { label: t("admin.finances.dashTotalCoins"), value: stats.circulation?.totalCoins || 0, icon: Coins, color: "text-yellow-400", bg: "bg-yellow-500/10" },
+    { label: t("admin.finances.dashTotalDiamonds"), value: stats.circulation?.totalDiamonds || 0, icon: Diamond, color: "text-cyan-400", bg: "bg-cyan-500/10" },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {cards.map((c, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: i * 0.05 }}
+          className="bg-white/[0.03] border border-white/5 rounded-xl p-3 flex items-center gap-3"
+        >
+          <div className={`${c.bg} p-2 rounded-lg`}>
+            <c.icon className={`w-4 h-4 ${c.color}`} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] text-white/40 truncate">{c.label}</p>
+            <p className="text-sm font-bold text-white">{c.value.toLocaleString()}{c.suffix || ""}</p>
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════
+// WITHDRAWALS TAB — طلبات السحب
+// ════════════════════════════════════════════════════════════
+
+const WR_STATUS_OPTIONS = [
+  { value: "", labelKey: "admin.finances.allStatuses" },
+  { value: "pending", labelKey: "admin.finances.txStatusPending" },
+  { value: "processing", labelKey: "admin.finances.wrStatusProcessing" },
+  { value: "completed", labelKey: "admin.finances.txStatusCompleted" },
+  { value: "rejected", labelKey: "admin.finances.txStatusRejected" },
+];
+
+function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
+  const { t } = useTranslation();
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  const [statusFilter, setStatusFilter] = useState("");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedWr, setSelectedWr] = useState<any>(null);
+  const [adminNotes, setAdminNotes] = useState("");
+
+  const loadRequests = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await adminWithdrawals.list({ page: pagination.page, limit: pagination.limit, status: statusFilter });
+      if (res?.data) {
+        setRequests(Array.isArray(res.data) ? res.data : []);
+        if (res.pagination) setPagination(res.pagination);
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [pagination.page, pagination.limit, statusFilter]);
+
+  useEffect(() => { loadRequests(); }, [loadRequests]);
+  useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [statusFilter, search]);
+
+  const handleAction = async (id: string, status: "completed" | "rejected" | "processing") => {
+    setActionLoading(id);
+    try {
+      await adminWithdrawals.update(id, { status, adminNotes: adminNotes || undefined });
+      setSelectedWr(null);
+      setAdminNotes("");
+      loadRequests();
+    } catch { /* ignore */ }
+    setActionLoading(null);
+  };
+
+  const statusBadge = (s: string) => {
+    const map: Record<string, string> = {
+      pending: "bg-amber-500/15 text-amber-400 border-amber-500/20",
+      processing: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+      completed: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+      rejected: "bg-red-500/15 text-red-400 border-red-500/20",
+    };
+    return map[s] || "bg-white/10 text-white/60 border-white/10";
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Filters */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="flex gap-2 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+              {WR_STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setStatusFilter(opt.value)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                    statusFilter === opt.value ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
+                  }`}
+                >
+                  {t(opt.labelKey)}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table */}
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-12 text-white/30 text-sm">{t("admin.finances.noWithdrawals")}</div>
+      ) : (
+        <div className="overflow-x-auto border border-white/5 rounded-xl">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-white/[0.02] text-white/40 border-b border-white/5">
+                <th className="text-start px-3 py-2.5 font-medium">{t("admin.finances.wrUser")}</th>
+                <th className="text-start px-3 py-2.5 font-medium">{t("admin.finances.wrAmount")}</th>
+                <th className="text-start px-3 py-2.5 font-medium">{t("admin.finances.wrAmountUsd")}</th>
+                <th className="text-start px-3 py-2.5 font-medium">{t("admin.finances.txStatus")}</th>
+                <th className="text-start px-3 py-2.5 font-medium">{t("admin.finances.wrDate")}</th>
+                <th className="text-end px-3 py-2.5 font-medium">{t("admin.finances.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((wr) => (
+                <tr key={wr.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className="px-3 py-2.5 text-white font-medium">@{wr.user?.username || wr.userId?.slice(0, 8)}</td>
+                  <td className="px-3 py-2.5 text-white">{wr.amount?.toLocaleString()} <span className="text-white/40">{t("admin.finances.coins")}</span></td>
+                  <td className="px-3 py-2.5 text-emerald-400 font-medium">${wr.amountUsd || "—"}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(wr.status)}`}>
+                      {wr.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-white/40">{new Date(wr.createdAt).toLocaleDateString("ar")}</td>
+                  <td className="px-3 py-2.5 text-end">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {(wr.status === "pending" || wr.status === "processing") && (
+                        <>
+                          <button
+                            onClick={() => handleAction(wr.id, "completed")}
+                            disabled={actionLoading === wr.id}
+                            className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                            title={t("admin.finances.approve")}
+                          >
+                            <CheckCircle className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => { setSelectedWr(wr); setAdminNotes(""); }}
+                            className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                            title={t("admin.finances.reject")}
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                      {wr.status === "pending" && (
+                        <button
+                          onClick={() => handleAction(wr.id, "processing")}
+                          disabled={actionLoading === wr.id}
+                          className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                          title={t("admin.finances.markProcessing")}
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setSelectedWr(wr); setAdminNotes(wr.adminNotes || ""); }}
+                        className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 transition-colors"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between px-1">
+          <p className="text-xs text-white/30">{t("admin.finances.showingOf", { showing: requests.length, total: pagination.total })}</p>
+          <div className="flex gap-1">
+            <button onClick={() => setPagination((p) => ({ ...p, page: Math.max(1, p.page - 1) }))} disabled={pagination.page <= 1} className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
+            <span className="px-3 py-1.5 text-xs text-white/50">{pagination.page}/{pagination.totalPages}</span>
+            <button onClick={() => setPagination((p) => ({ ...p, page: Math.min(p.totalPages, p.page + 1) }))} disabled={pagination.page >= pagination.totalPages} className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 disabled:opacity-30"><ChevronLeft className="w-4 h-4" /></button>
+          </div>
+        </div>
+      )}
+
+      {/* Detail / Reject Modal */}
+      <AnimatePresence>
+        {selectedWr && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setSelectedWr(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-md p-5 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-white text-sm">{t("admin.finances.wrDetails")}</h3>
+                <button onClick={() => setSelectedWr(null)} className="text-white/30 hover:text-white"><X className="w-4 h-4" /></button>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrUser")}:</span> <span className="text-white font-medium">@{selectedWr.user?.username || selectedWr.userId?.slice(0, 8)}</span></div>
+                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrAmount")}:</span> <span className="text-white font-medium">{selectedWr.amount?.toLocaleString()} {t("admin.finances.coins")}</span></div>
+                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.wrAmountUsd")}:</span> <span className="text-emerald-400 font-medium">${selectedWr.amountUsd || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-white/40">{t("admin.finances.txStatus")}:</span> <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(selectedWr.status)}`}>{selectedWr.status}</span></div>
+                {selectedWr.paymentDetails && (
+                  <div>
+                    <span className="text-white/40 block mb-1">{t("admin.finances.wrPaymentDetails")}:</span>
+                    <div className="bg-white/5 rounded-lg p-2 text-white/70 break-all">
+                      {typeof selectedWr.paymentDetails === "string" ? selectedWr.paymentDetails : JSON.stringify(selectedWr.paymentDetails, null, 2)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {(selectedWr.status === "pending" || selectedWr.status === "processing") && (
+                <div className="space-y-3">
+                  <textarea
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 resize-none h-20"
+                    placeholder={t("admin.finances.wrAdminNotes")}
+                    value={adminNotes}
+                    onChange={(e) => setAdminNotes(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(selectedWr.id, "completed")}
+                      disabled={!!actionLoading}
+                      className="flex-1 py-2 bg-emerald-500/20 text-emerald-400 font-bold text-xs rounded-xl hover:bg-emerald-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    >
+                      {actionLoading === selectedWr.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                      {t("admin.finances.approve")}
+                    </button>
+                    <button
+                      onClick={() => handleAction(selectedWr.id, "rejected")}
+                      disabled={!!actionLoading}
+                      className="flex-1 py-2 bg-red-500/20 text-red-400 font-bold text-xs rounded-xl hover:bg-red-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    >
+                      {actionLoading === selectedWr.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                      {t("admin.finances.reject")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════
+// ADJUST BALANCE MODAL — تعديل رصيد المستخدم
+// ════════════════════════════════════════════════════════════
+
+function AdjustBalanceModal({ userId, username, onClose, onSuccess }: {
+  userId: string; username: string; onClose: () => void; onSuccess: () => void;
+}) {
+  const { t } = useTranslation();
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [currency, setCurrency] = useState<"coins" | "diamonds">("coins");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async () => {
+    const num = parseInt(amount);
+    if (!num || num === 0) { setError(t("admin.finances.invalidAmount")); return; }
+    if (!reason.trim()) { setError(t("admin.finances.reasonRequired")); return; }
+    setLoading(true);
+    setError("");
+    try {
+      await adminWallets.adjust(userId, { amount: num, reason: reason.trim(), currency });
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || t("admin.finances.adjustFailed"));
+    }
+    setLoading(false);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-sm p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-white text-sm">{t("admin.finances.adjustBalance")} — @{username}</h3>
+          <button onClick={onClose} className="text-white/30 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+
+        {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2">{error}</p>}
+
+        <div className="space-y-3">
+          {/* Currency toggle */}
+          <div className="flex gap-2">
+            {(["coins", "diamonds"] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCurrency(c)}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-colors ${
+                  currency === c ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50"
+                }`}
+              >
+                {c === "coins" ? "🪙" : "💎"} {t(`admin.finances.${c}`)}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label className="text-xs text-white/40 mb-1 block">{t("admin.finances.adjustAmount")}</label>
+            <input
+              type="number"
+              className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50"
+              placeholder={t("admin.finances.adjustAmountHint")}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <p className="text-[10px] text-white/30 mt-1">{t("admin.finances.adjustAmountHelp")}</p>
+          </div>
+
+          <div>
+            <label className="text-xs text-white/40 mb-1 block">{t("admin.finances.adjustReason")}</label>
+            <textarea
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 resize-none h-20"
+              placeholder={t("admin.finances.adjustReasonHint")}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="w-full py-2.5 bg-primary hover:bg-primary/90 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {t("admin.finances.adjustSubmit")}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

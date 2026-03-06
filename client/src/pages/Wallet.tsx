@@ -53,7 +53,7 @@ export function Wallet() {
   const [usdtError, setUsdtError] = useState<string | null>(null);
 
   // Data
-  const [balance, setBalance] = useState<WalletBalance>({ coins: 0, diamonds: 0 });
+  const [balance, setBalance] = useState<WalletBalance>({ coins: 0, diamonds: 0, miles: 0 });
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
@@ -129,7 +129,7 @@ export function Wallet() {
   const loadBalance = useCallback(async () => {
     try {
       const data = await walletApi.balance();
-      setBalance({ coins: data?.coins || 0, diamonds: data?.diamonds || 0 });
+      setBalance({ coins: data?.coins || 0, diamonds: data?.diamonds || 0, miles: data?.miles || 0 });
     } catch {}
     setBalanceLoading(false);
   }, []);
@@ -587,7 +587,7 @@ export function Wallet() {
               {[
                 { label: t("wallet.totalEarned"), value: balance.diamonds, color: "text-emerald-400", gradient: "from-emerald-500/15 to-emerald-500/5", border: "border-emerald-500/10", icon: <Plus className="w-3.5 h-3.5" /> },
                 { label: t("wallet.totalSpentAll"), value: totalSpent, color: "text-red-400", gradient: "from-red-500/15 to-red-500/5", border: "border-red-500/10", icon: <Minus className="w-3.5 h-3.5" /> },
-                { label: t("wallet.tabMiles"), value: 0, color: "text-cyan-400", gradient: "from-cyan-500/15 to-cyan-500/5", border: "border-cyan-500/10", icon: <Navigation className="w-3.5 h-3.5" /> },
+                { label: t("wallet.tabMiles"), value: balance.miles, color: "text-cyan-400", gradient: "from-cyan-500/15 to-cyan-500/5", border: "border-cyan-500/10", icon: <Navigation className="w-3.5 h-3.5" /> },
               ].map((stat, i) => (
                 <motion.div key={i} initial={{ y: 15, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 + i * 0.08 }}>
                   <div className={`bg-gradient-to-br ${stat.gradient} border ${stat.border} rounded-2xl p-3.5 space-y-1.5`}>
@@ -977,6 +977,16 @@ export function Wallet() {
                 </div>
 
                 <p className="text-white/20 text-xs">{t("wallet.minWithdraw")}: 1,000 {t("common.coins")}</p>
+                {withdrawAmount && Number(withdrawAmount) > 0 && (
+                  <div className="flex items-center gap-2 bg-violet-500/5 border border-violet-500/10 rounded-xl px-4 py-2 mt-1">
+                    <DollarSign className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+                    <p className="text-violet-300 text-xs font-medium">
+                      ≈ ${(Number(withdrawAmount) / 100).toFixed(2)} USD
+                      <span className="text-white/20 mx-1">•</span>
+                      <span className="text-white/30">{t("wallet.conversionNote")}</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Method */}
