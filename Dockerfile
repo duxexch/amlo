@@ -23,8 +23,9 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 ablox && \
     adduser --system --uid 1001 --ingroup ablox ablox
 
-# Create logs directory
-RUN mkdir -p /app/logs && chown ablox:ablox /app/logs
+# Create logs and uploads directories
+RUN mkdir -p /app/logs /app/uploads/avatars /app/uploads/media && \
+    chown -R ablox:ablox /app/logs /app/uploads
 
 # Copy only production artifacts
 COPY --from=deps /app/node_modules ./node_modules
