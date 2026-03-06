@@ -9,6 +9,9 @@ interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   message?: string;
+  summary?: Record<string, any>;
+  wallet?: any;
+  transactions?: any[];
   pagination?: {
     page: number;
     limit: number;

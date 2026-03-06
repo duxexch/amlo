@@ -1,9 +1,61 @@
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2, Clock, RefreshCw, XCircle,
   ArrowDownLeft, ArrowUpRight,
 } from "lucide-react";
 import type { WalletTransaction } from "./types";
+
+/**
+ * Reusable hook: close a modal on Escape key.
+ */
+export function useEscapeKey(onClose: () => void) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+}
+
+/**
+ * useFocusTrap — traps Tab focus within a modal container.
+ * Returns a ref to attach to the modal container element.
+ */
+export function useFocusTrap<T extends HTMLElement = HTMLDivElement>() {
+  const ref = useRef<T>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const focusable = () =>
+      el.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+
+    el.addEventListener("keydown", handler);
+    // Auto-focus first focusable element
+    const items = focusable();
+    if (items.length > 0) items[0].focus();
+
+    return () => el.removeEventListener("keydown", handler);
+  }, []);
+
+  return ref;
+}
 
 /**
  * Returns a translated status badge for transaction/withdrawal status.
@@ -123,6 +175,13 @@ export function getDateRangeStart(range: string): Date | null {
 }
 
 /**
+ * Validate email format.
+ */
+export function validateEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
+
+/**
  * Trigger haptic feedback if available.
  */
 export function haptic(pattern: number | number[] = 50) {
@@ -133,14 +192,15 @@ export function haptic(pattern: number | number[] = 50) {
 
 /**
  * Share transaction receipt using Web Share API.
+ * @param locale — i18n.language for date formatting
  */
-export async function shareReceipt(tx: WalletTransaction, t: (key: string, options?: any) => string): Promise<boolean> {
+export async function shareReceipt(tx: WalletTransaction, t: (key: string, options?: any) => string, locale?: string): Promise<boolean> {
   if (!navigator.share) return false;
   try {
     const text = [
       `${t("wallet.transactionDetails")}`,
       `${t("wallet.txType")}: ${tx.type}`,
-      `${t("wallet.txDate")}: ${tx.createdAt ? new Date(tx.createdAt).toLocaleString() : "-"}`,
+      `${t("wallet.txDate")}: ${tx.createdAt ? new Date(tx.createdAt).toLocaleString(locale) : "-"}`,
       `${t("wallet.withdrawAmount")}: ${tx.amount > 0 ? "+" : ""}${tx.amount?.toLocaleString()}`,
       `${t("wallet.balanceAfter")}: ${tx.balanceAfter?.toLocaleString() || "-"}`,
       `${t("wallet.txId")}: ${tx.id}`,
@@ -154,13 +214,19 @@ export async function shareReceipt(tx: WalletTransaction, t: (key: string, optio
 
 /**
  * Attempt biometric (WebAuthn) confirmation.
- * Returns true if user confirmed, false if not available/cancelled.
+ * Returns true if user confirmed or biometrics unavailable (with warning), false if cancelled.
  */
 export async function biometricConfirm(): Promise<boolean> {
-  if (!window.PublicKeyCredential) return true; // fallback: skip if not supported
+  if (!window.PublicKeyCredential) {
+    console.warn("[biometricConfirm] WebAuthn not supported — skipping verification");
+    return true;
+  }
   try {
     const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    if (!available) return true; // not available, skip
+    if (!available) {
+      console.warn("[biometricConfirm] Platform authenticator not available — skipping");
+      return true;
+    }
     const challenge = new Uint8Array(32);
     crypto.getRandomValues(challenge);
     await navigator.credentials.get({
@@ -194,4 +260,60 @@ export function loadWithdrawPrefs(): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/**
+ * useConfirmDialog — replaces browser confirm() with a custom in-app dialog.
+ * Returns { confirm, ConfirmDialog } — render <ConfirmDialog /> in your JSX.
+ */
+export function useConfirmDialog() {
+  const { t } = useTranslation();
+  const [state, setState] = useState<{
+    message: string;
+    resolve: (val: boolean) => void;
+  } | null>(null);
+
+  const confirm = useCallback((message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setState({ message, resolve });
+    });
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    state?.resolve(true);
+    setState(null);
+  }, [state]);
+
+  const handleCancel = useCallback(() => {
+    state?.resolve(false);
+    setState(null);
+  }, [state]);
+
+  function ConfirmDialog() {
+    if (!state) return null;
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+        <div className="relative bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-sm p-5 space-y-4 mx-4">
+          <p className="text-sm text-white/80">{state.message}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleConfirm}
+              className="flex-1 py-2 bg-red-500/20 text-red-400 font-bold text-xs rounded-xl hover:bg-red-500/30 transition-colors"
+            >
+              {t("common.confirm", "تأكيد")}
+            </button>
+            <button
+              onClick={handleCancel}
+              className="flex-1 py-2 bg-white/5 text-white/60 font-bold text-xs rounded-xl hover:bg-white/10 transition-colors"
+            >
+              {t("common.cancel", "إلغاء")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return { confirm, ConfirmDialog };
 }
