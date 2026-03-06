@@ -73,7 +73,8 @@ router.post("/auth/login", rateLimitLogin, async (req, res) => {
 
 router.post("/auth/logout", requireAgent, (req, res) => {
   req.session.destroy(() => {
-    res.clearCookie("connect.sid");
+    res.clearCookie("ablox.sid");
+    res.clearCookie("connect.sid");  // clear legacy cookie
     res.json({ success: true });
   });
 });

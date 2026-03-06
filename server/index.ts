@@ -88,10 +88,34 @@ io.use((socket, next) => {
 
   // Create a minimal req/res pair to run express-session parsing
   // The sessionMiddleware is set up later, so we do manual cookie parsing here.
-  // Extract the connect.sid cookie value
-  const sidMatch = cookieHeader.match(/connect\.sid=s%3A([^.]+)\./);
+  // Extract the ablox.sid cookie value (user session)
+  const sidMatch = cookieHeader.match(/ablox\.sid=s%3A([^.]+)\./);
   if (!sidMatch) {
-    return next(); // No valid session cookie — allow as guest
+    // Fallback: try legacy connect.sid cookie (for existing sessions during migration)
+    const legacyMatch = cookieHeader.match(/connect\.sid=s%3A([^.]+)\./);
+    if (!legacyMatch) return next();
+    const legacyId = legacyMatch[1];
+    if (!legacyId) return next();
+    // Use legacy session ID
+    const redis = getRedis();
+    if (redis) {
+      const sessionKey = `ablox:sess:${legacyId}`;
+      redis.get(sessionKey).then((data) => {
+        if (data) {
+          try {
+            const sess = JSON.parse(data);
+            if (sess.userId && typeof sess.userId === "string") {
+              socket.data.userId = sess.userId;
+              socket.data.sessionVerified = true;
+            }
+          } catch { /* Invalid session data */ }
+        }
+        next();
+      }).catch(() => next());
+    } else {
+      next();
+    }
+    return;
   }
 
   const sessionId = sidMatch[1];
@@ -921,8 +945,11 @@ app.use((req, res, next) => {
   await initRedis();
 
   // ── Session middleware (Redis-backed, set up AFTER Redis connects) ──
+  // Separate cookies for user and admin to prevent session collision
+  // when both are opened in the same browser.
   const sessionStore = createRedisSessionStore(session);
-  const sessionMiddleware = session({
+  const userSessionMiddleware = session({
+    name: "ablox.sid",            // user session cookie
     secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
     resave: false,
     saveUninitialized: false,
@@ -931,6 +958,19 @@ app.use((req, res, next) => {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: "lax",
+    },
+  });
+  const adminSessionMiddleware = session({
+    name: "ablox.admin.sid",      // admin session cookie — separate from user
+    secret: SESSION_SECRET || "dev-only-session-secret-not-for-production",
+    resave: false,
+    saveUninitialized: false,
+    store: sessionStore,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 8 * 60 * 60 * 1000, // 8 hours for admin
       sameSite: "lax",
     },
   });
@@ -948,9 +988,13 @@ app.use((req, res, next) => {
   app.use((req, res, next) => {
     if (SESSION_SKIP_PATHS.has(req.path)) return next();
     if (req.method === "GET" && SESSION_SKIP_SOCIAL_GET.has(req.path)) return next();
-    return sessionMiddleware(req, res, next);
+    // Admin routes get their own cookie to prevent session collision
+    if (req.path.startsWith("/api/admin") || req.path.startsWith("/api/v1/admin")) {
+      return adminSessionMiddleware(req, res, next);
+    }
+    return userSessionMiddleware(req, res, next);
   });
-  console.log("[session] Session middleware initialized with", sessionStore ? "Redis store" : "MemoryStore");
+  console.log("[session] Dual session middleware initialized (user: ablox.sid, admin: ablox.admin.sid)");
 
   // ── Attach Redis Adapter for horizontal scaling ──
   try {

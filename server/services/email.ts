@@ -51,11 +51,18 @@ let otpConfig: OtpConfig = {
 let transporter: Transporter | null = null;
 
 /**
+ * Check if SMTP is configured and transport is available.
+ */
+export function isSmtpConfigured(): boolean {
+  return transporter !== null;
+}
+
+/**
  * Initialize or reinitialize SMTP transport.
  */
 function createTransport(): Transporter | null {
   if (!smtpConfig.user || !smtpConfig.pass) {
-    emailLog.warn("SMTP credentials not configured — email sending disabled");
+    emailLog.warn("⚠️ SMTP credentials not configured — email sending disabled. Set SMTP_USER and SMTP_PASS in .env");
     return null;
   }
 

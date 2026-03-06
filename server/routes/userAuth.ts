@@ -250,7 +250,8 @@ router.post("/logout", (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "حدث خطأ في تسجيل الخروج" });
     }
     if (userId) log(`User logout: ${userId}`);
-    res.clearCookie("connect.sid");
+    res.clearCookie("ablox.sid");
+    res.clearCookie("connect.sid");  // clear legacy cookie
     return res.json({ success: true, message: "تم تسجيل الخروج بنجاح" });
   });
 });

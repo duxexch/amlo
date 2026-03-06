@@ -13,7 +13,7 @@ import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => adminLog.info(msg);
 const adminLog = createLogger("admin");
 import { randomUUID } from "crypto";
-import { updateSmtpConfig, updateOtpConfig, sendEmail } from "../services/email";
+import { updateSmtpConfig, updateOtpConfig, sendEmail, isSmtpConfigured } from "../services/email";
 import {
   adminLoginSchema,
   createAgentSchema,
@@ -110,7 +110,8 @@ router.post("/auth/logout", requireAdmin, async (req, res) => {
   const adminId = req.session.adminId!;
   await storage.addAdminLog(adminId, "logout", "admin", adminId, "Admin logout");
   req.session.destroy(() => {
-    res.clearCookie("connect.sid");
+    res.clearCookie("ablox.admin.sid");
+    res.clearCookie("connect.sid");  // clear legacy cookie
     res.json({ success: true });
   });
 });
@@ -970,7 +971,7 @@ const defaultAdvancedSettings: Record<string, any> = {
     enabled: true,
     gmail: {
       enabled: true,
-      host: process.env.SMTP_HOST || "smtp.titan.email",
+      host: process.env.SMTP_HOST || "smtp.hostinger.com",
       port: parseInt(process.env.SMTP_PORT || "465"),
       username: process.env.SMTP_USER || "",
       password: process.env.SMTP_PASS || "",
@@ -1103,6 +1104,8 @@ router.get("/settings/advanced", requireAdmin, async (_req, res) => {
       if (safe.otp.sms.apiKey && safe.otp.sms.apiKey.length > 0) safe.otp.sms.apiKey = safe.otp.sms.apiKey.slice(0, 4) + "••••••••";
       if (safe.otp.sms.apiSecret && safe.otp.sms.apiSecret.length > 0) safe.otp.sms.apiSecret = safe.otp.sms.apiSecret.slice(0, 4) + "••••••••";
     }
+    // Add SMTP status so admin sees whether email is working
+    safe.smtpStatus = isSmtpConfigured() ? "connected" : "not_configured";
     return res.json({ success: true, data: safe });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في تحميل الإعدادات المتقدمة" });
