@@ -39,6 +39,9 @@ import * as schema from "../../shared/schema";
 import { getAllPricing, invalidatePricingCache } from "../pricingService";
 import { getQueueStats } from "../matchingEngine";
 import { paramStr } from "./socialHelpers";
+import { io } from "../index";
+import { getUserSocketId } from "../onlineUsers";
+import { decryptMessage } from "../utils/encryption";
 
 const router = Router();
 
@@ -764,6 +767,101 @@ router.get("/wallets/:userId", requireAdmin, async (req, res) => {
   }
 });
 
+// #14: Adjustment history endpoint
+router.get("/wallets/:userId/adjustments", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: [] });
+    const userId = paramStr(req.params.userId);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+
+    const adjustments = await db.select()
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        sql`${schema.walletTransactions.paymentMethod} = 'admin_adjustment'`
+      ))
+      .orderBy(sql`${schema.walletTransactions.createdAt} DESC`)
+      .limit(limit)
+      .offset(offset);
+
+    return res.json({ success: true, data: adjustments });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في تحميل سجل التعديلات" });
+  }
+});
+
+// #11: Admin CSV exports
+router.get("/export/transactions", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const type = req.query.type as string | undefined;
+
+    let conditions: any[] = [];
+    if (startDate) conditions.push(sql`${schema.walletTransactions.createdAt} >= ${new Date(startDate)}`);
+    if (endDate) { const ed = new Date(endDate); ed.setHours(23, 59, 59, 999); conditions.push(sql`${schema.walletTransactions.createdAt} <= ${ed}`); }
+    if (type) conditions.push(eq(schema.walletTransactions.type, type));
+
+    const rows = await db.select()
+      .from(schema.walletTransactions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(sql`${schema.walletTransactions.createdAt} DESC`)
+      .limit(10000);
+
+    const BOM = "\uFEFF";
+    const header = "ID,User ID,Type,Amount,Balance After,Currency,Description,Payment Method,Status,Created At\n";
+    const csv = rows.map((r: any) =>
+      `"${r.id}","${r.userId}","${r.type}","${r.amount}","${r.balanceAfter}","${r.currency}","${(r.description || "").replace(/"/g, '""')}","${r.paymentMethod || ""}","${r.status}","${r.createdAt}"`
+    ).join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="transactions_${Date.now()}.csv"`);
+    return res.send(BOM + header + csv);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "Export failed" });
+  }
+});
+
+router.get("/export/withdrawals", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+    const status = req.query.status as string | undefined;
+
+    let conditions: any[] = [];
+    if (status) conditions.push(eq(schema.withdrawalRequests.status, status));
+
+    const rows = await db.select()
+      .from(schema.withdrawalRequests)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(sql`${schema.withdrawalRequests.createdAt} DESC`)
+      .limit(10000);
+
+    // Enrich with user info
+    const enriched = await Promise.all(rows.map(async (r: any) => {
+      const user = await storage.getUser(r.userId);
+      return { ...r, username: user?.username || "—" };
+    }));
+
+    const BOM = "\uFEFF";
+    const header = "ID,User,Amount,Amount USD,Status,Payment Method,Admin Notes,Created At,Processed At\n";
+    const csv = enriched.map((r: any) =>
+      `"${r.id}","${r.username}","${r.amount}","${r.amountUsd || ""}","${r.status}","${r.paymentMethod || ""}","${(r.adminNotes || "").replace(/"/g, '""')}","${r.createdAt}","${r.processedAt || ""}"`
+    ).join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="withdrawals_${Date.now()}.csv"`);
+    return res.send(BOM + header + csv);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "Export failed" });
+  }
+});
+
 // ══════════════════════════════════════════════════════════
 // FINANCIAL DASHBOARD — لوحة الإحصائيات المالية
 // ══════════════════════════════════════════════════════════
@@ -806,14 +904,33 @@ router.get("/financial-stats", requireAdmin, async (_req, res) => {
       totalDiamonds: sql<number>`COALESCE(SUM(diamonds), 0)`,
     }).from(schema.users);
 
+    // #18: Weekly/monthly comparison
+    const prevWeekStart = new Date(weekStart);
+    prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+    const prevMonthStart = new Date(monthStart);
+    prevMonthStart.setMonth(prevMonthStart.getMonth() - 1);
+
+    const [comparisonStats] = await db.select({
+      prevWeekRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${prevWeekStart} AND ${schema.walletTransactions.createdAt} < ${weekStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      prevMonthRevenue: sql<number>`COALESCE(SUM(CASE WHEN type = 'purchase' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${prevMonthStart} AND ${schema.walletTransactions.createdAt} < ${monthStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      prevWeekWithdrawals: sql<number>`COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${prevWeekStart} AND ${schema.walletTransactions.createdAt} < ${weekStart} THEN ABS(amount) ELSE 0 END), 0)`,
+      prevMonthWithdrawals: sql<number>`COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' AND ${schema.walletTransactions.createdAt} >= ${prevMonthStart} AND ${schema.walletTransactions.createdAt} < ${monthStart} THEN ABS(amount) ELSE 0 END), 0)`,
+    }).from(schema.walletTransactions);
+
+    const weekRev = Number(revenueStats?.weekRevenue || 0);
+    const monthRev = Number(revenueStats?.monthRevenue || 0);
+    const prevWeekRev = Number(comparisonStats?.prevWeekRevenue || 0);
+    const prevMonthRev = Number(comparisonStats?.prevMonthRevenue || 0);
+    const calcGrowth = (cur: number, prev: number) => prev === 0 ? (cur > 0 ? 100 : 0) : Math.round(((cur - prev) / prev) * 100);
+
     return res.json({
       success: true,
       data: {
         revenue: {
           total: Number(revenueStats?.totalRevenue || 0),
           today: Number(revenueStats?.todayRevenue || 0),
-          week: Number(revenueStats?.weekRevenue || 0),
-          month: Number(revenueStats?.monthRevenue || 0),
+          week: weekRev,
+          month: monthRev,
         },
         giftVolume: Number(revenueStats?.totalGiftVolume || 0),
         withdrawn: Number(revenueStats?.totalWithdrawn || 0),
@@ -829,6 +946,14 @@ router.get("/financial-stats", requireAdmin, async (_req, res) => {
         circulation: {
           totalCoins: Number(coinStats?.totalCoins || 0),
           totalDiamonds: Number(coinStats?.totalDiamonds || 0),
+        },
+        comparison: {
+          weekGrowth: calcGrowth(weekRev, prevWeekRev),
+          monthGrowth: calcGrowth(monthRev, prevMonthRev),
+          prevWeekRevenue: prevWeekRev,
+          prevMonthRevenue: prevMonthRev,
+          prevWeekWithdrawals: Number(comparisonStats?.prevWeekWithdrawals || 0),
+          prevMonthWithdrawals: Number(comparisonStats?.prevMonthWithdrawals || 0),
         },
       },
     });
@@ -847,12 +972,48 @@ router.get("/withdrawal-requests", requireAdmin, async (req, res) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const status = (req.query.status as string) || "";
+    const search = (req.query.search as string) || "";
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
 
     const result = await storage.getWithdrawalRequests(page, limit, { status: status || undefined });
 
+    // #3: Decrypt payment details for admin, apply search/date filters
+    let enriched = await Promise.all((result.data || []).map(async (wr: any) => {
+      let decryptedDetails = wr.paymentDetails;
+      if (decryptedDetails && typeof decryptedDetails === "string" && decryptedDetails.includes(":")) {
+        try {
+          decryptedDetails = decryptMessage(decryptedDetails, `withdrawal:${wr.userId}`);
+        } catch { /* keep as-is */ }
+      }
+      const user = await storage.getUser(wr.userId);
+      return { ...wr, paymentDetails: decryptedDetails, user: user ? { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } : null };
+    }));
+
+    // #7: Apply search filter
+    if (search) {
+      const q = search.toLowerCase();
+      enriched = enriched.filter((wr: any) =>
+        wr.user?.username?.toLowerCase().includes(q) ||
+        wr.user?.displayName?.toLowerCase().includes(q) ||
+        wr.id?.toLowerCase().includes(q)
+      );
+    }
+
+    // #10: Apply date filters
+    if (startDate) {
+      const sd = new Date(startDate);
+      enriched = enriched.filter((wr: any) => new Date(wr.createdAt) >= sd);
+    }
+    if (endDate) {
+      const ed = new Date(endDate);
+      ed.setHours(23, 59, 59, 999);
+      enriched = enriched.filter((wr: any) => new Date(wr.createdAt) <= ed);
+    }
+
     return res.json({
       success: true,
-      data: result.data,
+      data: enriched,
       pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) },
     });
   } catch (err: any) {
@@ -921,6 +1082,20 @@ router.patch("/withdrawal-requests/:id", requireAdmin, async (req, res) => {
     });
 
     await storage.addAdminLog(req.session.adminId!, "update_withdrawal", "withdrawal", wrId, `Status → ${status}`);
+
+    // #2: Notify user via Socket.io when admin changes withdrawal status
+    try {
+      const wr = result;
+      const socketId = await getUserSocketId(wr.userId);
+      if (socketId) {
+        io.to(socketId).emit("withdrawal-status-change", { withdrawalId: wrId, status });
+        // If rejected with refund, also update balance
+        if (status === "rejected") {
+          const user = await storage.getUser(wr.userId);
+          if (user) io.to(socketId).emit("balance-update", { coins: user.coins });
+        }
+      }
+    } catch { /* non-critical */ }
 
     return res.json({ success: true, data: result });
   } catch (err: any) {

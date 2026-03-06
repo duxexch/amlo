@@ -507,6 +507,9 @@ export interface WithdrawalFilters {
   page?: number;
   limit?: number;
   status?: string;
+  search?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export const adminWithdrawals = {
@@ -520,6 +523,36 @@ export const adminWithdrawals = {
 
   update: (id: string, data: { status: string; adminNotes?: string }) =>
     request(`/withdrawal-requests/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+
+  exportCsvUrl: (status?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    return `/api/admin/export/withdrawals?${params}`;
+  },
+};
+
+// ── Admin Exports ────────────────────────────────────────
+
+export const adminExports = {
+  transactionsCsvUrl: (opts?: { startDate?: string; endDate?: string; type?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.startDate) params.set("startDate", opts.startDate);
+    if (opts?.endDate) params.set("endDate", opts.endDate);
+    if (opts?.type) params.set("type", opts.type);
+    return `/api/admin/export/transactions?${params}`;
+  },
+  withdrawalsCsvUrl: (status?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    return `/api/admin/export/withdrawals?${params}`;
+  },
+};
+
+// ── Adjustment History ───────────────────────────────────
+
+export const adminAdjustments = {
+  list: (userId: string, page = 1) =>
+    request<any>(`/wallets/${userId}/adjustments?page=${page}`),
 };
 
 // ── Logs ─────────────────────────────────────────────────

@@ -17,7 +17,7 @@ import { getUserSocketId, isUserOnline, areUsersOnline } from "../onlineUsers";
 import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
 import { storage } from "../storage";
-import { encryptMessage, decryptMessages } from "../utils/encryption";
+import { encryptMessage, decryptMessage, decryptMessages } from "../utils/encryption";
 import { getAllPricing } from "../pricingService";
 import {
   generateLiveKitToken,
@@ -1426,6 +1426,30 @@ router.get("/chat/settings", async (_req, res) => {
 // WALLET — المحفظة
 // ════════════════════════════════════════════════════════════
 
+/** Helper: get coins-to-USD conversion rate from DB settings */
+async function getConversionRate(): Promise<number> {
+  try {
+    const setting = await storage.getSetting("coins_per_usd");
+    if (setting?.value) {
+      const n = parseInt(setting.value);
+      if (n > 0) return n;
+    }
+  } catch {}
+  return 100; // default 100 coins = $1
+}
+
+/**
+ * GET /social/wallet/conversion-rate — سعر التحويل
+ */
+router.get("/wallet/conversion-rate", async (_req: Request, res: Response) => {
+  try {
+    const rate = await getConversionRate();
+    return res.json({ success: true, data: { coinsPerUsd: rate } });
+  } catch {
+    return res.json({ success: true, data: { coinsPerUsd: 100 } });
+  }
+});
+
 /**
  * GET /social/wallet/balance — رصيد المحفظة
  */
@@ -1493,7 +1517,7 @@ router.get("/wallet/income", async (req: Request, res: Response) => {
       .from(schema.walletTransactions)
       .where(and(
         eq(schema.walletTransactions.userId, userId),
-        eq(schema.walletTransactions.type, "gift_received"),
+        sql`${schema.walletTransactions.type} IN ('gift_received', 'commission')`,
         eq(schema.walletTransactions.status, "completed")
       ));
 
@@ -1550,6 +1574,17 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: `الحد الأدنى للسحب هو ${MIN_WITHDRAW} عملة` });
     }
 
+    // #16: Block if user already has active (pending/processing) withdrawal
+    const [activeWr] = await db.select({ cnt: sql<number>`COUNT(*)` })
+      .from(schema.withdrawalRequests)
+      .where(and(
+        eq(schema.withdrawalRequests.userId, userId),
+        sql`${schema.withdrawalRequests.status} IN ('pending', 'processing')`
+      ));
+    if (Number(activeWr?.cnt || 0) > 0) {
+      return res.status(400).json({ success: false, message: "لديك طلب سحب قيد المعالجة — انتظر حتى يُعالج أو ألغِه" });
+    }
+
     // ── Daily & Weekly withdrawal limits ──
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1599,9 +1634,14 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
         ? encryptMessage(parsed.data.paymentDetails, `withdrawal:${userId}`)
         : parsed.data.paymentDetails;
 
+      // #1: Calculate amountUsd
+      const convRate = await getConversionRate();
+      const amountUsd = (parsed.data.amount / convRate).toFixed(2);
+
       const [withdrawal] = await tx.insert(schema.withdrawalRequests).values({
         userId,
         amount: parsed.data.amount,
+        amountUsd,
         paymentMethodId: parsed.data.paymentMethodId,
         paymentDetails: encryptedDetails,
         status: "pending",
@@ -1695,7 +1735,7 @@ router.get("/wallet/income-chart", async (req: Request, res: Response) => {
     .from(schema.walletTransactions)
     .where(and(
       eq(schema.walletTransactions.userId, userId),
-      eq(schema.walletTransactions.type, "gift_received"),
+      sql`${schema.walletTransactions.type} IN ('gift_received', 'commission')`,
       eq(schema.walletTransactions.status, "completed"),
       sql`${schema.walletTransactions.createdAt} >= ${startDate}`
     ))
@@ -1794,6 +1834,66 @@ router.get("/wallet/total-spent", async (req: Request, res: Response) => {
     return res.json({ success: true, data: { totalSpent: Number(result?.total || 0) } });
   } catch (err: any) {
     socialLog.error({ err }, "Total spent error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/spending-breakdown — تفصيل المصروفات حسب النوع
+ */
+router.get("/wallet/spending-breakdown", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.json({ success: true, data: [] });
+
+    const breakdown = await db.select({
+      type: schema.walletTransactions.type,
+      total: sql<number>`COALESCE(SUM(ABS(amount)), 0)`,
+      count: sql<number>`COUNT(*)`,
+    })
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        sql`${schema.walletTransactions.amount} < 0`,
+        eq(schema.walletTransactions.status, "completed")
+      ))
+      .groupBy(schema.walletTransactions.type);
+
+    return res.json({ success: true, data: breakdown.map(b => ({ type: b.type, total: Number(b.total), count: Number(b.count) })) });
+  } catch (err: any) {
+    socialLog.error({ err }, "Spending breakdown error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+/**
+ * GET /social/wallet/transactions/export — تصدير كل المعاملات CSV
+ */
+router.get("/wallet/transactions/export", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const allTx = await db.select().from(schema.walletTransactions)
+      .where(eq(schema.walletTransactions.userId, userId))
+      .orderBy(desc(schema.walletTransactions.createdAt))
+      .limit(10000);
+
+    const csv = ["ID,Type,Amount,BalanceAfter,Currency,Description,Status,Date"]
+      .concat(allTx.map(tx =>
+        `${tx.id},${tx.type},${tx.amount},${tx.balanceAfter},${tx.currency},"${(tx.description || '').replace(/"/g, '""')}",${tx.status},${tx.createdAt?.toISOString() || ''}`
+      ))
+      .join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="wallet-transactions-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send("\uFEFF" + csv);
+  } catch (err: any) {
+    socialLog.error({ err }, "Export transactions error");
     return res.status(500).json({ success: false, message: "حدث خطأ" });
   }
 });

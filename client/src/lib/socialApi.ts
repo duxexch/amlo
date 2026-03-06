@@ -135,6 +135,9 @@ export const walletApi = {
   cancelWithdrawal: (withdrawalId: string) =>
     request("/wallet/cancel-withdrawal", { method: "POST", body: JSON.stringify({ withdrawalId }) }),
   totalSpent: () => request<{ totalSpent: number }>("/wallet/total-spent"),
+  conversionRate: () => request<{ coinsPerUsd: number }>("/wallet/conversion-rate"),
+  spendingBreakdown: () => request<{ type: string; total: number; count: number }[]>("/wallet/spending-breakdown"),
+  exportTransactionsCsv: () => `/api/wallet/transactions/export`,
 };
 
 // ── Gifts ──

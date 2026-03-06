@@ -6,7 +6,7 @@ import {
   Navigation, Rocket, Plane, Compass, Globe2, Star, Crown,
   Zap, CreditCard, Wallet as WalletIcon, ChevronDown, Eye, EyeOff,
   BadgeDollarSign, Gift, Plus, Minus, RefreshCw, Search, Copy, Check,
-  X, BarChart3, CalendarDays, Share2, Ban,
+  X, BarChart3, CalendarDays, Share2, Ban, DollarSign,
 } from "lucide-react";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
@@ -75,6 +75,8 @@ export function Wallet() {
   const [selectedTx, setSelectedTx] = useState<WalletTransaction | null>(null);
   const [totalSpent, setTotalSpent] = useState(0);
   const [cancellingWr, setCancellingWr] = useState<string | null>(null);
+  const [conversionRate, setConversionRate] = useState(100);
+  const [spendingBreakdown, setSpendingBreakdown] = useState<{ type: string; total: number; count: number }[]>([]);
 
   // Packages — fetched from API, with hardcoded fallback
   const fallbackPackages: RechargePackage[] = [
@@ -208,6 +210,10 @@ export function Wallet() {
         .then(data => setIncome(data || { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 }))
         .catch(() => {})
         .finally(() => setIncomeLoading(false));
+      // #12: Load spending breakdown
+      walletApi.spendingBreakdown()
+        .then((res: any) => setSpendingBreakdown(Array.isArray(res) ? res : res?.data || []))
+        .catch(() => {});
     }
   }, [activeTab]);
 
@@ -255,6 +261,10 @@ export function Wallet() {
   useEffect(() => {
     walletApi.totalSpent()
       .then((res: any) => setTotalSpent(res?.totalSpent || res?.data?.totalSpent || 0))
+      .catch(() => {});
+    // #4: Fetch conversion rate from API
+    walletApi.conversionRate()
+      .then((res: any) => { if (res?.coinsPerUsd > 0) setConversionRate(res.coinsPerUsd); })
       .catch(() => {});
   }, []);
 
@@ -626,54 +636,15 @@ export function Wallet() {
         {/* ──────── RECHARGE TAB ──────── */}
         {activeTab === "recharge" && (
           <motion.div key="recharge" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-black text-white">{t("wallet.rechargeTitle")}</h2>
-              <span className="text-sm text-white/25 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5" /> {t("wallet.securePaymentTitle")}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {packages.map((pkg, i) => (
-                <motion.div key={pkg.coins} initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: i * 0.04 }}>
-                  <ShimmerButton
-                    onClick={() => handlePurchase(pkg)}
-                    className={`w-full text-start p-5 rounded-3xl border transition-all duration-300 active:scale-95 ${
-                      pkg.popular
-                        ? "bg-gradient-to-br from-violet-600/20 to-purple-600/10 border-violet-500/30 ring-1 ring-violet-500/20"
-                        : "bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.12]"
-                    }`}>
-                    {pkg.popular && (
-                      <span className="absolute -top-2.5 end-4 bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[9px] font-black px-3 py-1 rounded-full shadow-lg shadow-violet-500/25 uppercase tracking-wider">
-                        {t("wallet.mostPopular")}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-3 mb-3">
-                      <img src={coinImg} alt="" className="w-10 h-10" />
-                      <p className="text-2xl font-black text-white">{pkg.coins.toLocaleString()}</p>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-white/50 font-bold text-sm">{pkg.price}</p>
-                      {pkg.bonus > 0 && (
-                        <p className="text-emerald-400 text-xs font-bold mt-0.5">+{pkg.bonus.toLocaleString()} <Gift className="w-3 h-3 inline" /></p>
-                      )}
-                    </div>
-                  </ShimmerButton>
-                </motion.div>
-              ))}
-            </div>
-
-            {/* Secure payment info */}
-            <GlassCard className="p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/15 to-emerald-500/5 border border-emerald-500/10 flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
-                </div>
-                <div>
-                  <h3 className="text-white font-bold mb-1">{t("wallet.securePaymentTitle")}</h3>
-                  <p className="text-white/30 text-sm leading-relaxed">{t("wallet.securePaymentDesc")}</p>
-                </div>
+            {/* #5: Coming Soon overlay */}
+            <GlassCard className="p-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500/20 to-purple-500/10 border border-violet-500/15 flex items-center justify-center">
+                <CreditCard className="w-8 h-8 text-violet-400" />
               </div>
+              <h3 className="text-xl font-black text-white mb-2">{t("wallet.comingSoon", "قريباً")}</h3>
+              <p className="text-white/40 text-sm leading-relaxed max-w-sm mx-auto">
+                {t("wallet.rechargeComingSoon", "خدمة الشحن قيد التطوير وستكون متاحة قريباً. ترقبوا!")}
+              </p>
             </GlassCard>
           </motion.div>
         )}
@@ -928,6 +899,41 @@ export function Wallet() {
                 </div>
               )}
             </GlassCard>
+
+            {/* #12: Spending Breakdown Chart */}
+            {spendingBreakdown.length > 0 && (
+              <GlassCard className="p-5 md:p-6">
+                <h3 className="text-white font-bold text-sm mb-4 flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-violet-400" /> {t("wallet.spendingBreakdown", "توزيع الإنفاق")}
+                </h3>
+                <div className="space-y-3">
+                  {(() => {
+                    const maxVal = Math.max(...spendingBreakdown.map(s => Math.abs(Number(s.total))), 1);
+                    const colors = ["bg-violet-500", "bg-pink-500", "bg-cyan-500", "bg-amber-500", "bg-emerald-500", "bg-red-500", "bg-blue-500"];
+                    return spendingBreakdown.map((item, i) => {
+                      const absTotal = Math.abs(Number(item.total));
+                      const pct = Math.round((absTotal / maxVal) * 100);
+                      return (
+                        <div key={item.type} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-white/60 capitalize">{t(`wallet.txType_${item.type}`, item.type.replace(/_/g, " "))}</span>
+                            <span className="text-white font-bold">{absTotal.toLocaleString()} <span className="text-white/30 font-normal">({item.count}×)</span></span>
+                          </div>
+                          <div className="h-2 bg-white/[0.05] rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.6, delay: i * 0.1 }}
+                              className={`h-full rounded-full ${colors[i % colors.length]}`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </GlassCard>
+            )}
           </motion.div>
         )}
 
@@ -981,7 +987,7 @@ export function Wallet() {
                   <div className="flex items-center gap-2 bg-violet-500/5 border border-violet-500/10 rounded-xl px-4 py-2 mt-1">
                     <DollarSign className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
                     <p className="text-violet-300 text-xs font-medium">
-                      ≈ ${(Number(withdrawAmount) / 100).toFixed(2)} USD
+                      ≈ ${(Number(withdrawAmount) / conversionRate).toFixed(2)} USD
                       <span className="text-white/20 mx-1">•</span>
                       <span className="text-white/30">{t("wallet.conversionNote")}</span>
                     </p>

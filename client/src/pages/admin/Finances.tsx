@@ -7,8 +7,9 @@ import {
   CheckCircle, XCircle, Eye, Clock, Ban, MessageSquare, Loader2,
   MoreHorizontal, FileText, Save, Search, TrendingUp, TrendingDown,
   Users, ArrowUpDown, Coins, Diamond, ChevronDown, Phone,
+  Download, CalendarDays, AlertTriangle,
 } from "lucide-react";
-import { adminTransactions, adminPaymentMethods, adminWallets, adminPricing, adminFinanceStats, adminWithdrawals } from "@/lib/adminApi";
+import { adminTransactions, adminPaymentMethods, adminWallets, adminPricing, adminFinanceStats, adminWithdrawals, adminExports, adminAdjustments } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 
 // ════════════════════════════════════════════════════════════
@@ -2250,6 +2251,12 @@ function FinancialDashboard() {
 
   useEffect(() => { loadStats(); }, [loadStats]);
 
+  // #13: Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(loadStats, 30000);
+    return () => clearInterval(interval);
+  }, [loadStats]);
+
   if (loading) {
     return (
       <div className="flex justify-center py-6">
@@ -2260,10 +2267,15 @@ function FinancialDashboard() {
 
   if (!stats) return null;
 
+  // #18: Growth indicators
+  const weekGrowth = stats.comparison?.weekGrowth ?? null;
+  const monthGrowth = stats.comparison?.monthGrowth ?? null;
+
   const cards = [
     { label: t("admin.finances.dashTotalRevenue"), value: stats.revenue?.total || 0, icon: DollarSign, color: "text-emerald-400", bg: "bg-emerald-500/10" },
     { label: t("admin.finances.dashTodayRevenue"), value: stats.revenue?.today || 0, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
-    { label: t("admin.finances.dashMonthRevenue"), value: stats.revenue?.month || 0, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-500/10" },
+    { label: t("admin.finances.dashMonthRevenue"), value: stats.revenue?.month || 0, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-500/10",
+      growth: monthGrowth },
     { label: t("admin.finances.dashTotalWithdrawn"), value: stats.withdrawn || 0, icon: ArrowUpRight, color: "text-red-400", bg: "bg-red-500/10" },
     { label: t("admin.finances.dashPendingWithdrawals"), value: stats.withdrawals?.pending || 0, icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", suffix: ` (${(stats.withdrawals?.pendingAmount || 0).toLocaleString()} ${t("admin.finances.coins")})` },
     { label: t("admin.finances.dashGiftVolume"), value: stats.giftVolume || 0, icon: Gift, color: "text-pink-400", bg: "bg-pink-500/10" },
@@ -2286,7 +2298,14 @@ function FinancialDashboard() {
           </div>
           <div className="min-w-0">
             <p className="text-[10px] text-white/40 truncate">{c.label}</p>
-            <p className="text-sm font-bold text-white">{c.value.toLocaleString()}{c.suffix || ""}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-bold text-white">{c.value.toLocaleString()}{(c as any).suffix || ""}</p>
+              {(c as any).growth !== undefined && (c as any).growth !== null && (
+                <span className={`text-[9px] font-bold ${(c as any).growth >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {(c as any).growth >= 0 ? "↑" : "↓"}{Math.abs((c as any).growth)}%
+                </span>
+              )}
+            </div>
           </div>
         </motion.div>
       ))}
@@ -2315,31 +2334,62 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedWr, setSelectedWr] = useState<any>(null);
   const [adminNotes, setAdminNotes] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [confirmAction, setConfirmAction] = useState<{ id: string; status: string; amount: number } | null>(null);
+  const [adjustments, setAdjustments] = useState<any[]>([]);
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await adminWithdrawals.list({ page: pagination.page, limit: pagination.limit, status: statusFilter });
+      const res = await adminWithdrawals.list({
+        page: pagination.page,
+        limit: pagination.limit,
+        status: statusFilter,
+        search,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+      });
       if (res?.data) {
         setRequests(Array.isArray(res.data) ? res.data : []);
         if (res.pagination) setPagination(res.pagination);
       }
     } catch { /* ignore */ }
     setLoading(false);
-  }, [pagination.page, pagination.limit, statusFilter]);
+  }, [pagination.page, pagination.limit, statusFilter, search, startDate, endDate]);
 
   useEffect(() => { loadRequests(); }, [loadRequests]);
-  useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [statusFilter, search]);
+  useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [statusFilter, search, startDate, endDate]);
+
+  // #17: Confirm dialog for large withdrawals (> 10,000 coins)
+  const LARGE_AMOUNT_THRESHOLD = 10000;
 
   const handleAction = async (id: string, status: "completed" | "rejected" | "processing") => {
     setActionLoading(id);
     try {
       await adminWithdrawals.update(id, { status, adminNotes: adminNotes || undefined });
       setSelectedWr(null);
+      setConfirmAction(null);
       setAdminNotes("");
       loadRequests();
     } catch { /* ignore */ }
     setActionLoading(null);
+  };
+
+  const initiateAction = (id: string, status: "completed" | "rejected" | "processing", amount: number) => {
+    if (status === "completed" && amount >= LARGE_AMOUNT_THRESHOLD) {
+      setConfirmAction({ id, status, amount });
+    } else {
+      handleAction(id, status);
+    }
+  };
+
+  // #14: Load adjustment history when viewing wallet detail
+  const loadAdjustments = async (userId: string) => {
+    try {
+      const res = await adminAdjustments.list(userId);
+      setAdjustments(Array.isArray(res?.data) ? res.data : []);
+    } catch { setAdjustments([]); }
   };
 
   const statusBadge = (s: string) => {
@@ -2358,18 +2408,45 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
       <AnimatePresence>
         {showFilters && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-            <div className="flex gap-2 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
-              {WR_STATUS_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setStatusFilter(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                    statusFilter === opt.value ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
-                  }`}
-                >
-                  {t(opt.labelKey)}
-                </button>
-              ))}
+            <div className="space-y-2 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+              <div className="flex gap-2 flex-wrap">
+                {WR_STATUS_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setStatusFilter(opt.value)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                      statusFilter === opt.value ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
+                    }`}
+                  >
+                    {t(opt.labelKey)}
+                  </button>
+                ))}
+              </div>
+              {/* #10: Date filters */}
+              <div className="flex gap-2 items-center">
+                <CalendarDays className="w-3.5 h-3.5 text-white/30 flex-shrink-0" />
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg h-8 px-2 text-xs text-white focus:outline-none focus:border-primary/50" />
+                <span className="text-white/20 text-xs">→</span>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg h-8 px-2 text-xs text-white focus:outline-none focus:border-primary/50" />
+                {(startDate || endDate) && (
+                  <button onClick={() => { setStartDate(""); setEndDate(""); }} className="text-white/30 hover:text-white/60">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {/* #11: CSV Export */}
+              <div className="flex gap-2">
+                <a href={adminExports.withdrawalsCsvUrl(statusFilter || undefined)} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
+                  <Download className="w-3.5 h-3.5" /> {t("admin.finances.exportCsv", "تصدير CSV")}
+                </a>
+                <a href={adminExports.transactionsCsvUrl({ startDate, endDate })} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors">
+                  <Download className="w-3.5 h-3.5" /> {t("admin.finances.exportTransactions", "تصدير المعاملات")}
+                </a>
+              </div>
             </div>
           </motion.div>
         )}
@@ -2410,7 +2487,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                       {(wr.status === "pending" || wr.status === "processing") && (
                         <>
                           <button
-                            onClick={() => handleAction(wr.id, "completed")}
+                            onClick={() => initiateAction(wr.id, "completed", wr.amount)}
                             disabled={actionLoading === wr.id}
                             className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                             title={t("admin.finances.approve")}
@@ -2428,7 +2505,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                       )}
                       {wr.status === "pending" && (
                         <button
-                          onClick={() => handleAction(wr.id, "processing")}
+                          onClick={() => initiateAction(wr.id, "processing", wr.amount)}
                           disabled={actionLoading === wr.id}
                           className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
                           title={t("admin.finances.markProcessing")}
@@ -2437,7 +2514,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                         </button>
                       )}
                       <button
-                        onClick={() => { setSelectedWr(wr); setAdminNotes(wr.adminNotes || ""); }}
+                        onClick={() => { setSelectedWr(wr); setAdminNotes(wr.adminNotes || ""); if (wr.user?.id) loadAdjustments(wr.userId); }}
                         className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 transition-colors"
                       >
                         <Eye className="w-3.5 h-3.5" />
@@ -2463,6 +2540,53 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
         </div>
       )}
 
+      {/* #17: Confirm dialog for large withdrawals */}
+      <AnimatePresence>
+        {confirmAction && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setConfirmAction(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#1a1a2e] border border-amber-500/20 rounded-2xl w-full max-w-sm p-5 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/10">
+                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">{t("admin.finances.confirmLargeWithdrawal", "تأكيد طلب سحب كبير")}</h3>
+                  <p className="text-xs text-white/40">{t("admin.finances.confirmLargeAmount", "هل أنت متأكد من الموافقة على سحب {{amount}} عملة؟").replace("{{amount}}", confirmAction.amount.toLocaleString())}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleAction(confirmAction.id, confirmAction.status as any)}
+                  disabled={!!actionLoading}
+                  className="flex-1 py-2 bg-emerald-500/20 text-emerald-400 font-bold text-xs rounded-xl hover:bg-emerald-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                  {t("admin.finances.approve")}
+                </button>
+                <button
+                  onClick={() => setConfirmAction(null)}
+                  className="flex-1 py-2 bg-white/5 text-white/60 font-bold text-xs rounded-xl hover:bg-white/10 transition-colors"
+                >
+                  {t("admin.finances.cancel", "إلغاء")}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Detail / Reject Modal */}
       <AnimatePresence>
         {selectedWr && (
@@ -2477,7 +2601,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-md p-5 space-y-4"
+              className="bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-md p-5 space-y-4 max-h-[85vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
@@ -2500,6 +2624,24 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                 )}
               </div>
 
+              {/* #14: Adjustment history */}
+              {adjustments.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold text-white/50 mb-2">{t("admin.finances.adjustmentHistory", "سجل التعديلات")}</h4>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {adjustments.map((adj: any) => (
+                      <div key={adj.id} className="flex justify-between items-center bg-white/[0.03] rounded-lg px-2.5 py-1.5 text-[10px]">
+                        <span className={adj.amount > 0 ? "text-emerald-400" : "text-red-400"}>
+                          {adj.amount > 0 ? "+" : ""}{adj.amount} {adj.currency}
+                        </span>
+                        <span className="text-white/30 truncate max-w-[50%]">{adj.description}</span>
+                        <span className="text-white/20">{new Date(adj.createdAt).toLocaleDateString("ar")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {(selectedWr.status === "pending" || selectedWr.status === "processing") && (
                 <div className="space-y-3">
                   <textarea
@@ -2510,7 +2652,7 @@ function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: 
                   />
                   <div className="flex gap-2">
                     <button
-                      onClick={() => handleAction(selectedWr.id, "completed")}
+                      onClick={() => initiateAction(selectedWr.id, "completed", selectedWr.amount)}
                       disabled={!!actionLoading}
                       className="flex-1 py-2 bg-emerald-500/20 text-emerald-400 font-bold text-xs rounded-xl hover:bg-emerald-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
