@@ -83,13 +83,13 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=classitest_classify-network"
       # HTTP → HTTPS redirect
-      - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`)"
+      - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`) || Host(`www.${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox-http.entrypoints=web"
       - "traefik.http.routers.ablox-http.middlewares=ablox-redirect"
       - "traefik.http.middlewares.ablox-redirect.redirectscheme.scheme=https"
       - "traefik.http.middlewares.ablox-redirect.redirectscheme.permanent=true"
       # HTTPS router — main entry
-      - "traefik.http.routers.ablox.rule=Host(`${DOMAIN:-mrco.live}`)"
+      - "traefik.http.routers.ablox.rule=Host(`${DOMAIN:-mrco.live}`) || Host(`www.${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox.entrypoints=websecure"
       - "traefik.http.routers.ablox.tls=true"
       - "traefik.http.routers.ablox.tls.certresolver=letsencrypt"

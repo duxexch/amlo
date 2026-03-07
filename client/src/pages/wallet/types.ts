@@ -37,5 +37,18 @@ export interface MilesPackage {
   price: string;
 }
 
+export interface WalletPaymentMethodOption {
+  id: string;
+  name: string;
+  nameAr?: string;
+  icon?: string;
+  provider?: string;
+  usageTarget?: "deposit" | "withdrawal" | "both";
+  countries?: string[];
+  fee?: string;
+  minAmount?: string | number;
+  maxAmount?: string | number;
+}
+
 // Re-export schema types
 export type { WalletTransaction, WithdrawalRequest };

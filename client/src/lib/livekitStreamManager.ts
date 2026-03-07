@@ -36,6 +36,13 @@ export interface StreamParticipantInfo {
   connectionQuality: string;
 }
 
+export interface LiveKitDebugStats {
+  rttMs: number | null;
+  jitterMs: number | null;
+  packetLossPct: number | null;
+  sampledAt: number;
+}
+
 export interface StreamEventHandlers {
   onStateChange: (state: StreamState) => void;
   onRemoteVideoTrack: (track: MediaStreamTrack, participantId: string) => void;
@@ -59,6 +66,7 @@ class LiveKitStreamManager {
   private role: StreamRole = "viewer";
   private localVideoTrack: LocalVideoTrack | null = null;
   private localAudioTrack: LocalAudioTrack | null = null;
+  private currentVideoQuality: "low" | "medium" | "high" = "medium";
 
   /**
    * Connect to a LiveKit room
@@ -79,6 +87,7 @@ class LiveKitStreamManager {
 
     this.handlers = handlers;
     this.role = role;
+    this.currentVideoQuality = options?.videoQuality ?? "medium";
     this.setState("connecting");
 
     try {
@@ -210,8 +219,8 @@ class LiveKitStreamManager {
       (quality: LKConnectionQuality, participant: any) => {
         const qualityStr = quality === LKConnectionQuality.Excellent ? "excellent"
           : quality === LKConnectionQuality.Good ? "good"
-          : quality === LKConnectionQuality.Poor ? "poor"
-          : "unknown";
+            : quality === LKConnectionQuality.Poor ? "poor"
+              : "unknown";
         this.handlers.onConnectionQualityChanged?.(qualityStr, participant.identity);
       }
     );
@@ -243,7 +252,7 @@ class LiveKitStreamManager {
       hasVideo: participant.isCameraEnabled,
       connectionQuality: participant.connectionQuality === LKConnectionQuality.Excellent ? "excellent"
         : participant.connectionQuality === LKConnectionQuality.Good ? "good"
-        : "poor",
+          : "poor",
     };
     this.handlers.onParticipantJoined?.(info);
 
@@ -283,7 +292,7 @@ class LiveKitStreamManager {
         video: publishVideo ? {
           resolution: videoQuality === "high" ? VideoPresets.h720.resolution
             : videoQuality === "medium" ? VideoPresets.h540.resolution
-            : VideoPresets.h360.resolution,
+              : VideoPresets.h360.resolution,
           facingMode: "user",
         } : false,
       });
@@ -308,6 +317,8 @@ class LiveKitStreamManager {
           }
         }
       }
+
+      this.currentVideoQuality = videoQuality;
     } catch (err: any) {
       console.error("[LiveKit] Media publish failed:", err);
       // Try audio-only fallback if video fails
@@ -317,6 +328,104 @@ class LiveKitStreamManager {
         return;
       }
       this.handlers.onError?.(err.message || "فشل في الوصول للميكروفون");
+    }
+  }
+
+  /**
+   * Update published camera quality without reconnecting the room.
+   */
+  async setVideoQuality(quality: "low" | "medium" | "high"): Promise<boolean> {
+    if (!this.localVideoTrack) return false;
+    if (this.currentVideoQuality === quality) return true;
+
+    try {
+      const resolution = quality === "high"
+        ? VideoPresets.h720.resolution
+        : quality === "medium"
+          ? VideoPresets.h540.resolution
+          : VideoPresets.h360.resolution;
+
+      await this.localVideoTrack.restartTrack({
+        resolution,
+        facingMode: "user",
+      });
+
+      this.currentVideoQuality = quality;
+      return true;
+    } catch (err: any) {
+      console.warn("[LiveKit] Failed to switch video quality:", err);
+      this.handlers.onError?.("تعذر تغيير جودة الفيديو");
+      return false;
+    }
+  }
+
+  getVideoQuality(): "low" | "medium" | "high" {
+    return this.currentVideoQuality;
+  }
+
+  /**
+   * Best-effort WebRTC transport stats from LiveKit peer connection internals.
+   */
+  async getWebRtcStats(): Promise<LiveKitDebugStats | null> {
+    if (!this.room) return null;
+
+    try {
+      const roomInternal = this.room as any;
+      const publisherPc: RTCPeerConnection | undefined = roomInternal?.engine?.pcManager?.publisher?.pc;
+      const subscriberPc: RTCPeerConnection | undefined = roomInternal?.engine?.pcManager?.subscriber?.pc;
+      const pc = publisherPc || subscriberPc;
+      if (!pc?.getStats) return null;
+
+      const stats = await pc.getStats();
+      let rttMs: number | null = null;
+      let jitterMs: number | null = null;
+      let packetsLost = 0;
+      let packetsTotal = 0;
+
+      stats.forEach((report: any) => {
+        if (report.type === "remote-inbound-rtp" && typeof report.roundTripTime === "number") {
+          const remoteRtt = report.roundTripTime * 1000;
+          if (Number.isFinite(remoteRtt)) {
+            rttMs = rttMs === null ? remoteRtt : Math.max(rttMs, remoteRtt);
+          }
+        }
+
+        if (report.type === "candidate-pair" && report.state === "succeeded" && typeof report.currentRoundTripTime === "number") {
+          const candidateRtt = report.currentRoundTripTime * 1000;
+          if (Number.isFinite(candidateRtt) && rttMs === null) {
+            rttMs = candidateRtt;
+          }
+        }
+
+        if (report.type === "inbound-rtp" || report.type === "outbound-rtp") {
+          const lost = typeof report.packetsLost === "number" ? report.packetsLost : 0;
+          const received = typeof report.packetsReceived === "number" ? report.packetsReceived : 0;
+          const sent = typeof report.packetsSent === "number" ? report.packetsSent : 0;
+          packetsLost += Math.max(0, lost);
+          packetsTotal += Math.max(0, received + sent + lost);
+
+          if (typeof report.jitter === "number") {
+            const candidateJitter = report.jitter * 1000;
+            if (Number.isFinite(candidateJitter)) {
+              jitterMs = jitterMs === null ? candidateJitter : Math.max(jitterMs, candidateJitter);
+            }
+          }
+        }
+      });
+
+      const packetLossPct = packetsTotal > 0
+        ? Math.min(100, Math.max(0, (packetsLost / packetsTotal) * 100))
+        : null;
+
+      return {
+        rttMs,
+        jitterMs,
+        packetLossPct,
+        sampledAt: Date.now(),
+      };
+    } catch (err) {
+      console.warn("[LiveKit] Failed reading WebRTC stats:", err);
+      return null;
     }
   }
 
@@ -464,6 +573,7 @@ class LiveKitStreamManager {
     }
     this.localVideoTrack = null;
     this.localAudioTrack = null;
+    this.currentVideoQuality = "medium";
     this.handlers = {};
     this.state = "idle";
     this.role = "viewer";

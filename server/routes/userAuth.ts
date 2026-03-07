@@ -17,7 +17,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { eq, and, or } from "drizzle-orm";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { getDb } from "../db";
 import { cacheGet, cacheSet, cacheDel } from "../redis";
 import { createLogger } from "../logger";
@@ -48,6 +48,14 @@ const log = (msg: string) => authLog.info(msg);
 // ── Helper: Express 5 param extraction ──
 function paramStr(val: string | string[] | undefined): string {
   return Array.isArray(val) ? val[0] : val || "";
+}
+
+function normalizeOtpCode(value: unknown): string {
+  return String(value || "")
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, "")
+    .slice(0, 6);
 }
 
 // ── Helper: require authenticated user ──
@@ -81,7 +89,7 @@ const authLimiter = rateLimit({
   max: 15, // 15 attempts per window
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip || "unknown",
+  keyGenerator: (req) => ipKeyGenerator(req.ip || "127.0.0.1"),
   message: { success: false, message: "عدد كبير من المحاولات — حاول بعد 15 دقيقة" },
 });
 
@@ -90,7 +98,7 @@ const strictAuthLimiter = rateLimit({
   max: 5, // 5 attempts per hour
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip || "unknown",
+  keyGenerator: (req) => ipKeyGenerator(req.ip || "127.0.0.1"),
   message: { success: false, message: "عدد كبير من المحاولات — حاول لاحقاً" },
 });
 
@@ -287,7 +295,7 @@ router.get("/me", async (req: Request, res: Response) => {
     const user = await storage.getUser(userId);
     if (!user) {
       // Session points to deleted user
-      req.session.destroy(() => {});
+      req.session.destroy(() => { });
       return res.status(401).json({ success: false, message: "المستخدم غير موجود" });
     }
 
@@ -783,7 +791,8 @@ router.post("/otp/send", async (req: Request, res: Response) => {
 
     const result = await sendOtp(email.trim());
     if (!result.success) {
-      return res.status(429).json(result);
+      const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
+      return res.status(status).json(result);
     }
 
     return res.json(result);
@@ -803,7 +812,12 @@ router.post("/otp/verify", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "يرجى إدخال البريد والرمز" });
     }
 
-    const result = await verifyOtp(email.trim(), String(code).trim());
+    const normalizedCode = normalizeOtpCode(code);
+    if (normalizedCode.length !== 6) {
+      return res.status(400).json({ success: false, message: "رمز التحقق يجب أن يكون 6 أرقام" });
+    }
+
+    const result = await verifyOtp(email.trim(), normalizedCode);
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -846,7 +860,8 @@ router.post("/otp/send-register", async (req: Request, res: Response) => {
 
     const result = await sendOtp(email.trim());
     if (!result.success) {
-      return res.status(429).json(result);
+      const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
+      return res.status(status).json(result);
     }
 
     return res.json(result);
@@ -981,10 +996,16 @@ router.post("/login/otp", async (req: Request, res: Response) => {
 
     const result = await sendOtp(user.email);
     if (!result.success) {
-      return res.status(429).json(result);
+      const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
+      return res.status(status).json(result);
     }
 
-    return res.json({ success: true, message: "تم إرسال رمز التحقق إلى بريدك الإلكتروني", email: maskEmail(user.email) });
+    return res.json({
+      success: true,
+      message: "تم إرسال رمز التحقق إلى بريدك الإلكتروني",
+      email: maskEmail(user.email),
+      ...(result as any).devCode ? { devCode: (result as any).devCode } : {},
+    });
   } catch (err: any) {
     authLog.error({ err }, "Login OTP send error");
     return res.status(500).json({ success: false, message: "حدث خطأ في إرسال رمز التحقق" });
@@ -1009,7 +1030,12 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "لا يوجد بريد إلكتروني مرتبط بالحساب" });
     }
 
-    const result = await verifyOtp(user.email, String(code).trim());
+    const normalizedCode = normalizeOtpCode(code);
+    if (normalizedCode.length !== 6) {
+      return res.status(400).json({ success: false, message: "رمز التحقق يجب أن يكون 6 أرقام" });
+    }
+
+    const result = await verifyOtp(user.email, normalizedCode);
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -1102,7 +1128,7 @@ router.delete("/account", async (req: Request, res: Response) => {
     await storage.deleteUser(userId);
 
     // Destroy session
-    req.session.destroy(() => {});
+    req.session.destroy(() => { });
 
     log(`User ${userId} deleted their account`);
     return res.json({ success: true, message: "تم حذف الحساب بنجاح" });
@@ -1124,14 +1150,14 @@ router.get("/notification-preferences", async (req: Request, res: Response) => {
     // Return defaults if no preferences exist yet
     return res.json({
       success: true,
-      data: prefs || {
-        messages: true,
-        calls: true,
-        friendRequests: true,
-        gifts: true,
-        streams: true,
-        systemUpdates: true,
-        marketing: false,
+      data: {
+        messages: prefs?.messages ?? true,
+        calls: prefs?.calls ?? true,
+        friendRequests: prefs?.friendRequests ?? true,
+        gifts: prefs?.gifts ?? true,
+        streams: prefs?.streams ?? true,
+        systemUpdates: prefs?.systemUpdates ?? true,
+        marketing: prefs?.marketing ?? false,
       },
     });
   } catch (err: any) {
@@ -1154,10 +1180,72 @@ router.put("/notification-preferences", async (req: Request, res: Response) => {
     }
 
     const updated = await storage.upsertNotificationPreferences(userId, parsed.data);
-    return res.json({ success: true, data: updated });
+    return res.json({
+      success: true,
+      data: {
+        messages: updated?.messages ?? true,
+        calls: updated?.calls ?? true,
+        friendRequests: updated?.friendRequests ?? true,
+        gifts: updated?.gifts ?? true,
+        streams: updated?.streams ?? true,
+        systemUpdates: updated?.systemUpdates ?? true,
+        marketing: updated?.marketing ?? false,
+      },
+    });
   } catch (err: any) {
     authLog.error({ err }, "Update notification preferences error");
     return res.status(500).json({ success: false, message: "حدث خطأ في تحديث الإعدادات" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// GET /auth/chat-translation-preferences — تفضيلات ترجمة الشات
+// ════════════════════════════════════════════════════════════
+router.get("/chat-translation-preferences", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const prefs = await storage.getNotificationPreferences(userId);
+    return res.json({
+      success: true,
+      data: {
+        chatAutoTranslate: prefs?.chatAutoTranslate ?? true,
+        chatShowOriginalText: prefs?.chatShowOriginalText ?? true,
+        chatTranslateLang: prefs?.chatTranslateLang ?? "ar",
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Get chat translation preferences error");
+    return res.status(500).json({ success: false, message: "حدث خطأ" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// PUT /auth/chat-translation-preferences — تحديث تفضيلات ترجمة الشات
+// ════════════════════════════════════════════════════════════
+router.put("/chat-translation-preferences", async (req: Request, res: Response) => {
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const parsed = schema.updateChatTranslationPrefsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.flatten() });
+    }
+
+    const updated = await storage.upsertNotificationPreferences(userId, parsed.data);
+    return res.json({
+      success: true,
+      data: {
+        chatAutoTranslate: updated?.chatAutoTranslate ?? true,
+        chatShowOriginalText: updated?.chatShowOriginalText ?? true,
+        chatTranslateLang: updated?.chatTranslateLang ?? "ar",
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Update chat translation preferences error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في تحديث إعدادات الترجمة" });
   }
 });
 

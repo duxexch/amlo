@@ -9,7 +9,7 @@
  * GET    /api/social/stories/:id/viewers — Get story viewers
  */
 import { Router, type Request, type Response } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { getPool } from "../db";
 import { createStorySchema } from "../../shared/schema";
 import { createLogger } from "../logger";
@@ -23,7 +23,7 @@ const storyCreateLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.session as any)?.userId || req.ip || "unknown",
+  keyGenerator: (req) => (req.session as any)?.userId || ipKeyGenerator(req.ip || "127.0.0.1"),
   message: { success: false, message: "تم تجاوز الحد الأقصى لإنشاء القصص. حاول لاحقاً" },
 });
 

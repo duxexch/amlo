@@ -145,10 +145,12 @@ io.use((socket, next) => {
       next();
     });
   } else {
-    // No Redis — fall back to trusting handshake auth (dev only)
-    const userId = socket.handshake.auth?.userId;
-    if (userId && typeof userId === "string" && userId.length <= 100) {
-      socket.data.userId = userId;
+    // No Redis: never trust client-provided identity in production.
+    if (process.env.NODE_ENV !== "production") {
+      const userId = socket.handshake.auth?.userId;
+      if (userId && typeof userId === "string" && userId.length <= 100) {
+        socket.data.userId = userId;
+      }
     }
     next();
   }
@@ -192,7 +194,7 @@ setInterval(() => {
 }, 120_000).unref(); // Every 2 minutes
 
 // Online users — Redis-backed (shared across nodes)
-import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, getUserSocketIdSync, removeUserOnline, getOnlineUsersCount, setLastSeen } from "./onlineUsers";
+import { onlineUsersMap, startOnlineUsersCleanup, setUserOnline, getUserSocketId, removeUserOnline, getOnlineUsersCount, setLastSeen } from "./onlineUsers";
 
 // Matching engine — random chat queue
 import { joinQueue, leaveQueue, findMatch, endRandomCall, startMatchingLoop, startQueueCleanup, type MatchFilters } from "./matchingEngine";
@@ -360,6 +362,13 @@ io.on("connection", (socket) => {
     return typeof v === "string" && v.length > 0 && v.length <= maxLen;
   }
 
+  // Session-authenticated sockets should immediately join the per-user room.
+  const sessionUserId = socket.data.userId;
+  if (isStr(sessionUserId, 100)) {
+    socket.join(`user:${sessionUserId}`);
+    void setUserOnline(sessionUserId, socket.id);
+  }
+
   // ── User goes online ──
   socket.on("user-online", async (userId: unknown) => {
     if (!isStr(userId, 100)) return;
@@ -367,16 +376,6 @@ io.on("connection", (socket) => {
     if (socket.data.userId && socket.data.userId !== userId) {
       log(`Socket ${socket.id} tried to change userId from ${socket.data.userId} to ${userId}`, "socket.io");
       return;
-    }
-    // Prevent hijacking: if another socket already owns this userId, reject
-    const existing = getUserSocketIdSync(userId);
-    if (existing && existing !== socket.id) {
-      const existingSocket = io.sockets.sockets.get(existing);
-      if (existingSocket?.connected) {
-        log(`Socket ${socket.id} rejected: userId ${userId} already owned by ${existing}`, "socket.io");
-        socket.emit("auth-error", { message: "هذا الحساب متصل من جهاز آخر" });
-        return;
-      }
     }
     await setUserOnline(userId, socket.id);
     socket.data.userId = userId;
@@ -473,27 +472,31 @@ io.on("connection", (socket) => {
     // Verify socket actually joined this room
     if (!socket.rooms.has(`room:${roomId}`)) return;
 
+    const currentUserId = socket.data.userId;
+    if (!isStr(currentUserId, 100)) {
+      socket.emit("error", { type: "unauthorized", message: "يجب تسجيل الدخول للمشاركة في الشات" });
+      return;
+    }
+
     // Enforce stream-level mute in live room chat.
-    if (socket.data.userId) {
-      const db = getDb();
-      if (db) {
-        const [muted] = await db.select({ id: schema.streamMutedUsers.id })
-          .from(schema.streamMutedUsers)
-          .where(and(
-            eq(schema.streamMutedUsers.streamId, roomId),
-            eq(schema.streamMutedUsers.userId, socket.data.userId),
-          ))
-          .limit(1);
-        if (muted) {
-          liveTelemetry.chatMutedBlocked++;
-          socket.emit("error", { type: "muted", message: "تم كتمك في هذا البث" });
-          return;
-        }
+    const db = getDb();
+    if (db) {
+      const [muted] = await db.select({ id: schema.streamMutedUsers.id })
+        .from(schema.streamMutedUsers)
+        .where(and(
+          eq(schema.streamMutedUsers.streamId, roomId),
+          eq(schema.streamMutedUsers.userId, currentUserId),
+        ))
+        .limit(1);
+      if (muted) {
+        liveTelemetry.chatMutedBlocked++;
+        socket.emit("error", { type: "muted", message: "تم كتمك في هذا البث" });
+        return;
       }
     }
 
     // ── Throttle: prevent spam flooding ──
-    if (socket.data.userId && isChatRateLimited(socket.data.userId)) {
+    if (isChatRateLimited(currentUserId)) {
       socket.emit("error", { type: "rate_limited", message: "أنت ترسل بسرعة كبيرة. انتظر قليلاً" });
       return;
     }
@@ -513,10 +516,11 @@ io.on("connection", (socket) => {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       roomId,
       message: message.slice(0, 2000),
-      // Use server-verified userId instead of client-supplied user object
-      user: socket.data.userId
-        ? { id: socket.data.userId, name: typeof user === "object" && user ? ((user as any).name || "مستخدم") : "مستخدم" }
-        : (typeof user === "object" && user ? { id: (user as any).id, name: (user as any).name } : null),
+      // Always use server-verified userId; never trust client-provided identity.
+      user: {
+        id: currentUserId,
+        name: typeof user === "object" && user ? ((user as any).name || "مستخدم") : "مستخدم",
+      },
       ts: Date.now(),
     };
     io.to(`room:${roomId}`).emit("chat-message", chatMsg);
@@ -565,7 +569,7 @@ io.on("connection", (socket) => {
         targetUserId,
         expiresAt: Date.now() + SPEAKER_INVITE_TTL_MS,
       });
-      io.to(targetSocketId).emit("speaker-invite", {
+      io.to(`user:${targetUserId}`).emit("speaker-invite", {
         roomId,
         hostId: socket.data.userId,
         hostName: typeof hostName === "string" ? hostName : "المضيف",
@@ -609,7 +613,7 @@ io.on("connection", (socket) => {
     liveTelemetry.speakerRejects++;
     const hostSocketId = await getUserSocketId(hostId);
     if (hostSocketId) {
-      io.to(hostSocketId).emit("speaker-declined", {
+      io.to(`user:${hostId}`).emit("speaker-declined", {
         roomId,
         userId: socket.data.userId,
       });
@@ -651,7 +655,7 @@ io.on("connection", (socket) => {
     typingThrottle.set(uid, Date.now());
     const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("typing", {
+      io.to(`user:${receiverId}`).emit("typing", {
         conversationId,
         userId: socket.data.userId,
       });
@@ -664,7 +668,7 @@ io.on("connection", (socket) => {
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
     const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("stop-typing", {
+      io.to(`user:${receiverId}`).emit("stop-typing", {
         conversationId,
         userId: socket.data.userId,
       });
@@ -678,7 +682,7 @@ io.on("connection", (socket) => {
     if (!isStr(conversationId, 100) || !isStr(receiverId, 100)) return;
     const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messages-read", {
+      io.to(`user:${receiverId}`).emit("messages-read", {
         conversationId,
         readerId: socket.data.userId,
       });
@@ -720,7 +724,7 @@ io.on("connection", (socket) => {
 
     const senderSocketId = await getUserSocketId(msg.senderId);
     if (senderSocketId) {
-      io.to(senderSocketId).emit("message-delivered", {
+      io.to(`user:${msg.senderId}`).emit("message-delivered", {
         messageId,
         conversationId,
         deliveredAt: new Date().toISOString(),
@@ -922,8 +926,11 @@ io.on("connection", (socket) => {
     if (userId) {
       await leaveQueue(userId);
       await endRandomCall(userId);
-      await removeUserOnline(userId);
-      await setLastSeen(userId);
+      const stillConnected = (io.sockets.adapter.rooms.get(`user:${userId}`)?.size || 0) > 0;
+      if (!stillConnected) {
+        await removeUserOnline(userId);
+        await setLastSeen(userId);
+      }
 
       // ── World session disconnect notification ──
       // Notify any world session partner that this user disconnected
@@ -975,7 +982,7 @@ function persistRoomMessage(roomId: string, msg: object) {
       .ltrim(key, 0, 199)
       .expire(key, 86400)
       .exec()
-      .catch(() => {}); // fire-and-forget, non-critical
+      .catch(() => { }); // fire-and-forget, non-critical
   } catch { /* non-critical */ }
 }
 

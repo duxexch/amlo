@@ -40,6 +40,9 @@ export interface ChatMessage {
   _pending?: boolean;
   /** Failed send marker (for retry) */
   _failed?: boolean;
+  /** Auto-retry attempts for transient failures */
+  _retryCount?: number;
+  _nextRetryAt?: string;
   /** Delivery confirmation */
   _delivered?: boolean;
 }

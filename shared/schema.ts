@@ -1161,6 +1161,9 @@ export const notificationPreferences = pgTable("notification_preferences", {
   streams: boolean("streams").notNull().default(true),
   systemUpdates: boolean("system_updates").notNull().default(true),
   marketing: boolean("marketing").notNull().default(false),
+  chatAutoTranslate: boolean("chat_auto_translate").notNull().default(true),
+  chatShowOriginalText: boolean("chat_show_original_text").notNull().default(true),
+  chatTranslateLang: text("chat_translate_lang").notNull().default("ar"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   index("notif_prefs_user_idx").on(table.userId),
@@ -1209,6 +1212,68 @@ export const streamViewers = pgTable("stream_viewers", {
 
 export type StreamViewer = typeof streamViewers.$inferSelect;
 
+// ════════════════════════════════════════════════════════════
+// 36. USER_DAILY_MISSIONS — Daily missions claims + streaks
+// ════════════════════════════════════════════════════════════
+export const userDailyMissions = pgTable("user_daily_missions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  missionDate: date("mission_date").notNull(),
+  streakCount: integer("streak_count").notNull().default(1),
+  xpAwarded: integer("xp_awarded").notNull().default(0),
+  coinsAwarded: integer("coins_awarded").notNull().default(0),
+  metadata: text("metadata"),
+  claimedAt: timestamp("claimed_at").notNull().defaultNow(),
+}, (table) => [
+  unique("uq_user_daily_missions_date").on(table.userId, table.missionDate),
+  index("user_daily_missions_user_idx").on(table.userId),
+  index("user_daily_missions_date_idx").on(table.missionDate),
+]);
+
+export type UserDailyMission = typeof userDailyMissions.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 37. STREAM_DIRECTOR_EVENTS — Smart Director interaction telemetry
+// ════════════════════════════════════════════════════════════
+export const streamDirectorEvents = pgTable("stream_director_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tipId: text("tip_id").notNull(),
+  action: text("action").notNull(), // shown | accepted | dismissed
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stream_director_events_stream_idx").on(table.streamId),
+  index("stream_director_events_host_idx").on(table.hostId),
+  index("stream_director_events_created_idx").on(table.createdAt),
+]);
+
+export type StreamDirectorEvent = typeof streamDirectorEvents.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 38. STREAM_AUTO_CLIPS — Auto-generated clip markers from engagement peaks
+// ════════════════════════════════════════════════════════════
+export const streamAutoClips = pgTable("stream_auto_clips", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  streamId: varchar("stream_id").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  cueType: text("cue_type").notNull(), // chat_burst | gift_burst | viewer_spike | retention_recovery
+  title: text("title").notNull(),
+  reason: text("reason").notNull(),
+  startOffsetSec: integer("start_offset_sec").notNull(),
+  endOffsetSec: integer("end_offset_sec").notNull(),
+  score: integer("score").notNull().default(0),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("stream_auto_clips_stream_idx").on(table.streamId),
+  index("stream_auto_clips_host_idx").on(table.hostId),
+  index("stream_auto_clips_created_idx").on(table.createdAt),
+]);
+
+export type StreamAutoClip = typeof streamAutoClips.$inferSelect;
+
 // ═══ Additional Validation Schemas ═══
 
 export const sendGiftSchema = z.object({
@@ -1238,6 +1303,12 @@ export const updateNotificationPrefsSchema = z.object({
   streams: z.boolean().optional(),
   systemUpdates: z.boolean().optional(),
   marketing: z.boolean().optional(),
+});
+
+export const updateChatTranslationPrefsSchema = z.object({
+  chatAutoTranslate: z.boolean().optional(),
+  chatShowOriginalText: z.boolean().optional(),
+  chatTranslateLang: z.string().trim().min(2).max(20).optional(),
 });
 
 // ════════════════════════════════════════════════════════════

@@ -5,6 +5,13 @@ import { User, Mail, Lock, ArrowRight, AlertCircle, Gift, Phone, Eye, EyeOff, Ch
 import { useTranslation } from "react-i18next";
 import { authApi, loginOtpApi } from "../lib/authApi";
 
+function normalizeOtpDigits(value: string): string {
+  return value
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, "");
+}
+
 // Extend window for OAuth SDKs
 declare global {
   interface Window {
@@ -115,7 +122,7 @@ export function UserAuth() {
           setShowOtp(true);
           setOtpTimer(60);
           setOtpValues(["", "", "", "", "", ""]);
-          setAuthSuccess(otpResult.message);
+          setAuthSuccess(otpResult.devCode ? `${otpResult.message} - OTP: ${otpResult.devCode}` : otpResult.message);
         } else {
           setAuthError(otpResult.message);
         }
@@ -198,11 +205,12 @@ export function UserAuth() {
   };
 
   const handle2FAVerify = async () => {
-    if (!twoFAUserId || twoFACode.length !== 6) return;
+    const normalizedCode = normalizeOtpDigits(twoFACode).slice(0, 6);
+    if (!twoFAUserId || normalizedCode.length !== 6) return;
     setAuthLoading(true);
     setAuthError(null);
     try {
-      await authApi.verify2FA(twoFAUserId, twoFACode);
+      await authApi.verify2FA(twoFAUserId, normalizedCode);
       setLocation("/");
     } catch (err: any) {
       setAuthError(err?.message || "رمز التحقق غير صحيح");
@@ -212,7 +220,7 @@ export function UserAuth() {
   };
 
   const handleOtpSubmit = async () => {
-    const code = otpValues.join("");
+    const code = normalizeOtpDigits(otpValues.join(""));
     if (code.length !== 6) return;
 
     setAuthLoading(true);
@@ -248,15 +256,31 @@ export function UserAuth() {
   };
 
   const handleOtpChange = (index: number, value: string) => {
-    if (value.length > 1) value = value[0];
-    if (!/^\d*$/.test(value)) return;
+    const digits = normalizeOtpDigits(value);
+    const nextChar = digits.slice(0, 1);
     const newOtp = [...otpValues];
-    newOtp[index] = value;
+    newOtp[index] = nextChar;
     setOtpValues(newOtp);
-    if (value && index < 5) {
+    if (nextChar && index < 5) {
       const next = document.getElementById(`otp-${index + 1}`);
       next?.focus();
     }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>, mode: "register" | "login") => {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text") || "";
+    const digits = normalizeOtpDigits(text).slice(0, 6);
+    if (!digits) return;
+    const arr = Array.from({ length: 6 }, (_, i) => digits[i] || "");
+    if (mode === "register") {
+      setOtpValues(arr);
+    } else {
+      setLoginOtpValues(arr);
+    }
+    const focusIndex = Math.min(Math.max(digits.length - 1, 0), 5);
+    const inputId = mode === "register" ? `otp-${focusIndex}` : `login-otp-${focusIndex}`;
+    document.getElementById(inputId)?.focus();
   };
 
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
@@ -312,7 +336,7 @@ export function UserAuth() {
                 inputMode="numeric"
                 maxLength={6}
                 value={twoFACode}
-                onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(e) => setTwoFACode(normalizeOtpDigits(e.target.value).slice(0, 6))}
                 placeholder="000000"
                 className="w-full text-center text-3xl tracking-[0.5em] font-mono px-4 py-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:border-primary focus:ring-1 focus:ring-primary outline-none mb-6"
                 autoFocus
@@ -364,11 +388,11 @@ export function UserAuth() {
                     maxLength={1}
                     value={val}
                     onChange={(e) => {
-                      const v = e.target.value;
-                      if (v.length > 1 || (v && !/^\d$/.test(v))) return;
+                      const v = normalizeOtpDigits(e.target.value).slice(0, 1);
                       const arr = [...loginOtpValues]; arr[i] = v; setLoginOtpValues(arr);
                       if (v && i < 5) document.getElementById(`login-otp-${i + 1}`)?.focus();
                     }}
+                    onPaste={(e) => handleOtpPaste(e, "login")}
                     onKeyDown={(e) => {
                       if (e.key === "Backspace" && !loginOtpValues[i] && i > 0) document.getElementById(`login-otp-${i - 1}`)?.focus();
                     }}
@@ -379,7 +403,7 @@ export function UserAuth() {
 
               <button
                 onClick={async () => {
-                  const code = loginOtpValues.join("");
+                  const code = normalizeOtpDigits(loginOtpValues.join(""));
                   if (code.length !== 6) return;
                   setAuthLoading(true); setAuthError(null);
                   try {
@@ -447,6 +471,7 @@ export function UserAuth() {
                     try {
                       const result = await loginOtpApi.sendOtp();
                       setLoginOtpEmail(result.email || "");
+                      setAuthSuccess(result.devCode ? `${t("auth.otpTitle", "رمز التحقق")}: ${result.devCode}` : null);
                       setShowLoginChoice(false);
                       setShowLoginOtp(true);
                       setLoginOtpValues(["", "", "", "", "", ""]);
@@ -507,6 +532,7 @@ export function UserAuth() {
                     maxLength={1}
                     value={val}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
+                    onPaste={(e) => handleOtpPaste(e, "register")}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
                     className="w-12 h-14 bg-white/5 border border-white/10 rounded-xl text-center text-white text-xl font-bold focus:outline-none focus:border-primary transition-all"
                   />

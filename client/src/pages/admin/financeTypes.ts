@@ -32,6 +32,7 @@ export interface PaymentMethod {
   minAmount: number;
   maxAmount: number;
   fee: string;
+  usageTarget?: "deposit" | "withdrawal" | "both";
   isActive: boolean;
   sortOrder: number;
   instructions: string;
@@ -102,6 +103,12 @@ export const PM_TYPE_OPTIONS = [
   { value: "telecom", labelKey: "admin.finances.pmTypeTelecom" },
   { value: "bank_transfer", labelKey: "admin.finances.pmTypeBankTransfer" },
 ];
+
+export const PM_USAGE_OPTIONS = [
+  { value: "deposit", label: "ايداع/شراء فقط" },
+  { value: "withdrawal", label: "سحب فقط" },
+  { value: "both", label: "كلاهما" },
+] as const;
 
 export const PM_ICONS = ["💳", "🍎", "📱", "📲", "📞", "🏦", "🪙", "💰", "🅿️", "⚡", "🔗", "💎"];
 

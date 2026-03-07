@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, User, Bell, Shield, LogOut, Camera, ShieldCheck, ChevronDown,
@@ -11,6 +11,7 @@ import avatarImg from "@/assets/images/avatar-3d.png";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
 import { authApi, profileApi } from "@/lib/authApi";
+import { gamificationApi } from "@/lib/socialApi";
 import { PinSetup } from "@/pages/PinSetup";
 import { useLocation } from "wouter";
 import { LANGUAGES } from "@/i18n";
@@ -132,10 +133,21 @@ export function Profile() {
   const [twoFaLoading, setTwoFaLoading] = useState(false);
   const [twoFaError, setTwoFaError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState(defaultUser.notifications);
+  const [chatTranslationPrefs, setChatTranslationPrefs] = useState({
+    chatAutoTranslate: true,
+    chatShowOriginalText: true,
+    chatTranslateLang: localStorage.getItem("ablox_translate_lang") || i18n.language || "ar",
+  });
+  const [customTranslateLang, setCustomTranslateLang] = useState("");
+  const [chatPrefsSyncStatus, setChatPrefsSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const chatPrefsStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [dailyMissions, setDailyMissions] = useState<any | null>(null);
+  const [loadingMissions, setLoadingMissions] = useState(true);
+  const [claimingMission, setClaimingMission] = useState(false);
 
   // PIN management state
   const [profiles, setProfiles] = useState<any[]>([]);
@@ -208,13 +220,52 @@ export function Profile() {
           vibration: true,
         });
       }
-    } catch {}
+    } catch { }
+  }, []);
+
+  const loadChatTranslationPrefs = useCallback(async () => {
+    try {
+      const res = await authApi.getChatTranslationPreferences();
+      if (res.success && res.data) {
+        const next = {
+          chatAutoTranslate: res.data.chatAutoTranslate ?? true,
+          chatShowOriginalText: res.data.chatShowOriginalText ?? true,
+          chatTranslateLang: res.data.chatTranslateLang || (localStorage.getItem("ablox_translate_lang") || i18n.language || "ar"),
+        };
+        setChatTranslationPrefs(next);
+        localStorage.setItem("ablox_chat_auto_translate", next.chatAutoTranslate ? "1" : "0");
+        localStorage.setItem("ablox_chat_show_original_text", next.chatShowOriginalText ? "1" : "0");
+        localStorage.setItem("ablox_translate_lang", next.chatTranslateLang);
+      }
+    } catch { }
+  }, [i18n.language]);
+
+  const loadDailyMissions = useCallback(async () => {
+    setLoadingMissions(true);
+    try {
+      const res = await gamificationApi.daily();
+      setDailyMissions(res);
+    } catch {
+      setDailyMissions(null);
+    } finally {
+      setLoadingMissions(false);
+    }
   }, []);
 
   useEffect(() => {
     loadUser();
     loadNotifications();
-  }, [loadUser, loadNotifications]);
+    loadChatTranslationPrefs();
+    loadDailyMissions();
+  }, [loadUser, loadNotifications, loadChatTranslationPrefs, loadDailyMissions]);
+
+  useEffect(() => {
+    return () => {
+      if (chatPrefsStatusTimerRef.current) {
+        clearTimeout(chatPrefsStatusTimerRef.current);
+      }
+    };
+  }, []);
 
   // Load profiles on mount
   useEffect(() => {
@@ -270,7 +321,7 @@ export function Profile() {
     try {
       const res = await profileApi.getProfiles();
       setProfiles(res.data || []);
-    } catch {}
+    } catch { }
   };
 
   const startEdit = (field: string, value: string) => {
@@ -305,6 +356,28 @@ export function Profile() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const claimDailyMissions = async () => {
+    if (claimingMission) return;
+    setClaimingMission(true);
+    try {
+      const result = await gamificationApi.claim();
+      if (result?.user) {
+        setUser((prev) => ({
+          ...prev,
+          xp: result.user.xp ?? prev.xp,
+          level: result.user.level ?? prev.level,
+          coins: result.user.coins ?? prev.coins,
+          xpNext: ((result.user.level ?? prev.level) || 1) * 1000,
+        }));
+      }
+      await loadDailyMissions();
+    } catch (err: any) {
+      alert(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setClaimingMission(false);
+    }
+  };
   const toggleNotification = async (key: keyof typeof notifications) => {
     const newValue = !notifications[key];
     setNotifications({ ...notifications, [key]: newValue });
@@ -326,6 +399,48 @@ export function Profile() {
       // Revert on error
       setNotifications({ ...notifications, [key]: !newValue });
     }
+  };
+
+  const updateChatTranslationPrefs = async (patch: Partial<typeof chatTranslationPrefs>) => {
+    const prev = chatTranslationPrefs;
+    const next = { ...prev, ...patch };
+    setChatTranslationPrefs(next);
+    setChatPrefsSyncStatus("saving");
+    if (chatPrefsStatusTimerRef.current) {
+      clearTimeout(chatPrefsStatusTimerRef.current);
+    }
+
+    if (patch.chatAutoTranslate !== undefined) {
+      localStorage.setItem("ablox_chat_auto_translate", patch.chatAutoTranslate ? "1" : "0");
+    }
+    if (patch.chatShowOriginalText !== undefined) {
+      localStorage.setItem("ablox_chat_show_original_text", patch.chatShowOriginalText ? "1" : "0");
+    }
+    if (patch.chatTranslateLang) {
+      localStorage.setItem("ablox_translate_lang", patch.chatTranslateLang);
+    }
+
+    try {
+      await authApi.updateChatTranslationPreferences(patch);
+      setChatPrefsSyncStatus("saved");
+      chatPrefsStatusTimerRef.current = setTimeout(() => setChatPrefsSyncStatus("idle"), 2000);
+    } catch {
+      setChatTranslationPrefs(prev);
+      localStorage.setItem("ablox_chat_auto_translate", prev.chatAutoTranslate ? "1" : "0");
+      localStorage.setItem("ablox_chat_show_original_text", prev.chatShowOriginalText ? "1" : "0");
+      localStorage.setItem("ablox_translate_lang", prev.chatTranslateLang);
+      setChatPrefsSyncStatus("error");
+      chatPrefsStatusTimerRef.current = setTimeout(() => setChatPrefsSyncStatus("idle"), 2500);
+    }
+  };
+
+  const applyCustomTranslateLang = async () => {
+    const normalized = customTranslateLang.trim().replace(/_/g, "-");
+    if (!/^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,8})?$/.test(normalized)) {
+      return;
+    }
+    await updateChatTranslationPrefs({ chatTranslateLang: normalized });
+    setCustomTranslateLang("");
   };
 
   const handleChangePassword = async () => {
@@ -536,6 +651,71 @@ export function Profile() {
         ))}
       </motion.div>
 
+      {/* Daily Missions + Streak */}
+      <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }} className="glass p-5 rounded-3xl border border-white/10">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-white font-black text-lg flex items-center gap-2">
+              <Award className="w-5 h-5 text-yellow-400" />
+              {t("profile.dailyMissions", "المهام اليومية")}
+            </h3>
+            <p className="text-white/40 text-xs mt-0.5">{t("profile.dailyMissionsDesc", "أنجز المهام اليومية وارفع الـ streak")}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-white/40">{t("profile.streak", "السلسلة")}</p>
+            <p className="text-yellow-400 font-black text-lg">{dailyMissions?.streak || 0}</p>
+          </div>
+        </div>
+
+        {loadingMissions ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : dailyMissions?.enabled === false ? (
+          <p className="text-white/40 text-sm">{t("profile.missionsDisabled", "المهام اليومية غير مفعلة حالياً")}</p>
+        ) : (
+          <div className="space-y-2.5">
+            {(dailyMissions?.missions || []).map((mission: any) => {
+              const pct = Math.min(100, Math.round(((mission.progress || 0) / Math.max(1, mission.target || 1)) * 100));
+              return (
+                <div key={mission.id} className="bg-white/5 border border-white/10 rounded-2xl p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white text-sm font-semibold truncate">{mission.title}</p>
+                      <p className="text-white/40 text-[11px]">{mission.progress}/{mission.target}</p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-yellow-400 text-[11px] font-bold">+{mission.rewardXp} XP</p>
+                      <p className="text-emerald-300 text-[11px] font-bold">+{mission.rewardCoins} Coins</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${mission.done ? "bg-emerald-400" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-xs text-white/50">
+                {t("profile.rewardPreview", "مكافأة اليوم")}: +{dailyMissions?.rewardPreview?.xp || 0} XP / +{dailyMissions?.rewardPreview?.coins || 0} Coins
+              </div>
+              <button
+                onClick={claimDailyMissions}
+                disabled={!dailyMissions?.canClaim || dailyMissions?.claimed || claimingMission}
+                className="px-4 py-2 rounded-xl bg-primary/20 border border-primary/30 text-primary text-sm font-bold hover:bg-primary/30 transition-all disabled:opacity-40"
+              >
+                {claimingMission
+                  ? t("common.loading", "جاري التحميل...")
+                  : dailyMissions?.claimed
+                    ? t("profile.claimed", "تم الاستلام")
+                    : t("profile.claimReward", "استلام المكافأة")}
+              </button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+
       {/* Sections */}
       <div className="space-y-3">
         {/* Personal Info */}
@@ -579,7 +759,7 @@ export function Profile() {
               <User className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldGender")}</p>
-                <select value={user.gender} onChange={async (e) => { const v = e.target.value; setUser({ ...user, gender: v }); try { await profileApi.updateProfile(1, { gender: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
+                <select value={user.gender} onChange={async (e) => { const v = e.target.value; setUser({ ...user, gender: v }); try { await profileApi.updateProfile(1, { gender: v }); } catch { } }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
                   <option value="male" className="bg-[#1a1a2e] text-white">{t("profile.genderMale")}</option>
                   <option value="female" className="bg-[#1a1a2e] text-white">{t("profile.genderFemale")}</option>
                   <option value="other" className="bg-[#1a1a2e] text-white">{t("profile.genderOther")}</option>
@@ -591,7 +771,7 @@ export function Profile() {
               <MapPin className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldCountry")}</p>
-                <select value={user.country} onChange={async (e) => { const v = e.target.value; setUser({ ...user, country: v }); try { await profileApi.updateProfile(1, { country: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
+                <select value={user.country} onChange={async (e) => { const v = e.target.value; setUser({ ...user, country: v }); try { await profileApi.updateProfile(1, { country: v }); } catch { } }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1 appearance-none cursor-pointer">
                   {COUNTRIES.map(c => (<option key={c.code} value={c.code} className="bg-[#1a1a2e] text-white">{c.flag} {c.nameAr}</option>))}
                 </select>
               </div>
@@ -601,7 +781,7 @@ export function Profile() {
               <Calendar className="w-4 h-4 text-white/30 shrink-0" />
               <div>
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-wider">{t("profile.fieldBirthday")}</p>
-                <input type="date" value={user.birthday} onChange={async (e) => { const v = e.target.value; setUser({ ...user, birthday: v }); try { await profileApi.updateProfile(1, { birthDate: v }); } catch {} }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1" dir="ltr" />
+                <input type="date" value={user.birthday} onChange={async (e) => { const v = e.target.value; setUser({ ...user, birthday: v }); try { await profileApi.updateProfile(1, { birthDate: v }); } catch { } }} className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary mt-1" dir="ltr" />
               </div>
             </div>
           </div>
@@ -998,9 +1178,33 @@ export function Profile() {
                 <span className="text-white text-sm font-medium">{t("chat.translateLang")}</span>
               </div>
               <p className="text-white/40 text-xs">{t("chat.selectTranslateLang")}</p>
+              {chatPrefsSyncStatus !== "idle" && (
+                <p className={`text-[11px] font-medium ${chatPrefsSyncStatus === "saving"
+                  ? "text-amber-300"
+                  : chatPrefsSyncStatus === "saved"
+                    ? "text-emerald-300"
+                    : "text-rose-300"
+                  }`}>
+                  {chatPrefsSyncStatus === "saving"
+                    ? t("profile.saving", "جاري الحفظ...")
+                    : chatPrefsSyncStatus === "saved"
+                      ? t("profile.saved", "تم الحفظ")
+                      : t("common.error", "حدث خطأ")}
+                </p>
+              )}
+              <SectionToggle
+                label={t("chat.autoTranslate", "ترجمة تلقائية")}
+                enabled={chatTranslationPrefs.chatAutoTranslate}
+                onChange={() => updateChatTranslationPrefs({ chatAutoTranslate: !chatTranslationPrefs.chatAutoTranslate })}
+              />
+              <SectionToggle
+                label={t("chat.showOriginal", "إظهار النص الأصلي")}
+                enabled={chatTranslationPrefs.chatShowOriginalText}
+                onChange={() => updateChatTranslationPrefs({ chatShowOriginalText: !chatTranslationPrefs.chatShowOriginalText })}
+              />
               <select
-                value={localStorage.getItem("ablox_translate_lang") || i18n.language || "ar"}
-                onChange={(e) => { localStorage.setItem("ablox_translate_lang", e.target.value); }}
+                value={chatTranslationPrefs.chatTranslateLang}
+                onChange={(e) => { void updateChatTranslationPrefs({ chatTranslateLang: e.target.value }); }}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary appearance-none cursor-pointer"
               >
                 {LANGUAGES.map((lang) => (
@@ -1009,6 +1213,20 @@ export function Profile() {
                   </option>
                 ))}
               </select>
+              <div className="flex items-center gap-2">
+                <input
+                  value={customTranslateLang}
+                  onChange={(e) => setCustomTranslateLang(e.target.value)}
+                  placeholder={t("chat.customLangCode", "رمز لغة مخصص مثل pt-BR")}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-primary"
+                />
+                <button
+                  onClick={() => { void applyCustomTranslateLang(); }}
+                  className="px-3 py-2 rounded-xl bg-primary/20 text-primary text-xs font-semibold hover:bg-primary/30 transition-colors"
+                >
+                  {t("common.apply", "تطبيق")}
+                </button>
+              </div>
             </div>
 
             <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all"><Palette className="w-4 h-4 text-white/50" /><span className="text-white text-sm font-medium">{t("profile.changeTheme")}</span></button>

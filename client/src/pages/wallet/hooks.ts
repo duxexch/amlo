@@ -11,7 +11,7 @@ import {
 } from "./helpers";
 import type {
   WalletTab, WalletBalance, IncomeStats, ChartDataPoint, ChartPeriod,
-  DateRange, RechargePackage, MilesPackage, WalletTransaction, WithdrawalRequest,
+  DateRange, RechargePackage, MilesPackage, WalletTransaction, WithdrawalRequest, WalletPaymentMethodOption,
 } from "./types";
 
 /* ═══════════════════════════════════════════════════════
@@ -188,6 +188,7 @@ export function useWithdrawFlow(
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawDisplayAmount, setWithdrawDisplayAmount] = useState("");
   const [withdrawMethod, setWithdrawMethod] = useState("bank");
+  const [availableWithdrawMethods, setAvailableWithdrawMethods] = useState<WalletPaymentMethodOption[]>([]);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState(false);
@@ -199,6 +200,7 @@ export function useWithdrawFlow(
   const [usdtNetwork, setUsdtNetwork] = useState("trc20");
   const [usdtAddress, setUsdtAddress] = useState("");
   const [usdtError, setUsdtError] = useState<string | null>(null);
+  const [customPaymentDetails, setCustomPaymentDetails] = useState("");
 
   // Withdrawal requests
   const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>([]);
@@ -252,8 +254,47 @@ export function useWithdrawFlow(
       walletApi.withdrawLimits()
         .then((res: any) => setWithdrawLimits(res))
         .catch(() => {});
+
+      walletApi.paymentMethods("withdrawal")
+        .then((res: any) => {
+          const list = Array.isArray(res) ? res : [];
+          const normalized: WalletPaymentMethodOption[] = list.map((m: any) => ({
+            id: m.id,
+            name: m.name,
+            nameAr: m.nameAr,
+            icon: m.icon,
+            provider: m.provider,
+            usageTarget: m.usageTarget,
+            countries: m.countries,
+            fee: m.fee,
+            minAmount: m.minAmount,
+            maxAmount: m.maxAmount,
+          }));
+          sessionStorage.setItem("wallet:withdrawMethods", JSON.stringify({ ts: Date.now(), data: normalized }));
+          setAvailableWithdrawMethods(normalized);
+          if (normalized.length > 0 && !normalized.some((m) => m.id === withdrawMethod)) {
+            setWithdrawMethod(normalized[0].id);
+          }
+        })
+        .catch(() => {
+          const cached = sessionStorage.getItem("wallet:withdrawMethods");
+          if (cached) {
+            try {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed?.data) && Date.now() - Number(parsed.ts || 0) < 10 * 60_000) {
+                setAvailableWithdrawMethods(parsed.data as WalletPaymentMethodOption[]);
+                return;
+              }
+            } catch {}
+          }
+          setAvailableWithdrawMethods([
+            { id: "bank", name: "Bank", nameAr: "تحويل بنكي", icon: "💳" },
+            { id: "paypal", name: "PayPal", nameAr: "باي بال", icon: "🅿️" },
+            { id: "usdt", name: "USDT", nameAr: "تيذر", icon: "🪙" },
+          ]);
+        });
     }
-  }, [activeTab, t]);
+  }, [activeTab, t, withdrawMethod]);
 
   // #13: Conversion rate with sessionStorage cache (5 min TTL)
   useEffect(() => {
@@ -346,6 +387,10 @@ export function useWithdrawFlow(
         return;
       }
     }
+    if (!["bank", "paypal", "usdt"].includes(withdrawMethod) && !customPaymentDetails.trim()) {
+      toast.error(t("wallet.fillAllFields"));
+      return;
+    }
     saveWithdrawPrefs({ method: withdrawMethod, bankName, accountNumber, accountHolder, paypalEmail, usdtNetwork, usdtAddress });
     setWithdrawError(null);
     setShowWithdrawConfirm(true);
@@ -369,6 +414,7 @@ export function useWithdrawFlow(
     if (withdrawMethod === "bank") paymentDetails = { bankName, accountNumber, accountHolder };
     else if (withdrawMethod === "paypal") paymentDetails = { paypalEmail };
     else if (withdrawMethod === "usdt") paymentDetails = { network: usdtNetwork, walletAddress: usdtAddress };
+    else paymentDetails = { details: customPaymentDetails.trim() };
     try {
       await walletApi.withdraw({ amount, paymentMethodId: withdrawMethod, paymentDetails: JSON.stringify(paymentDetails) });
       setWithdrawSuccess(true);
@@ -431,10 +477,12 @@ export function useWithdrawFlow(
   return {
     // Form state
     withdrawAmount, withdrawDisplayAmount, withdrawMethod, setWithdrawMethod,
+    availableWithdrawMethods,
     withdrawSubmitting, withdrawError, withdrawSuccess,
     showWithdrawConfirm, setShowWithdrawConfirm,
     bankName, setBankName, accountNumber, setAccountNumber, accountHolder, setAccountHolder,
     paypalEmail, setPaypalEmail, usdtNetwork, setUsdtNetwork, usdtAddress, setUsdtAddress, usdtError, setUsdtError,
+    customPaymentDetails, setCustomPaymentDetails,
     // Requests
     withdrawalRequests, wrLoading, wrHasMore, wrLoadingMore, cancellingWr,
     // Limits & conversion

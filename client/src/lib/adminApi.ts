@@ -452,6 +452,7 @@ export const adminPaymentMethods = {
     nameAr: string;
     icon?: string;
     type: string;
+    usageTarget?: "deposit" | "withdrawal" | "both";
     provider?: string;
     countries?: string[];
     minAmount?: number;

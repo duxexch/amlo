@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, UserPlus, Search, Bell, Check, X, MessageCircle,
-  Phone, Video, Loader2, UserCheck, Clock, Globe,
+  Phone, Video, Loader2, UserCheck, Clock, Globe, Activity,
   CheckCheck, Lock, ShieldCheck, Coins, Eye
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -20,13 +20,85 @@ import { friendVisibilityApi, profileApi } from "@/lib/authApi";
 import { useLocation } from "wouter";
 import { useConversations } from "./chat/chatHooks";
 import { ChatPopupModal } from "./chat/ChatPopupModal";
-import type { Conversation } from "./chat/chatTypes";
+import type { Conversation, NewMessagePayload } from "./chat/chatTypes";
 import { socketManager } from "@/lib/socketManager";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
+import { toast } from "sonner";
+
+let friendsNotifAudio: HTMLAudioElement | null = null;
+
+type ChatNotifyMode = "all" | "sound" | "push" | "off";
+
+function getChatNotifyMode(): ChatNotifyMode {
+  try {
+    const mode = localStorage.getItem("ablox_chat_notify_mode");
+    if (mode === "all" || mode === "sound" || mode === "push" || mode === "off") return mode;
+  } catch { }
+  return "all";
+}
+
+function setChatNotifyMode(mode: ChatNotifyMode) {
+  try { localStorage.setItem("ablox_chat_notify_mode", mode); } catch { }
+}
+
+function shouldPlayChatSound(mode: ChatNotifyMode): boolean {
+  return mode === "all" || mode === "sound";
+}
+
+function shouldShowChatPush(mode: ChatNotifyMode): boolean {
+  return mode === "all" || mode === "push";
+}
+
+async function showFriendsDesktopNotification(title: string, body: string, mode: ChatNotifyMode) {
+  if (typeof window === "undefined" || typeof Notification === "undefined") return;
+  if (!shouldShowChatPush(mode)) return;
+  let permission = Notification.permission;
+  if (permission === "default") {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      permission = Notification.permission;
+    }
+  }
+  if (permission !== "granted") return;
+
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: "/favicon.ico",
+      tag: "ablox-social-notify",
+    });
+    n.onclick = () => {
+      try { window.focus(); } catch { }
+      n.close();
+    };
+  } catch { }
+}
+
+function playFriendsNotificationSound() {
+  try {
+    if (!friendsNotifAudio) {
+      friendsNotifAudio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LkZWTi4F3cXV7f4WIioqHhH95dHB0eYCFiImIhYJ+eXZ0d3t/g4aHh4WDgH15dnd5fICDhYaFg4GAfoB8fH5/gIGBgQA=");
+    }
+    friendsNotifAudio.currentTime = 0;
+    friendsNotifAudio.volume = 0.7;
+    friendsNotifAudio.play().catch(() => { });
+  } catch { }
+}
 
 // ── Types ──
 type Tab = "chats" | "friends" | "requests";
+
+type ChatMetricsSnapshot = {
+  sentTotal: number;
+  sendErrors: number;
+  avgSendLatencyMs: number;
+  fetchTotal: number;
+  fetchErrors: number;
+  avgFetchLatencyMs: number;
+  timestamp: string;
+};
 
 
 
@@ -119,10 +191,10 @@ function ConversationItem({ conv, onClick, isTyping }: { conv: any; onClick: () 
                       : <Check className="w-3 h-3 text-white/40 shrink-0" />
                 )}
                 {conv.lastMessage?.type === "image" ? "📷 صورة" :
-                 conv.lastMessage?.type === "voice" ? "🎤 رسالة صوتية" :
-                 conv.lastMessage?.type === "gift" ? "🎁 هدية" :
-                 conv.lastMessage?.isDeleted ? "🚫 تم الحذف" :
-                 conv.lastMessage?.content || "..."}
+                  conv.lastMessage?.type === "voice" ? "🎤 رسالة صوتية" :
+                    conv.lastMessage?.type === "gift" ? "🎁 هدية" :
+                      conv.lastMessage?.isDeleted ? "🚫 تم الحذف" :
+                        conv.lastMessage?.content || "..."}
               </>
             )}
           </p>
@@ -176,11 +248,10 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
         <div className="relative">
           <button
             onClick={() => setShowProfileMenu(!showProfileMenu)}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
-              visibleProfile === 2
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${visibleProfile === 2
                 ? "bg-purple-500/15 hover:bg-purple-500/25"
                 : "bg-white/5 hover:bg-white/10"
-            }`}
+              }`}
             title={t("social.profileVisibility", "ملف ظاهر")}
           >
             <Eye className={`w-3.5 h-3.5 ${visibleProfile === 2 ? "text-purple-400" : "text-white/40"}`} />
@@ -195,9 +266,8 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
               >
                 <button
                   onClick={() => handleSetVisibility(1)}
-                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors ${
-                    visibleProfile === 1 ? "text-blue-400 bg-blue-500/10" : "text-white/60 hover:bg-white/5"
-                  }`}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors ${visibleProfile === 1 ? "text-blue-400 bg-blue-500/10" : "text-white/60 hover:bg-white/5"
+                    }`}
                 >
                   <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center">1</span>
                   {t("social.profile1", "ملف 1")}
@@ -205,9 +275,8 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
                 </button>
                 <button
                   onClick={() => handleSetVisibility(2)}
-                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors ${
-                    visibleProfile === 2 ? "text-purple-400 bg-purple-500/10" : "text-white/60 hover:bg-white/5"
-                  }`}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors ${visibleProfile === 2 ? "text-purple-400 bg-purple-500/10" : "text-white/60 hover:bg-white/5"
+                    }`}
                 >
                   <span className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-400 text-[10px] font-bold flex items-center justify-center">2</span>
                   {t("social.profile2", "ملف 2")}
@@ -291,6 +360,12 @@ function SearchResult({ user, onAdd }: { user: any; onAdd: () => void }) {
 export function Friends() {
   const { t } = useTranslation();
   const [location, navigate] = useLocation();
+  const [notifyMode, setNotifyModeState] = useState<ChatNotifyMode>(() => getChatNotifyMode());
+  const [showNotifyMenu, setShowNotifyMenu] = useState(false);
+  const [showMetricsPanel, setShowMetricsPanel] = useState(false);
+  const [chatMetrics, setChatMetrics] = useState<ChatMetricsSnapshot | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
 
   // ── Ensure socket is connected on mount ──
   useEffect(() => {
@@ -323,6 +398,19 @@ export function Friends() {
   const onlineFriends = useMemo(() => friends.filter(f => f.isOnline), [friends]);
   const offlineFriends = useMemo(() => friends.filter(f => !f.isOnline), [friends]);
   const showSearchResults = globalSearch.length >= 2 && !/^\d+$/.test(globalSearch);
+  const sendErrorRate = useMemo(() => {
+    if (!chatMetrics || chatMetrics.sentTotal <= 0) return 0;
+    return (chatMetrics.sendErrors / chatMetrics.sentTotal) * 100;
+  }, [chatMetrics]);
+  const fetchErrorRate = useMemo(() => {
+    if (!chatMetrics || chatMetrics.fetchTotal <= 0) return 0;
+    return (chatMetrics.fetchErrors / chatMetrics.fetchTotal) * 100;
+  }, [chatMetrics]);
+  const metricsUpdatedAt = useMemo(() => {
+    if (!chatMetrics?.timestamp) return null;
+    const dt = new Date(chatMetrics.timestamp);
+    return Number.isNaN(dt.getTime()) ? null : dt.toLocaleTimeString();
+  }, [chatMetrics?.timestamp]);
 
   const filteredConvs = useMemo(() =>
     conversations.filter(c =>
@@ -341,10 +429,128 @@ export function Friends() {
         ]);
         setFriends(friendsList || []);
         setRequests(requestsList || []);
-      } catch {}
+      } catch { }
       setFriendsLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    const onClickOutside = () => setShowNotifyMenu(false);
+    if (!showNotifyMenu) return;
+    document.addEventListener("click", onClickOutside);
+    return () => document.removeEventListener("click", onClickOutside);
+  }, [showNotifyMenu]);
+
+  useEffect(() => {
+    if (!showMetricsPanel) return;
+
+    let cancelled = false;
+    const loadMetrics = async (isFirstLoad = false) => {
+      if (isFirstLoad) setMetricsLoading(true);
+      try {
+        const data = await chatApi.metrics();
+        if (cancelled) return;
+        setChatMetrics(data as ChatMetricsSnapshot);
+        setMetricsError(null);
+      } catch {
+        if (cancelled) return;
+        setMetricsError(t("social.metricsLoadFailed", "تعذر تحميل مؤشرات الدردشة"));
+      } finally {
+        if (!cancelled && isFirstLoad) setMetricsLoading(false);
+      }
+    };
+
+    void loadMetrics(true);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void loadMetrics(false);
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [showMetricsPanel, t]);
+
+  // ── Realtime social updates (requests + chat badge updates) ──
+  useEffect(() => {
+    const s = socketManager.getSocket();
+
+    const onFriendRequest = (payload: any) => {
+      if (!payload?.friendship?.id) return;
+      setRequests((prev) => {
+        if (prev.some((r) => r.id === payload.friendship.id)) return prev;
+        return [{ ...payload.friendship, sender: payload.sender }, ...prev];
+      });
+      if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
+      toast.info(t("social.newFriendRequest", "لديك طلب صداقة جديد"));
+      void showFriendsDesktopNotification(
+        t("social.newFriendRequest", "لديك طلب صداقة جديد"),
+        payload?.sender?.displayName || payload?.sender?.username || t("social.socialHub", "التواصل الاجتماعي"),
+        notifyMode,
+      );
+    };
+
+    const onFriendAccepted = async () => {
+      try {
+        const updated = await friendsApi.list();
+        setFriends(updated || []);
+      } catch { }
+      if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
+      toast.success(t("social.friendRequestAccepted", "تم قبول طلب الصداقة"));
+    };
+
+    const onNewMessage = (data: NewMessagePayload) => {
+      if (!data?.conversationId || !data?.message) return;
+      if (activeConv?.id === data.conversationId) return;
+
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.id === data.conversationId);
+        if (idx === -1) return prev;
+        const next = [...prev];
+        const current = next[idx];
+        next[idx] = {
+          ...current,
+          lastMessage: data.message,
+          lastMessageAt: data.message.createdAt,
+          unreadCount: (current.unreadCount || 0) + 1,
+        };
+        return next;
+      });
+
+      if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
+      const senderName = data.sender?.displayName || data.sender?.username || t("social.newMessage", "رسالة جديدة");
+      toast.info(senderName, {
+        description: data.message.content || t("social.newMessage", "رسالة جديدة"),
+      });
+      if (document.hidden) {
+        void showFriendsDesktopNotification(
+          senderName,
+          data.message.content || t("social.newMessage", "رسالة جديدة"),
+          notifyMode,
+        );
+      }
+    };
+
+    s.on("friend-request", onFriendRequest);
+    s.on("friend-accepted", onFriendAccepted);
+    s.on("new-message", onNewMessage);
+
+    return () => {
+      s.off("friend-request", onFriendRequest);
+      s.off("friend-accepted", onFriendAccepted);
+      s.off("new-message", onNewMessage);
+    };
+  }, [activeConv?.id, notifyMode, setConversations, t]);
+
+  const applyNotifyMode = async (mode: ChatNotifyMode) => {
+    setNotifyModeState(mode);
+    setChatNotifyMode(mode);
+    if ((mode === "all" || mode === "push") && typeof Notification !== "undefined" && Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch { }
+    }
+    setShowNotifyMenu(false);
+  };
 
   // ── Handle ?user= query param ──
   useEffect(() => {
@@ -407,12 +613,12 @@ export function Friends() {
       await friendsApi.accept(id);
       const updated = await friendsApi.list();
       setFriends(updated || []);
-    } catch {}
+    } catch { }
     setRequests(prev => prev.filter(r => r.id !== id));
   };
 
   const handleReject = async (id: string) => {
-    try { await friendsApi.reject(id); } catch {}
+    try { await friendsApi.reject(id); } catch { }
     setRequests(prev => prev.filter(r => r.id !== id));
   };
 
@@ -435,265 +641,357 @@ export function Friends() {
       <div className="flex flex-col h-full">
         {/* Header */}
         <div className="pt-3 pb-2 px-1">
-              <div className="flex items-center justify-between mb-3">
-                <h1 className="text-2xl font-black text-white flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]">
-                    <MessageCircle className="w-5 h-5 text-white" />
-                  </div>
-                  {t("social.socialHub")}
-                </h1>
-                <div className="flex items-center gap-2">
-                  {chatSettings && chatSettings.message_cost > 0 && (
-                    <div className="flex items-center gap-1 text-amber-400 text-[10px] font-bold bg-amber-400/10 px-2 py-1 rounded-lg">
-                      <Coins className="w-3 h-3" />
-                      {chatSettings.message_cost}/{t("social.perMessage")}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1 text-emerald-400 text-[10px] font-bold bg-emerald-400/10 px-2 py-1 rounded-lg">
-                    <ShieldCheck className="w-3 h-3" />
-                    {t("chat.encrypted")}
-                  </div>
-                </div>
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-2xl font-black text-white flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]">
+                <MessageCircle className="w-5 h-5 text-white" />
               </div>
-
-              {/* Online Strip */}
-              <OnlineStrip
-                friends={onlineFriends}
-                onChat={handleOpenChatWithUser}
-                onSearch={() => {
-                  setSearchFocused(true);
-                  searchRef.current?.querySelector("input")?.focus();
-                }}
-              />
-
-              {/* Global Search */}
-              <div ref={searchRef} className="relative z-20 mb-3">
-                <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" />
-                  <input
-                    type="text"
-                    value={globalSearch}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setGlobalSearch(val);
-                      setSearchFocused(true);
-
-                      // PIN switch: if exactly 4 digits, try to verify as PIN
-                      if (/^\d{4}$/.test(val) && !pinSwitching) {
-                        setPinSwitching(true);
-                        profileApi.verifyPin(val)
-                          .then((res) => {
-                            setPinSwitchSuccess(res.data?.displayName || t("social.profileSwitched", "تم التبديل!"));
-                            setGlobalSearch("");
-                            setSearchResults([]);
-                            setSearchFocused(false);
-                            setTimeout(() => setPinSwitchSuccess(null), 3000);
-                            // Reload page data
-                            window.location.reload();
-                          })
-                          .catch(() => {
-                            // Not a valid PIN — treat as normal search
-                          })
-                          .finally(() => setPinSwitching(false));
-                      }
-                    }}
-                    onFocus={() => setSearchFocused(true)}
-                    placeholder={t("social.globalSearchPlaceholder")}
-                    className="w-full bg-white/[0.04] border border-white/8 rounded-xl py-2.5 pr-10 pl-10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/25 focus:bg-white/[0.06] transition-all"
-                  />
-                  {(searching || pinSwitching) && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
-                  {!searching && !pinSwitching && globalSearch.length > 0 && (
-                    <button
-                      onClick={() => { setGlobalSearch(""); setSearchResults([]); setSearchFocused(false); }}
-                      className="absolute left-3 top-1/2 -translate-y-1/2"
-                    >
-                      <X className="w-4 h-4 text-white/30 hover:text-white/60 transition-colors" />
-                    </button>
-                  )}
-                  {!searching && !pinSwitching && !globalSearch && (
-                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/15" />
-                  )}
-                </div>
-
-                {/* Search Results Dropdown */}
+              {t("social.socialHub")}
+            </h1>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowMetricsPanel((v) => !v)}
+                className={`w-8 h-8 rounded-lg transition-colors flex items-center justify-center ${showMetricsPanel ? "bg-primary/20 text-primary" : "bg-white/5 hover:bg-white/10 text-white/60 hover:text-white"}`}
+                title={t("social.chatMetrics", "مؤشرات الدردشة")}
+              >
+                <Activity className="w-4 h-4" />
+              </button>
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => setShowNotifyMenu((v) => !v)}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors flex items-center justify-center"
+                  title={t("social.notifications", "الإشعارات")}
+                >
+                  <Bell className="w-4 h-4" />
+                </button>
                 <AnimatePresence>
-                  {searchFocused && showSearchResults && (
+                  {showNotifyMenu && (
                     <motion.div
-                      initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                      initial={{ opacity: 0, y: -6, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute top-full left-0 right-0 mt-1.5 glass rounded-2xl border border-white/10 shadow-2xl shadow-black/40 max-h-[min(350px,50vh)] overflow-y-auto z-50"
+                      exit={{ opacity: 0, y: -6, scale: 0.95 }}
+                      className="absolute top-10 right-0 rtl:right-auto rtl:left-0 w-44 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl p-1 z-50"
                     >
-                      <div className="p-2.5 border-b border-white/5 flex items-center gap-2">
-                        <Globe className="w-3.5 h-3.5 text-primary" />
-                        <span className="text-[10px] font-bold text-white/40">{t("social.globalSearchTitle")}</span>
-                        {searchResults.length > 0 && (
-                          <span className="text-[9px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full font-bold ml-auto">
-                            {searchResults.length} {t("social.results")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="p-1.5">
-                        {searchResults.map(u => (
-                          <SearchResult key={u.id} user={u} onAdd={() => friendsApi.sendRequest(u.id).catch(() => {})} />
-                        ))}
-                      </div>
-                      {searchResults.length === 0 && !searching && (
-                        <div className="text-center py-6">
-                          <Search className="w-8 h-8 text-white/8 mx-auto mb-1.5" />
-                          <p className="text-white/30 text-xs">{t("social.noResults")}</p>
-                        </div>
-                      )}
+                      {[{ key: "all", label: t("social.notifyAll", "الكل") }, { key: "sound", label: t("social.notifySound", "صوت فقط") }, { key: "push", label: t("social.notifyPush", "إشعار فقط") }, { key: "off", label: t("social.notifyOff", "إيقاف") }].map((opt) => (
+                        <button
+                          key={opt.key}
+                          onClick={() => applyNotifyMode(opt.key as ChatNotifyMode)}
+                          className={`w-full text-start px-3 py-2 rounded-lg text-xs font-medium transition-colors ${notifyMode === opt.key ? "bg-primary/20 text-primary" : "text-white/65 hover:bg-white/5"}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
-
-              {/* PIN Switch Success Toast */}
-              <AnimatePresence>
-                {pinSwitchSuccess && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                    className="mb-3 flex items-center gap-3 bg-emerald-500/15 border border-emerald-500/20 rounded-xl px-4 py-3"
-                  >
-                    <Check className="w-5 h-5 text-emerald-400 shrink-0" />
-                    <div>
-                      <p className="text-emerald-400 text-sm font-bold">{t("social.profileSwitched", "تم التبديل!")}</p>
-                      <p className="text-emerald-400/60 text-xs">{pinSwitchSuccess}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Tabs — Segmented Control */}
-              <div className="flex bg-white/[0.03] rounded-xl p-1 gap-1">
-                {tabs.map(ti => (
-                  <button
-                    key={ti.key}
-                    onClick={() => setTab(ti.key)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all relative ${
-                      tab === ti.key
-                        ? "bg-primary/15 text-primary shadow-[0_0_12px_rgba(var(--primary-rgb),0.15)]"
-                        : "text-white/40 hover:text-white/60 hover:bg-white/[0.03]"
-                    }`}
-                  >
-                    <ti.icon className="w-3.5 h-3.5" />
-                    <span>{ti.label}</span>
-                    {ti.count !== undefined && ti.count > 0 && (
-                      <span className={`min-w-4 h-4 flex items-center justify-center text-[9px] font-bold rounded-full px-1 ${
-                        tab === ti.key ? "bg-primary/25 text-primary" : "bg-white/8 text-white/30"
-                      }`}>
-                        {ti.count}
-                      </span>
-                    )}
-                  </button>
-                ))}
+              {chatSettings && chatSettings.message_cost > 0 && (
+                <div className="flex items-center gap-1 text-amber-400 text-[10px] font-bold bg-amber-400/10 px-2 py-1 rounded-lg">
+                  <Coins className="w-3 h-3" />
+                  {chatSettings.message_cost}/{t("social.perMessage")}
+                </div>
+              )}
+              <div className="flex items-center gap-1 text-emerald-400 text-[10px] font-bold bg-emerald-400/10 px-2 py-1 rounded-lg">
+                <ShieldCheck className="w-3 h-3" />
+                {t("chat.encrypted")}
               </div>
             </div>
-
-            {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto px-1 pt-2 scrollbar-thin">
-              <AnimatePresence mode="wait">
-                {/* ── CHATS TAB ── */}
-                {tab === "chats" && (
-                  <motion.div key="chats" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-1">
-                    {conversations.length > 3 && (
-                      <div className="relative mb-2">
-                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/20" />
-                        <input
-                          type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)}
-                          placeholder={t("social.searchConversations")}
-                          className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pr-9 pl-4 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-primary/20 transition-all"
-                        />
-                      </div>
-                    )}
-                    {loading ? (
-                      <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-7 h-7 text-primary animate-spin" />
-                      </div>
-                    ) : filteredConvs.length > 0 ? (
-                      filteredConvs.map(conv => (
-                        <ConversationItem key={conv.id} conv={conv} isTyping={typingConvIds.has(conv.id)} onClick={() => setActiveConv(conv as Conversation)} />
-                      ))
-                    ) : (
-                      <div className="text-center py-14">
-                        <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
-                          <MessageCircle className="w-8 h-8 text-white/8" />
-                        </div>
-                        <p className="text-white/30 text-sm font-bold">{t("social.noConversations")}</p>
-                        <p className="text-white/15 text-xs mt-1">{t("social.noConversationsDesc")}</p>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-
-                {/* ── FRIENDS TAB ── */}
-                {tab === "friends" && (
-                  <motion.div key="friends" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-1">
-                    {onlineFriends.length > 0 && (
-                      <div className="mb-2">
-                        <div className="flex items-center gap-2 mb-2 px-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]" />
-                          <span className="text-white/40 text-[10px] font-bold uppercase tracking-wider">
-                            {t("social.onlineNow")} ({onlineFriends.length})
-                          </span>
-                        </div>
-                        {onlineFriends.map(f => (
-                          <FriendCard key={f.id} friend={f} onMessage={() => handleOpenChatWithUser(f.id)} onCall={type => handleCall(f.id, type)} />
-                        ))}
-                      </div>
-                    )}
-                    {offlineFriends.length > 0 && (
-                      <div>
-                        <div className="flex items-center gap-2 mb-2 px-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-white/15" />
-                          <span className="text-white/25 text-[10px] font-bold uppercase tracking-wider">
-                            {t("social.offlineFriends")} ({offlineFriends.length})
-                          </span>
-                        </div>
-                        <div className="opacity-60">
-                          {offlineFriends.map(f => (
-                            <FriendCard key={f.id} friend={f} onMessage={() => handleOpenChatWithUser(f.id)} onCall={type => handleCall(f.id, type)} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {friends.length === 0 && (
-                      <div className="text-center py-14">
-                        <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
-                          <Users className="w-8 h-8 text-white/8" />
-                        </div>
-                        <p className="text-white/30 text-sm font-bold">{t("social.noFriends")}</p>
-                        <p className="text-white/15 text-xs mt-1">{t("social.noFriendsDesc")}</p>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-
-                {/* ── REQUESTS TAB ── */}
-                {tab === "requests" && (
-                  <motion.div key="requests" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
-                    {requests.length > 0 ? (
-                      requests.map(r => (
-                        <RequestCard key={r.id} request={r} onAccept={() => handleAccept(r.id)} onReject={() => handleReject(r.id)} />
-                      ))
-                    ) : (
-                      <div className="text-center py-14">
-                        <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
-                          <Bell className="w-8 h-8 text-white/8" />
-                        </div>
-                        <p className="text-white/30 text-sm font-bold">{t("social.noRequests")}</p>
-                        <p className="text-white/15 text-xs mt-1">{t("social.noRequestsDesc")}</p>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
           </div>
+
+          <AnimatePresence>
+            {showMetricsPanel && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                className="mb-3 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-white/70">{t("social.chatMetrics", "مؤشرات الدردشة")}</span>
+                  {metricsUpdatedAt && (
+                    <span className="text-[10px] text-white/35">
+                      {t("social.updatedAt", "آخر تحديث")}: {metricsUpdatedAt}
+                    </span>
+                  )}
+                </div>
+
+                {metricsLoading && !chatMetrics ? (
+                  <div className="flex items-center gap-2 text-white/50 text-xs">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {t("social.loadingMetrics", "جاري تحميل المؤشرات...")}
+                  </div>
+                ) : metricsError && !chatMetrics ? (
+                  <div className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2.5 py-2">
+                    {metricsError}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.sentTotal", "إجمالي الإرسال")}</p>
+                      <p className="text-sm font-bold text-white">{chatMetrics?.sentTotal ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.sendErrorRate", "نسبة أخطاء الإرسال")}</p>
+                      <p className="text-sm font-bold text-amber-300">{sendErrorRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.sendLatency", "زمن إرسال متوسط")}</p>
+                      <p className="text-sm font-bold text-cyan-300">{Math.round(chatMetrics?.avgSendLatencyMs ?? 0)}ms</p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.fetchTotal", "إجمالي الجلب")}</p>
+                      <p className="text-sm font-bold text-white">{chatMetrics?.fetchTotal ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.fetchErrorRate", "نسبة أخطاء الجلب")}</p>
+                      <p className="text-sm font-bold text-amber-300">{fetchErrorRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] px-2.5 py-2">
+                      <p className="text-[10px] text-white/35">{t("social.fetchLatency", "زمن جلب متوسط")}</p>
+                      <p className="text-sm font-bold text-cyan-300">{Math.round(chatMetrics?.avgFetchLatencyMs ?? 0)}ms</p>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Online Strip */}
+          <OnlineStrip
+            friends={onlineFriends}
+            onChat={handleOpenChatWithUser}
+            onSearch={() => {
+              setSearchFocused(true);
+              searchRef.current?.querySelector("input")?.focus();
+            }}
+          />
+
+          {/* Global Search */}
+          <div ref={searchRef} className="relative z-20 mb-3">
+            <div className="relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" />
+              <input
+                type="text"
+                value={globalSearch}
+                onChange={e => {
+                  const val = e.target.value;
+                  setGlobalSearch(val);
+                  setSearchFocused(true);
+
+                  // PIN switch: if exactly 4 digits, try to verify as PIN
+                  if (/^\d{4}$/.test(val) && !pinSwitching) {
+                    setPinSwitching(true);
+                    profileApi.verifyPin(val)
+                      .then((res) => {
+                        setPinSwitchSuccess(res.data?.displayName || t("social.profileSwitched", "تم التبديل!"));
+                        setGlobalSearch("");
+                        setSearchResults([]);
+                        setSearchFocused(false);
+                        setTimeout(() => setPinSwitchSuccess(null), 3000);
+                        // Reload page data
+                        window.location.reload();
+                      })
+                      .catch(() => {
+                        // Not a valid PIN — treat as normal search
+                      })
+                      .finally(() => setPinSwitching(false));
+                  }
+                }}
+                onFocus={() => setSearchFocused(true)}
+                placeholder={t("social.globalSearchPlaceholder")}
+                className="w-full bg-white/[0.04] border border-white/8 rounded-xl py-2.5 pr-10 pl-10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/25 focus:bg-white/[0.06] transition-all"
+              />
+              {(searching || pinSwitching) && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
+              {!searching && !pinSwitching && globalSearch.length > 0 && (
+                <button
+                  onClick={() => { setGlobalSearch(""); setSearchResults([]); setSearchFocused(false); }}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                >
+                  <X className="w-4 h-4 text-white/30 hover:text-white/60 transition-colors" />
+                </button>
+              )}
+              {!searching && !pinSwitching && !globalSearch && (
+                <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/15" />
+              )}
+            </div>
+
+            {/* Search Results Dropdown */}
+            <AnimatePresence>
+              {searchFocused && showSearchResults && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute top-full left-0 right-0 mt-1.5 glass rounded-2xl border border-white/10 shadow-2xl shadow-black/40 max-h-[min(350px,50vh)] overflow-y-auto z-50"
+                >
+                  <div className="p-2.5 border-b border-white/5 flex items-center gap-2">
+                    <Globe className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-[10px] font-bold text-white/40">{t("social.globalSearchTitle")}</span>
+                    {searchResults.length > 0 && (
+                      <span className="text-[9px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full font-bold ml-auto">
+                        {searchResults.length} {t("social.results")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-1.5">
+                    {searchResults.map(u => (
+                      <SearchResult key={u.id} user={u} onAdd={() => friendsApi.sendRequest(u.id).catch(() => { })} />
+                    ))}
+                  </div>
+                  {searchResults.length === 0 && !searching && (
+                    <div className="text-center py-6">
+                      <Search className="w-8 h-8 text-white/8 mx-auto mb-1.5" />
+                      <p className="text-white/30 text-xs">{t("social.noResults")}</p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* PIN Switch Success Toast */}
+          <AnimatePresence>
+            {pinSwitchSuccess && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="mb-3 flex items-center gap-3 bg-emerald-500/15 border border-emerald-500/20 rounded-xl px-4 py-3"
+              >
+                <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div>
+                  <p className="text-emerald-400 text-sm font-bold">{t("social.profileSwitched", "تم التبديل!")}</p>
+                  <p className="text-emerald-400/60 text-xs">{pinSwitchSuccess}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Tabs — Segmented Control */}
+          <div className="flex bg-white/[0.03] rounded-xl p-1 gap-1">
+            {tabs.map(ti => (
+              <button
+                key={ti.key}
+                onClick={() => setTab(ti.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all relative ${tab === ti.key
+                    ? "bg-primary/15 text-primary shadow-[0_0_12px_rgba(var(--primary-rgb),0.15)]"
+                    : "text-white/40 hover:text-white/60 hover:bg-white/[0.03]"
+                  }`}
+              >
+                <ti.icon className="w-3.5 h-3.5" />
+                <span>{ti.label}</span>
+                {ti.count !== undefined && ti.count > 0 && (
+                  <span className={`min-w-4 h-4 flex items-center justify-center text-[9px] font-bold rounded-full px-1 ${tab === ti.key ? "bg-primary/25 text-primary" : "bg-white/8 text-white/30"
+                    }`}>
+                    {ti.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto px-1 pt-2 scrollbar-thin">
+          <AnimatePresence mode="wait">
+            {/* ── CHATS TAB ── */}
+            {tab === "chats" && (
+              <motion.div key="chats" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-1">
+                {conversations.length > 3 && (
+                  <div className="relative mb-2">
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/20" />
+                    <input
+                      type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)}
+                      placeholder={t("social.searchConversations")}
+                      className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pr-9 pl-4 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-primary/20 transition-all"
+                    />
+                  </div>
+                )}
+                {loading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-7 h-7 text-primary animate-spin" />
+                  </div>
+                ) : filteredConvs.length > 0 ? (
+                  filteredConvs.map(conv => (
+                    <ConversationItem key={conv.id} conv={conv} isTyping={typingConvIds.has(conv.id)} onClick={() => setActiveConv(conv as Conversation)} />
+                  ))
+                ) : (
+                  <div className="text-center py-14">
+                    <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
+                      <MessageCircle className="w-8 h-8 text-white/8" />
+                    </div>
+                    <p className="text-white/30 text-sm font-bold">{t("social.noConversations")}</p>
+                    <p className="text-white/15 text-xs mt-1">{t("social.noConversationsDesc")}</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── FRIENDS TAB ── */}
+            {tab === "friends" && (
+              <motion.div key="friends" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-1">
+                {onlineFriends.length > 0 && (
+                  <div className="mb-2">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]" />
+                      <span className="text-white/40 text-[10px] font-bold uppercase tracking-wider">
+                        {t("social.onlineNow")} ({onlineFriends.length})
+                      </span>
+                    </div>
+                    {onlineFriends.map(f => (
+                      <FriendCard key={f.id} friend={f} onMessage={() => handleOpenChatWithUser(f.id)} onCall={type => handleCall(f.id, type)} />
+                    ))}
+                  </div>
+                )}
+                {offlineFriends.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-white/15" />
+                      <span className="text-white/25 text-[10px] font-bold uppercase tracking-wider">
+                        {t("social.offlineFriends")} ({offlineFriends.length})
+                      </span>
+                    </div>
+                    <div className="opacity-60">
+                      {offlineFriends.map(f => (
+                        <FriendCard key={f.id} friend={f} onMessage={() => handleOpenChatWithUser(f.id)} onCall={type => handleCall(f.id, type)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {friends.length === 0 && (
+                  <div className="text-center py-14">
+                    <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
+                      <Users className="w-8 h-8 text-white/8" />
+                    </div>
+                    <p className="text-white/30 text-sm font-bold">{t("social.noFriends")}</p>
+                    <p className="text-white/15 text-xs mt-1">{t("social.noFriendsDesc")}</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── REQUESTS TAB ── */}
+            {tab === "requests" && (
+              <motion.div key="requests" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
+                {requests.length > 0 ? (
+                  requests.map(r => (
+                    <RequestCard key={r.id} request={r} onAccept={() => handleAccept(r.id)} onReject={() => handleReject(r.id)} />
+                  ))
+                ) : (
+                  <div className="text-center py-14">
+                    <div className="w-16 h-16 rounded-2xl bg-white/[0.03] mx-auto mb-3 flex items-center justify-center">
+                      <Bell className="w-8 h-8 text-white/8" />
+                    </div>
+                    <p className="text-white/30 text-sm font-bold">{t("social.noRequests")}</p>
+                    <p className="text-white/15 text-xs mt-1">{t("social.noRequestsDesc")}</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
 
       {/* ═══ CHAT POPUP MODAL (delegated to ChatPopupModal component) ═══ */}
       <AnimatePresence>

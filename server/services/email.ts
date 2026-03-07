@@ -12,6 +12,19 @@ import { randomInt } from "crypto";
 
 const emailLog = createLogger("email");
 
+function isOtpDevFallbackEnabled(): boolean {
+  const flag = (process.env.OTP_DEV_FALLBACK || "").toLowerCase();
+  if (flag === "true" || flag === "1") return true;
+  if (flag === "false" || flag === "0") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
+function shouldLogDevOtpCode(): boolean {
+  const flag = (process.env.OTP_DEV_LOG_OTP || "").toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return isOtpDevFallbackEnabled();
+}
+
 // ── SMTP Config (from env, overridable by admin settings) ──
 interface SmtpConfig {
   host: string;
@@ -49,6 +62,40 @@ let otpConfig: OtpConfig = {
 };
 
 let transporter: Transporter | null = null;
+
+type LocalOtpRecord = {
+  code: string;
+  attempts: number;
+  expiresAt: number;
+  cooldownUntil: number;
+};
+
+const localOtpStore = new Map<string, LocalOtpRecord>();
+
+function getLocalOtpRecord(emailLower: string): LocalOtpRecord | null {
+  const rec = localOtpStore.get(emailLower);
+  if (!rec) return null;
+  const now = Date.now();
+  if (rec.expiresAt <= now) {
+    localOtpStore.delete(emailLower);
+    return null;
+  }
+  return rec;
+}
+
+function setLocalOtpRecord(emailLower: string, code: string) {
+  const now = Date.now();
+  localOtpStore.set(emailLower, {
+    code,
+    attempts: 0,
+    expiresAt: now + otpConfig.expiryMinutes * 60_000,
+    cooldownUntil: now + otpConfig.cooldownMinutes * 60_000,
+  });
+}
+
+function clearLocalOtpRecord(emailLower: string) {
+  localOtpStore.delete(emailLower);
+}
 
 /**
  * Check if SMTP is configured and transport is available.
@@ -151,18 +198,39 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
 
   // Check cooldown
   const cooldown = await cacheGet(otpCooldownKey(emailLower));
+  const local = getLocalOtpRecord(emailLower);
   if (cooldown) {
     const remaining = parseInt(cooldown);
     return { success: false, message: "يرجى الانتظار قبل إعادة الإرسال", cooldownSeconds: remaining };
   }
-
-  if (!transporter) {
-    emailLog.error("Cannot send OTP — SMTP not configured");
-    return { success: false, message: "خدمة البريد غير متاحة حالياً" };
+  if (local && local.cooldownUntil > Date.now()) {
+    const remaining = Math.ceil((local.cooldownUntil - Date.now()) / 1000);
+    return { success: false, message: "يرجى الانتظار قبل إعادة الإرسال", cooldownSeconds: remaining };
   }
 
   // Generate OTP
   const code = generateOtp();
+
+  if (!transporter) {
+    if (isOtpDevFallbackEnabled()) {
+      // Local/dev fallback: allow OTP flow without SMTP and print code in logs.
+      await cacheSet(otpKey(emailLower), code, otpConfig.expiryMinutes * 60);
+      await cacheSet(otpAttemptsKey(emailLower), "0", otpConfig.expiryMinutes * 60);
+      await cacheSet(otpCooldownKey(emailLower), String(otpConfig.cooldownMinutes * 60), otpConfig.cooldownMinutes * 60);
+      setLocalOtpRecord(emailLower, code);
+      if (shouldLogDevOtpCode()) {
+        emailLog.warn(`DEV OTP for ${emailLower}: ${code}`);
+      }
+      return {
+        success: true,
+        message: "تم إرسال رمز التحقق (وضع التطوير)",
+        // Exposed only for local temporary testing when fallback mode is enabled.
+        ...(process.env.OTP_DEV_LOG_OTP === "true" ? { devCode: code } : {}),
+      } as any;
+    }
+    emailLog.error("Cannot send OTP — SMTP not configured");
+    return { success: false, message: "خدمة البريد غير متاحة حالياً" };
+  }
 
   try {
     // Store OTP in Redis
@@ -171,6 +239,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
     await cacheSet(otpAttemptsKey(emailLower), "0", otpConfig.expiryMinutes * 60);
     // Set cooldown
     await cacheSet(otpCooldownKey(emailLower), String(otpConfig.cooldownMinutes * 60), otpConfig.cooldownMinutes * 60);
+    setLocalOtpRecord(emailLower, code);
 
     // Send email
     await transporter.sendMail({
@@ -187,6 +256,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
     emailLog.error({ err }, `Failed to send OTP to ${emailLower.slice(0, 3)}***`);
     // Clean up on failure
     await cacheDel(otpKey(emailLower));
+    clearLocalOtpRecord(emailLower);
     return { success: false, message: "فشل إرسال رمز التحقق، حاول مرة أخرى" };
   }
 }
@@ -197,19 +267,21 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
  */
 export async function verifyOtp(email: string, code: string): Promise<{ success: boolean; message: string }> {
   const emailLower = email.toLowerCase();
+  const local = getLocalOtpRecord(emailLower);
 
   // Check attempts
   const attemptsStr = await cacheGet(otpAttemptsKey(emailLower));
-  const attempts = parseInt(attemptsStr || "0");
+  const attempts = parseInt(attemptsStr || String(local?.attempts || 0));
   if (attempts >= otpConfig.maxAttempts) {
     // Delete the OTP — user exceeded attempts
     await cacheDel(otpKey(emailLower));
     await cacheDel(otpAttemptsKey(emailLower));
+    clearLocalOtpRecord(emailLower);
     return { success: false, message: "تجاوزت عدد المحاولات المسموح. أعد إرسال الرمز." };
   }
 
   // Get stored OTP
-  const storedCode = await cacheGet(otpKey(emailLower));
+  const storedCode = (await cacheGet(otpKey(emailLower))) || local?.code || null;
   if (!storedCode) {
     return { success: false, message: "رمز التحقق منتهي أو غير موجود. أعد الإرسال." };
   }
@@ -219,6 +291,9 @@ export async function verifyOtp(email: string, code: string): Promise<{ success:
     // Increment attempts
     const newAttempts = attempts + 1;
     await cacheSet(otpAttemptsKey(emailLower), String(newAttempts), otpConfig.expiryMinutes * 60);
+    if (local) {
+      localOtpStore.set(emailLower, { ...local, attempts: newAttempts });
+    }
     const remaining = otpConfig.maxAttempts - newAttempts;
     return { success: false, message: `رمز التحقق غير صحيح. متبقي ${remaining} محاولات.` };
   }
@@ -227,6 +302,7 @@ export async function verifyOtp(email: string, code: string): Promise<{ success:
   await cacheDel(otpKey(emailLower));
   await cacheDel(otpAttemptsKey(emailLower));
   await cacheDel(otpCooldownKey(emailLower));
+  clearLocalOtpRecord(emailLower);
 
   emailLog.info(`OTP verified for ${emailLower.slice(0, 3)}***`);
   return { success: true, message: "تم التحقق بنجاح" };

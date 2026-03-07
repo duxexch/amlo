@@ -5,7 +5,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { escapeLike, isValidUuid } from "../utils/validation";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { eq, and, or, desc, asc, sql, count, ne, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { getRedis } from "../redis";
@@ -45,6 +45,40 @@ async function getConversationOtherId(db: any, conversationId: string, userId: s
   }).from(schema.conversations).where(eq(schema.conversations.id, conversationId)).limit(1);
   if (!conv) return null;
   return conv.p1 === userId ? conv.p2 : conv.p1;
+}
+
+function parsePaymentMethodDetails(raw: unknown): { provider: string; countries: string[]; fee: string; usageTarget: "deposit" | "withdrawal" | "both" } {
+  const fallback = { provider: "", countries: ["*"], fee: "0", usageTarget: "both" as const };
+  if (!raw) return fallback;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const obj = (parsed && typeof parsed === "object") ? parsed as Record<string, unknown> : {};
+    const countries = Array.isArray(obj.countries)
+      ? obj.countries.map((c) => String(c || "").toUpperCase()).filter(Boolean)
+      : ["*"];
+    const usage = String(obj.usageTarget || obj.usage || "both");
+    const usageTarget = usage === "deposit" || usage === "withdrawal" ? usage : "both";
+    return {
+      provider: String(obj.provider || ""),
+      countries: countries.length ? countries : ["*"],
+      fee: String(obj.fee || "0"),
+      usageTarget,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function detectCountry(req: Request, userCountry?: string | null): string {
+  const fromProfile = String(userCountry || "").trim().toUpperCase();
+  if (fromProfile.length === 2) return fromProfile;
+  const headerCountry = String(
+    req.headers["cf-ipcountry"] ||
+    req.headers["x-vercel-ip-country"] ||
+    req.headers["x-country-code"] ||
+    ""
+  ).trim().toUpperCase();
+  return headerCountry.length === 2 ? headerCountry : "";
 }
 
 // ── UUID param validation middleware — rejects malformed :id early ──
@@ -246,7 +280,7 @@ router.post("/friends/request", async (req, res) => {
         avatar: schema.users.avatar,
         level: schema.users.level,
       }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-      io.to(receiverSocketId).emit("friend-request", { friendship, sender });
+      io.to(`user:${receiverId}`).emit("friend-request", { friendship, sender });
     }
 
     return res.status(201).json({ success: true, data: friendship });
@@ -282,7 +316,7 @@ router.post("/friends/:id/accept", async (req, res) => {
     // Notify sender
     const senderSocketId = await getUserSocketId(friendship.senderId);
     if (senderSocketId) {
-      io.to(senderSocketId).emit("friend-accepted", { friendshipId: updated.id, userId });
+      io.to(`user:${friendship.senderId}`).emit("friend-accepted", { friendshipId: updated.id, userId });
     }
 
     return res.json({ success: true, data: updated });
@@ -383,7 +417,7 @@ const searchLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.session as any)?.userId || req.ip || "unknown",
+  keyGenerator: (req) => (req.session as any)?.userId || ipKeyGenerator(req.ip || "127.0.0.1"),
   message: { success: false, message: "عدد كبير من طلبات البحث. حاول بعد دقيقة" },
 });
 
@@ -423,12 +457,12 @@ router.get("/users/search", searchLimiter, async (req, res) => {
     const resultIds = results.map(r => r.id);
     const existingFriendships = resultIds.length > 0
       ? await db.select().from(schema.friendships)
-          .where(
-            or(
-              and(eq(schema.friendships.senderId, userId), inArray(schema.friendships.receiverId, resultIds)),
-              and(inArray(schema.friendships.senderId, resultIds), eq(schema.friendships.receiverId, userId)),
-            )
+        .where(
+          or(
+            and(eq(schema.friendships.senderId, userId), inArray(schema.friendships.receiverId, resultIds)),
+            and(inArray(schema.friendships.senderId, resultIds), eq(schema.friendships.receiverId, userId)),
           )
+        )
       : [];
 
     const enriched = await Promise.all(results.map(async r => {
@@ -506,13 +540,21 @@ router.get("/conversations", async (req, res) => {
     const result = convs.map(c => {
       const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
       const unread = c.participant1Id === userId ? c.participant1Unread : c.participant2Unread;
+      const rawLastMessage = lastMessages.find(m => m.id === c.lastMessageId);
+      const lastMessage = rawLastMessage
+        ? {
+          ...rawLastMessage,
+          content: rawLastMessage.content ? decryptMessage(rawLastMessage.content, c.id) : rawLastMessage.content,
+          isEncrypted: true,
+        }
+        : null;
       return {
         id: c.id,
         otherUser: participants.find(p => p.id === otherId),
         isOnline: onlineMap.get(otherId) || false,
         lastSeen: lastSeenMap.get(otherId) || null,
         unreadCount: unread,
-        lastMessage: lastMessages.find(m => m.id === c.lastMessageId),
+        lastMessage,
         lastMessageAt: c.lastMessageAt,
       };
     });
@@ -588,15 +630,34 @@ router.post("/conversations", async (req, res) => {
 });
 
 // Get messages in a conversation
+// ── Lightweight chat metrics snapshot (process-local) ──
+const chatMetrics = {
+  sentTotal: 0,
+  sendErrors: 0,
+  sendLatencyMsTotal: 0,
+  fetchTotal: 0,
+  fetchErrors: 0,
+  fetchLatencyMsTotal: 0,
+};
+
+function avgMs(total: number, count: number): number {
+  if (count <= 0) return 0;
+  return Math.round((total / count) * 100) / 100;
+}
+
 router.get("/conversations/:id/messages", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
+  const startedAt = Date.now();
 
   const page = parseInt(req.query.page as string) || 1;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
   const offset = (page - 1) * limit;
+  const cursorRaw = typeof req.query.cursor === "string" ? req.query.cursor : "";
+  const cursorDate = cursorRaw ? new Date(cursorRaw) : null;
+  const hasCursor = !!(cursorDate && !Number.isNaN(cursorDate.getTime()));
 
   try {
     // Verify user is participant
@@ -613,17 +674,21 @@ router.get("/conversations/:id/messages", async (req, res) => {
 
     if (!conv) return res.status(404).json({ success: false, message: "المحادثة غير موجودة" });
 
-    const msgs = await db.select().from(schema.messages)
-      .where(
-        and(
-          eq(schema.messages.conversationId, req.params.id),
-          eq(schema.messages.isDeleted, false),
-          sql`NOT (${schema.messages.hiddenFor} @> ARRAY[${userId}]::text[])`,
-        )
-      )
-      .orderBy(desc(schema.messages.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const filters = [
+      eq(schema.messages.conversationId, req.params.id),
+      eq(schema.messages.isDeleted, false),
+      sql`NOT (${schema.messages.hiddenFor} @> ARRAY[${userId}]::text[])`,
+    ] as any[];
+    if (hasCursor && cursorDate) {
+      filters.push(sql`${schema.messages.createdAt} < ${cursorDate}`);
+    }
+
+    const baseQuery = db.select().from(schema.messages)
+      .where(and(...filters))
+      .orderBy(desc(schema.messages.createdAt), desc(schema.messages.id))
+      .limit(limit);
+
+    const msgs = hasCursor ? await baseQuery : await baseQuery.offset(offset);
 
     // Mark messages as read
     const unreadField = conv.participant1Id === userId ? "participant1Unread" : "participant2Unread";
@@ -643,7 +708,7 @@ router.get("/conversations/:id/messages", async (req, res) => {
     if (markedRead.length > 0) {
       const senderSocketId = await getUserSocketId(otherId);
       if (senderSocketId) {
-        io.to(senderSocketId).emit("messages-read", {
+        io.to(`user:${otherId}`).emit("messages-read", {
           conversationId: conv.id,
           readBy: userId,
           readAt: now.toISOString(),
@@ -652,8 +717,25 @@ router.get("/conversations/:id/messages", async (req, res) => {
       }
     }
 
-    return res.json({ success: true, data: decryptMessages(msgs.reverse(), req.params.id) });
+    const decrypted = decryptMessages(msgs.reverse(), req.params.id);
+    chatMetrics.fetchTotal += 1;
+    chatMetrics.fetchLatencyMsTotal += Date.now() - startedAt;
+
+    if (hasCursor) {
+      const nextCursor = msgs.length > 0 ? (msgs[msgs.length - 1].createdAt?.toISOString?.() || null) : null;
+      return res.json({
+        success: true,
+        data: {
+          messages: decrypted,
+          nextCursor,
+          hasMore: msgs.length >= limit,
+        },
+      });
+    }
+
+    return res.json({ success: true, data: decrypted });
   } catch (err: any) {
+    chatMetrics.fetchErrors += 1;
     return res.status(500).json({ success: false, message: "خطأ" });
   }
 });
@@ -680,6 +762,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
   if (!userId) return;
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+  const startedAt = Date.now();
 
   // Rate limit: max 15 messages per minute per user
   if (await isMessageRateLimited(userId)) {
@@ -768,7 +851,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     // Send real-time notification
     const receiverSocketId = await getUserSocketId(otherId);
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("new-message", {
+      io.to(`user:${otherId}`).emit("new-message", {
         message: decryptedMsg,
         conversationId: conv.id,
         sender,
@@ -778,14 +861,17 @@ router.post("/conversations/:id/messages", async (req, res) => {
     // Also notify sender socket for multi-tab sync
     const senderSocketId = await getUserSocketId(userId);
     if (senderSocketId) {
-      io.to(senderSocketId).emit("message-sent", {
+      io.to(`user:${userId}`).emit("message-sent", {
         message: decryptedMsg,
         conversationId: conv.id,
       });
     }
 
+    chatMetrics.sentTotal += 1;
+    chatMetrics.sendLatencyMsTotal += Date.now() - startedAt;
     return res.status(201).json({ success: true, data: decryptedMsg });
   } catch (err: any) {
+    chatMetrics.sendErrors += 1;
     log(`Send message error: ${err.message}`, "social");
     return res.status(500).json({ success: false, message: "خطأ في الإرسال" });
   }
@@ -837,7 +923,7 @@ router.delete("/messages/:id", async (req, res) => {
     if (otherId) {
       const otherSocketId = await getUserSocketId(otherId);
       if (otherSocketId) {
-        io.to(otherSocketId).emit("message-deleted", {
+        io.to(`user:${otherId}`).emit("message-deleted", {
           messageId: msg.id,
           conversationId: msg.conversationId,
         });
@@ -903,7 +989,7 @@ router.post("/messages/:id/reactions", async (req, res) => {
       if (otherId) {
         const otherSocketId = await getUserSocketId(otherId);
         if (otherSocketId) {
-          io.to(otherSocketId).emit("reaction-updated", {
+          io.to(`user:${otherId}`).emit("reaction-updated", {
             messageId: req.params.id,
             conversationId: msg.conversationId,
             userId,
@@ -927,7 +1013,7 @@ router.post("/messages/:id/reactions", async (req, res) => {
       if (otherId) {
         const otherSocketId = await getUserSocketId(otherId);
         if (otherSocketId) {
-          io.to(otherSocketId).emit("reaction-updated", {
+          io.to(`user:${otherId}`).emit("reaction-updated", {
             messageId: req.params.id,
             conversationId: msg.conversationId,
             userId,
@@ -1096,7 +1182,7 @@ router.post("/messages/bulk-delete", async (req, res) => {
       if (otherId) {
         const otherSocketId = await getUserSocketId(otherId);
         if (otherSocketId) {
-          io.to(otherSocketId).emit("message-deleted", {
+          io.to(`user:${otherId}`).emit("message-deleted", {
             messageId: msg.id,
             conversationId: msg.conversationId,
           });
@@ -1147,6 +1233,25 @@ router.get("/unread-count", async (req, res) => {
   } catch (err: any) {
     return res.json({ success: true, data: { unread: 0, friendRequests: 0 } });
   }
+});
+
+// Chat metrics snapshot (auth required)
+router.get("/chat/metrics", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  return res.json({
+    success: true,
+    data: {
+      sentTotal: chatMetrics.sentTotal,
+      sendErrors: chatMetrics.sendErrors,
+      avgSendLatencyMs: avgMs(chatMetrics.sendLatencyMsTotal, chatMetrics.sentTotal),
+      fetchTotal: chatMetrics.fetchTotal,
+      fetchErrors: chatMetrics.fetchErrors,
+      avgFetchLatencyMs: avgMs(chatMetrics.fetchLatencyMsTotal, chatMetrics.fetchTotal),
+      timestamp: new Date().toISOString(),
+    },
+  });
 });
 
 // ════════════════════════════════════════════════════════════
@@ -1224,7 +1329,7 @@ router.post("/calls", async (req, res) => {
 
       const receiverSocketId = await getUserSocketId(receiverId);
       if (receiverSocketId) {
-        io.to(receiverSocketId).emit("incoming-call", {
+        io.to(`user:${receiverId}`).emit("incoming-call", {
           call,
           caller: callerInfo,
         });
@@ -1268,7 +1373,7 @@ router.post("/calls/:id/answer", async (req, res) => {
     // Notify caller
     const callerSocketId = await getUserSocketId(call.callerId);
     if (callerSocketId) {
-      io.to(callerSocketId).emit("call-answered", { callId: call.id });
+      io.to(`user:${call.callerId}`).emit("call-answered", { callId: call.id });
     }
 
     return res.json({ success: true, data: updated });
@@ -1302,7 +1407,7 @@ router.post("/calls/:id/reject", async (req, res) => {
     socialLog.info({ callId: call.id, receiverId: userId, callerId: call.callerId }, "Call rejected");
 
     const callerSocketId = await getUserSocketId(call.callerId);
-    if (callerSocketId) io.to(callerSocketId).emit("call-rejected", { callId: call.id });
+    if (callerSocketId) io.to(`user:${call.callerId}`).emit("call-rejected", { callId: call.id });
 
     return res.json({ success: true, message: "تم رفض المكالمة" });
   } catch (err: any) {
@@ -1321,7 +1426,7 @@ router.post("/calls/:id/end", async (req, res) => {
   try {
     // Atomic status update — prevents double-end/double-charge race condition
     const endedAt = new Date();
-    
+
     // First, get call info for charging calculation
     const [call] = await db.select().from(schema.calls)
       .where(
@@ -1378,7 +1483,7 @@ router.post("/calls/:id/end", async (req, res) => {
     const otherId = call.callerId === userId ? call.receiverId : call.callerId;
     const otherSocketId = await getUserSocketId(otherId);
     if (otherSocketId) {
-      io.to(otherSocketId).emit("call-ended", { callId: call.id, durationSeconds, coinsCharged });
+      io.to(`user:${otherId}`).emit("call-ended", { callId: call.id, durationSeconds, coinsCharged });
     }
 
     return res.json({ success: true, data: updated });
@@ -1548,11 +1653,13 @@ router.post("/miles/purchase", async (req, res) => {
 router.get("/pricing", async (_req, res) => {
   try {
     const pricing = await getAllPricing();
-    return res.json({ success: true, data: {
-      voice_call_rate: pricing.calls.voice_call_rate,
-      video_call_rate: pricing.calls.video_call_rate,
-      message_cost: pricing.messages.message_cost,
-    } });
+    return res.json({
+      success: true, data: {
+        voice_call_rate: pricing.calls.voice_call_rate,
+        video_call_rate: pricing.calls.video_call_rate,
+        message_cost: pricing.messages.message_cost,
+      }
+    });
   } catch {
     return res.json({ success: true, data: { voice_call_rate: 5, video_call_rate: 10, message_cost: 0 } });
   }
@@ -1597,7 +1704,7 @@ router.post("/chat/block/:userId", async (req, res) => {
     // Notify blocked user via socket
     const blockedSocketId = await getUserSocketId(targetId);
     if (blockedSocketId) {
-      io.to(blockedSocketId).emit("chat-blocked", { blockerId: userId });
+      io.to(`user:${targetId}`).emit("chat-blocked", { blockerId: userId });
     }
 
     return res.status(201).json({ success: true, message: "تم حظر المستخدم من الدردشة" });
@@ -1807,7 +1914,7 @@ async function getConversionRate(): Promise<number> {
       const n = parseInt(setting.value);
       if (n > 0) return n;
     }
-  } catch {}
+  } catch { }
   return 100; // default 100 coins = $1
 }
 
@@ -1920,6 +2027,52 @@ router.post("/wallet/recharge", async (_req: Request, res: Response) => {
     message: "هذا المسار ملغي. استخدم /api/v1/payments/checkout لشحن العملات عبر Stripe",
     redirect: "/api/v1/payments/checkout",
   });
+});
+
+/**
+ * GET /social/wallet/payment-methods — طرق الدفع المتاحة حسب الدولة والاستخدام
+ */
+router.get("/wallet/payment-methods", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const usageRaw = String(req.query.usage || "withdrawal").toLowerCase();
+    const usage = usageRaw === "deposit" || usageRaw === "withdrawal" ? usageRaw : "withdrawal";
+
+    const user = await storage.getUser(userId);
+    const country = detectCountry(req, user?.country || null);
+
+    const methods = await storage.getPaymentMethods(true);
+    const normalized = (methods || []).map((m: any) => {
+      const details = parsePaymentMethodDetails(m.accountDetails);
+      return {
+        ...m,
+        provider: details.provider,
+        countries: details.countries,
+        fee: details.fee,
+        usageTarget: details.usageTarget,
+      };
+    });
+
+    const byUsage = normalized.filter((m: any) => m.usageTarget === "both" || m.usageTarget === usage);
+    const filtered = country
+      ? byUsage.filter((m: any) => (m.countries || []).includes("*") || (m.countries || []).includes(country))
+      : byUsage;
+
+    return res.json({
+      success: true,
+      data: filtered,
+      meta: {
+        usage,
+        country: country || null,
+        total: filtered.length,
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Wallet payment methods error");
+    return res.status(500).json({ success: false, message: "تعذر تحميل وسائل الدفع" });
+  }
 });
 
 /**
@@ -2105,15 +2258,15 @@ router.get("/wallet/income-chart", async (req: Request, res: Response) => {
       day: sql<string>`DATE(${schema.walletTransactions.createdAt})`,
       total: sql<number>`COALESCE(SUM(${schema.walletTransactions.amount}), 0)`,
     })
-    .from(schema.walletTransactions)
-    .where(and(
-      eq(schema.walletTransactions.userId, userId),
-      sql`${schema.walletTransactions.type} IN ('gift_received', 'commission')`,
-      eq(schema.walletTransactions.status, "completed"),
-      sql`${schema.walletTransactions.createdAt} >= ${startDate}`
-    ))
-    .groupBy(sql`DATE(${schema.walletTransactions.createdAt})`)
-    .orderBy(sql`DATE(${schema.walletTransactions.createdAt})`);
+      .from(schema.walletTransactions)
+      .where(and(
+        eq(schema.walletTransactions.userId, userId),
+        sql`${schema.walletTransactions.type} IN ('gift_received', 'commission')`,
+        eq(schema.walletTransactions.status, "completed"),
+        sql`${schema.walletTransactions.createdAt} >= ${startDate}`
+      ))
+      .groupBy(sql`DATE(${schema.walletTransactions.createdAt})`)
+      .orderBy(sql`DATE(${schema.walletTransactions.createdAt})`);
 
     return res.json({ success: true, data: dailyIncome.map(d => ({ day: d.day, total: Number(d.total) })) });
   } catch (err: any) {
@@ -2173,8 +2326,8 @@ router.post("/wallet/cancel-withdrawal", async (req: Request, res: Response) => 
     // Emit balance update via socket
     const socketId = await getUserSocketId(userId);
     if (socketId) {
-      io.to(socketId).emit("balance-update", { coins: result.newBalance });
-      io.to(socketId).emit("withdrawal-status-change", { withdrawalId, status: "rejected", reason: "Cancelled by user" });
+      io.to(`user:${userId}`).emit("balance-update", { coins: result.newBalance });
+      io.to(`user:${userId}`).emit("withdrawal-status-change", { withdrawalId, status: "rejected", reason: "Cancelled by user" });
     }
 
     return res.json({ success: true, message: "تم إلغاء طلب السحب" });
@@ -2608,6 +2761,290 @@ async function enrichStream(s: any) {
   };
 }
 
+type LiveFeatureFlags = {
+  liveRecommendationEnabled: boolean;
+  postStreamReportEnabled: boolean;
+  liveGamificationEnabled: boolean;
+  creatorAnalyticsCsvEnabled: boolean;
+  smartDirectorTelemetryEnabled: boolean;
+  autoClipsEnabled: boolean;
+};
+
+async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
+  if (!db) {
+    return {
+      liveRecommendationEnabled: true,
+      postStreamReportEnabled: true,
+      liveGamificationEnabled: true,
+      creatorAnalyticsCsvEnabled: true,
+      smartDirectorTelemetryEnabled: true,
+      autoClipsEnabled: true,
+    };
+  }
+
+  const keys = [
+    "live_recommendation_enabled",
+    "post_stream_report_enabled",
+    "live_gamification_enabled",
+    "creator_analytics_csv_enabled",
+    "smart_director_telemetry_enabled",
+    "auto_clips_enabled",
+  ];
+  const rows = await db.select({ key: schema.systemSettings.key, value: schema.systemSettings.value })
+    .from(schema.systemSettings)
+    .where(inArray(schema.systemSettings.key, keys));
+
+  const values: Record<string, string> = {};
+  for (const row of rows) values[row.key] = String(row.value || "").toLowerCase();
+
+  const toBool = (key: string, defaultValue: boolean) => {
+    const v = values[key];
+    if (v === undefined) return defaultValue;
+    if (v === "false" || v === "0" || v === "off" || v === "no") return false;
+    if (v === "true" || v === "1" || v === "on" || v === "yes") return true;
+    return defaultValue;
+  };
+
+  return {
+    liveRecommendationEnabled: toBool("live_recommendation_enabled", true),
+    postStreamReportEnabled: toBool("post_stream_report_enabled", true),
+    liveGamificationEnabled: toBool("live_gamification_enabled", true),
+    creatorAnalyticsCsvEnabled: toBool("creator_analytics_csv_enabled", true),
+    smartDirectorTelemetryEnabled: toBool("smart_director_telemetry_enabled", true),
+    autoClipsEnabled: toBool("auto_clips_enabled", true),
+  };
+}
+
+// GET /social/feature-flags — lightweight runtime flags for live UX
+router.get("/feature-flags", async (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const flags = await getLiveFeatureFlags(db);
+    return res.json({ success: true, data: flags });
+  } catch (err: any) {
+    socialLog.error({ err }, "Feature flags error");
+    return res.json({
+      success: true,
+      data: {
+        liveRecommendationEnabled: true,
+        postStreamReportEnabled: true,
+        liveGamificationEnabled: true,
+        creatorAnalyticsCsvEnabled: true,
+        smartDirectorTelemetryEnabled: true,
+        autoClipsEnabled: true,
+      },
+    });
+  }
+});
+
+type DailyMissionState = {
+  id: "watch_minutes" | "send_gift" | "follow_user";
+  title: string;
+  progress: number;
+  target: number;
+  done: boolean;
+  rewardXp: number;
+  rewardCoins: number;
+};
+
+async function computeDailyMissionState(db: any, userId: string) {
+  const [watchRow] = await db.select({
+    minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${schema.streamViewers.leftAt}, NOW()) - ${schema.streamViewers.joinedAt}))), 0) / 60`,
+  }).from(schema.streamViewers)
+    .where(and(
+      eq(schema.streamViewers.userId, userId),
+      sql`${schema.streamViewers.joinedAt} >= CURRENT_DATE`,
+    ));
+
+  const [giftRow] = await db.select({ count: count() }).from(schema.giftTransactions)
+    .where(and(
+      eq(schema.giftTransactions.senderId, userId),
+      sql`${schema.giftTransactions.createdAt} >= CURRENT_DATE`,
+    ));
+
+  const [followRow] = await db.select({ count: count() }).from(schema.userFollows)
+    .where(and(
+      eq(schema.userFollows.followerId, userId),
+      sql`${schema.userFollows.createdAt} >= CURRENT_DATE`,
+    ));
+
+  const watchMinutes = Math.max(0, Math.round(Number(watchRow?.minutes || 0)));
+  const giftCount = Math.max(0, Number(giftRow?.count || 0));
+  const followCount = Math.max(0, Number(followRow?.count || 0));
+
+  const missions: DailyMissionState[] = [
+    { id: "watch_minutes", title: "شاهد بثًا لمدة 20 دقيقة", progress: watchMinutes, target: 20, done: watchMinutes >= 20, rewardXp: 80, rewardCoins: 20 },
+    { id: "send_gift", title: "أرسل هدية واحدة", progress: giftCount, target: 1, done: giftCount >= 1, rewardXp: 120, rewardCoins: 35 },
+    { id: "follow_user", title: "تابع مستخدمًا جديدًا", progress: followCount, target: 1, done: followCount >= 1, rewardXp: 60, rewardCoins: 15 },
+  ];
+
+  return missions;
+}
+
+function applyLevelProgression(currentLevel: number, currentXp: number, gainedXp: number) {
+  let level = Math.max(1, currentLevel || 1);
+  let xp = Math.max(0, currentXp || 0) + Math.max(0, gainedXp || 0);
+  let next = level * 1000;
+  while (xp >= next && level < 200) {
+    xp -= next;
+    level += 1;
+    next = level * 1000;
+  }
+  return { level, xp };
+}
+
+// GET /social/gamification/daily — mission progress + streak
+router.get("/gamification/daily", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.liveGamificationEnabled) {
+      return res.json({ success: true, data: { enabled: false, missions: [], canClaim: false, streak: 0 } });
+    }
+
+    const missions = await computeDailyMissionState(db, userId);
+    const [todayClaim] = await db.select().from(schema.userDailyMissions)
+      .where(and(
+        eq(schema.userDailyMissions.userId, userId),
+        sql`${schema.userDailyMissions.missionDate} = CURRENT_DATE`,
+      ))
+      .limit(1);
+
+    const [latestClaim] = await db.select().from(schema.userDailyMissions)
+      .where(eq(schema.userDailyMissions.userId, userId))
+      .orderBy(desc(schema.userDailyMissions.missionDate))
+      .limit(1);
+
+    const allDone = missions.every((m) => m.done);
+    const baseXp = missions.reduce((sum, m) => sum + m.rewardXp, 0);
+    const baseCoins = missions.reduce((sum, m) => sum + m.rewardCoins, 0);
+
+    return res.json({
+      success: true,
+      data: {
+        enabled: true,
+        day: new Date().toISOString().slice(0, 10),
+        missions,
+        canClaim: allDone && !todayClaim,
+        claimed: !!todayClaim,
+        streak: Number(todayClaim?.streakCount || latestClaim?.streakCount || 0),
+        rewardPreview: {
+          xp: baseXp,
+          coins: baseCoins,
+        },
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Daily gamification state error");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل المهام اليومية" });
+  }
+});
+
+// POST /social/gamification/claim — claim daily rewards once per day
+router.post("/gamification/claim", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.liveGamificationEnabled) {
+      return res.status(403).json({ success: false, message: "نظام المهام اليومية غير مفعل" });
+    }
+
+    const [alreadyClaimed] = await db.select({ id: schema.userDailyMissions.id })
+      .from(schema.userDailyMissions)
+      .where(and(
+        eq(schema.userDailyMissions.userId, userId),
+        sql`${schema.userDailyMissions.missionDate} = CURRENT_DATE`,
+      ))
+      .limit(1);
+    if (alreadyClaimed) {
+      return res.status(409).json({ success: false, message: "تم استلام مكافأة اليوم مسبقاً" });
+    }
+
+    const missions = await computeDailyMissionState(db, userId);
+    if (!missions.every((m) => m.done)) {
+      return res.status(400).json({ success: false, message: "لم تكتمل المهام اليومية بعد" });
+    }
+
+    const baseXp = missions.reduce((sum, m) => sum + m.rewardXp, 0);
+    const baseCoins = missions.reduce((sum, m) => sum + m.rewardCoins, 0);
+
+    const [yesterdayClaim] = await db.select().from(schema.userDailyMissions)
+      .where(and(
+        eq(schema.userDailyMissions.userId, userId),
+        sql`${schema.userDailyMissions.missionDate} = (CURRENT_DATE - INTERVAL '1 day')::date`,
+      ))
+      .limit(1);
+
+    const nextStreak = yesterdayClaim ? Number(yesterdayClaim.streakCount || 0) + 1 : 1;
+    const streakXpBonus = Math.min(150, nextStreak * 10);
+    const streakCoinBonus = Math.min(100, nextStreak * 5);
+    const totalXp = baseXp + streakXpBonus;
+    const totalCoins = baseCoins + streakCoinBonus;
+
+    const [user] = await db.select({
+      id: schema.users.id,
+      level: schema.users.level,
+      xp: schema.users.xp,
+      coins: schema.users.coins,
+    }).from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+
+    const levelState = applyLevelProgression(Number(user.level || 1), Number(user.xp || 0), totalXp);
+    const [updatedUser] = await db.update(schema.users)
+      .set({
+        xp: levelState.xp,
+        level: levelState.level,
+        coins: sql`${schema.users.coins} + ${totalCoins}`,
+      })
+      .where(eq(schema.users.id, userId))
+      .returning({ id: schema.users.id, level: schema.users.level, xp: schema.users.xp, coins: schema.users.coins });
+
+    await db.insert(schema.userDailyMissions).values({
+      userId,
+      missionDate: new Date().toISOString().slice(0, 10),
+      streakCount: nextStreak,
+      xpAwarded: totalXp,
+      coinsAwarded: totalCoins,
+      metadata: JSON.stringify({ missions: missions.map((m) => ({ id: m.id, progress: m.progress })) }),
+    });
+
+    await db.insert(schema.walletTransactions).values({
+      userId,
+      type: "bonus",
+      amount: totalCoins,
+      balanceAfter: Number(updatedUser?.coins || Number(user.coins || 0) + totalCoins),
+      currency: "coins",
+      description: `Daily missions reward (streak ${nextStreak})`,
+      status: "completed",
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        streak: nextStreak,
+        reward: { xp: totalXp, coins: totalCoins, streakXpBonus, streakCoinBonus },
+        user: updatedUser,
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Daily claim error");
+    return res.status(500).json({ success: false, message: "خطأ في استلام مكافأة اليوم" });
+  }
+});
+
 // GET /social/streams/active — list active live streams with host info
 router.get("/streams/active", async (req: Request, res: Response) => {
   try {
@@ -2648,6 +3085,91 @@ router.get("/streams/active", async (req: Request, res: Response) => {
     return res.json(enriched);
   } catch (err: any) {
     socialLog.error({ err }, "Active streams error");
+    return res.json([]);
+  }
+});
+
+// GET /social/streams/recommended — personalized discover feed ranking
+router.get("/streams/recommended", async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    if (!db) return res.json([]);
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.liveRecommendationEnabled) {
+      return res.json([]);
+    }
+
+    const category = String(req.query.category || "").trim();
+    const currentUserId = String((req.session as any)?.userId || "").trim() || null;
+
+    const conditions = [eq(schema.streams.status, "active")];
+    if (category && category !== "all") {
+      conditions.push(eq(schema.streams.category, category));
+    }
+
+    const streams = await db.select().from(schema.streams)
+      .where(and(...conditions))
+      .orderBy(desc(schema.streams.viewerCount), desc(schema.streams.startedAt))
+      .limit(80);
+
+    if (!streams.length) return res.json([]);
+
+    const hostIds = [...new Set(streams.map((s: any) => s.userId).filter(Boolean))] as string[];
+    const hosts = hostIds.length
+      ? await db.select({
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatar: schema.users.avatar,
+        level: schema.users.level,
+      }).from(schema.users).where(inArray(schema.users.id, hostIds))
+      : [];
+    const hostsMap: Record<string, any> = {};
+    for (const host of hosts) hostsMap[host.id] = host;
+
+    let followedHostIds = new Set<string>();
+    if (currentUserId && hostIds.length) {
+      const follows = await db.select({ followingId: schema.userFollows.followingId })
+        .from(schema.userFollows)
+        .where(and(
+          eq(schema.userFollows.followerId, currentUserId),
+          inArray(schema.userFollows.followingId, hostIds),
+        ));
+      followedHostIds = new Set(follows.map((f: any) => f.followingId));
+    }
+
+    const now = Date.now();
+    const ranked = streams.map((s: any) => {
+      const startedAtMs = s.startedAt ? new Date(s.startedAt).getTime() : now;
+      const ageMinutes = Math.max(1, (now - startedAtMs) / 60_000);
+      const recencyBoost = Math.max(0.2, 1.4 - ageMinutes / 240);
+      const followBoost = currentUserId && followedHostIds.has(s.userId) ? 1.35 : 1;
+      const categoryBoost = category && category !== "all" && s.category === category ? 1.08 : 1;
+
+      const base =
+        (Number(s.viewerCount || 0) * 3) +
+        (Number(s.peakViewers || 0) * 1.25) +
+        (Number(s.totalGifts || 0) * 0.8);
+
+      const score = Math.round(base * recencyBoost * followBoost * categoryBoost * 100) / 100;
+      const host = hostsMap[s.userId];
+
+      return {
+        ...s,
+        recommendationScore: score,
+        hostName: host?.displayName || host?.username || "مجهول",
+        hostUsername: host?.username || "",
+        hostAvatar: host?.avatar || null,
+        hostLevel: host?.level || 1,
+        tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
+      };
+    });
+
+    ranked.sort((a: any, b: any) => Number(b.recommendationScore) - Number(a.recommendationScore));
+    return res.json(ranked.slice(0, 50));
+  } catch (err: any) {
+    socialLog.error({ err }, "Recommended streams error");
     return res.json([]);
   }
 });
@@ -2770,7 +3292,7 @@ router.post("/streams/create", async (req: Request, res: Response) => {
         for (const f of followers) {
           const socketId = await getUserSocketId(f.followerId);
           if (socketId) {
-            io.to(socketId).emit("stream-started", {
+            io.to(`user:${f.followerId}`).emit("stream-started", {
               streamId: stream.id,
               hostName: hostUser?.displayName || "مستخدم",
               hostAvatar: hostUser?.avatar || null,
@@ -2874,12 +3396,12 @@ router.get("/streams/:id/viewers", async (req: Request, res: Response) => {
     const viewerUserIds = viewers.map((v: any) => v.userId).filter(Boolean);
     const users = viewerUserIds.length > 0
       ? await db.select({
-          id: schema.users.id,
-          username: schema.users.username,
-          displayName: schema.users.displayName,
-          avatar: schema.users.avatar,
-          level: schema.users.level,
-        }).from(schema.users).where(inArray(schema.users.id, viewerUserIds))
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatar: schema.users.avatar,
+        level: schema.users.level,
+      }).from(schema.users).where(inArray(schema.users.id, viewerUserIds))
       : [];
 
     const data = viewers.map((v: any) => {
@@ -2922,13 +3444,24 @@ router.post("/streams/:id/token", async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: "البث غير متاح" });
     }
 
-    // Determine role
+    // Determine role strictly on server-side state (never trust requested role).
     const isHost = stream.userId === userId;
-    const requestedRole = req.body?.role;
-    const isSpeaker = !isHost && requestedRole === "speaker";
+    let isSpeaker = false;
+
+    const db = getDb();
+    if (!isHost && db) {
+      const [viewerRow] = await db.select({ role: schema.streamViewers.role })
+        .from(schema.streamViewers)
+        .where(and(
+          eq(schema.streamViewers.streamId, streamId),
+          eq(schema.streamViewers.userId, userId),
+          sql`left_at IS NULL`,
+        ))
+        .limit(1);
+      isSpeaker = viewerRow?.role === "speaker";
+    }
 
     // Get user info for participant name
-    const db = getDb();
     let displayName = "مستخدم";
     if (db) {
       const [user] = await db.select({
@@ -2994,6 +3527,18 @@ router.post("/streams/:id/promote", async (req: Request, res: Response) => {
     const roomName = `stream-${streamId}`;
     await updateParticipantPermissions(roomName, targetUserId, true);
 
+    // Keep DB role state as the source of truth for future token issuance.
+    const db = getDb();
+    if (db) {
+      await db.update(schema.streamViewers)
+        .set({ role: "speaker" })
+        .where(and(
+          eq(schema.streamViewers.streamId, streamId),
+          eq(schema.streamViewers.userId, targetUserId),
+          sql`left_at IS NULL`,
+        ));
+    }
+
     socialLog.info({ streamId, targetUserId }, "Speaker promoted");
     return res.json({ success: true });
   } catch (err: any) {
@@ -3025,6 +3570,18 @@ router.post("/streams/:id/demote", async (req: Request, res: Response) => {
 
     const roomName = `stream-${streamId}`;
     await updateParticipantPermissions(roomName, targetUserId, false);
+
+    // Revert DB role so speaker tokens cannot be re-issued.
+    const db = getDb();
+    if (db) {
+      await db.update(schema.streamViewers)
+        .set({ role: "viewer" })
+        .where(and(
+          eq(schema.streamViewers.streamId, streamId),
+          eq(schema.streamViewers.userId, targetUserId),
+          sql`left_at IS NULL`,
+        ));
+    }
 
     socialLog.info({ streamId, targetUserId }, "Speaker demoted");
     return res.json({ success: true });
@@ -3187,6 +3744,372 @@ router.get("/streams/:id/stats", async (req: Request, res: Response) => {
   }
 });
 
+// GET /streams/:id/report — richer post-stream report for hosts
+router.get("/streams/:id/report", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.postStreamReportEnabled) {
+      return res.status(403).json({ success: false, message: "تقرير البث غير مفعل حالياً" });
+    }
+
+    const [uniqueViewers] = await db.select({ count: count() })
+      .from(schema.streamViewers)
+      .where(eq(schema.streamViewers.streamId, streamId));
+
+    const [giftSummary] = await db.select({
+      total: sql<number>`COALESCE(SUM(${schema.giftTransactions.totalPrice}), 0)`,
+      senders: sql<number>`COUNT(DISTINCT ${schema.giftTransactions.senderId})`,
+      events: sql<number>`COUNT(*)`,
+    }).from(schema.giftTransactions)
+      .where(eq(schema.giftTransactions.streamId, streamId));
+
+    const [speakerSummary] = await db.select({
+      speakers: sql<number>`COUNT(DISTINCT ${schema.streamViewers.userId})`,
+    }).from(schema.streamViewers)
+      .where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        eq(schema.streamViewers.role, "speaker"),
+      ));
+
+    const [watchSummary] = await db.select({
+      avgWatchSec: sql<number>`AVG(EXTRACT(EPOCH FROM (COALESCE(${schema.streamViewers.leftAt}, NOW()) - ${schema.streamViewers.joinedAt})))`,
+      totalWatchSec: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${schema.streamViewers.leftAt}, NOW()) - ${schema.streamViewers.joinedAt}))), 0)`,
+    }).from(schema.streamViewers)
+      .where(eq(schema.streamViewers.streamId, streamId));
+
+    const topCountries = await db.select({
+      country: schema.users.country,
+      viewers: count(),
+    }).from(schema.streamViewers)
+      .innerJoin(schema.users, eq(schema.users.id, schema.streamViewers.userId))
+      .where(and(
+        eq(schema.streamViewers.streamId, streamId),
+        sql`${schema.users.country} IS NOT NULL AND ${schema.users.country} <> ''`,
+      ))
+      .groupBy(schema.users.country)
+      .orderBy(desc(count()))
+      .limit(5);
+
+    const durationSec = stream.endedAt
+      ? Math.max(1, Math.round((new Date(stream.endedAt).getTime() - new Date(stream.startedAt).getTime()) / 1000))
+      : Math.max(1, Math.round((Date.now() - new Date(stream.startedAt).getTime()) / 1000));
+
+    const uniqueCount = Number(uniqueViewers?.count || 0);
+    const avgWatchSec = Math.max(0, Math.round(Number(watchSummary?.avgWatchSec || 0)));
+    const giftsTotal = Number(giftSummary?.total || 0);
+    const giftsPerViewer = uniqueCount > 0 ? giftsTotal / uniqueCount : 0;
+    const avgRetentionPct = Math.min(100, Math.max(0, (avgWatchSec / durationSec) * 100));
+
+    const recommendations: string[] = [];
+    if (avgRetentionPct < 20) recommendations.push("ابدأ البث بخطاف أقوى خلال أول دقيقتين لرفع الاحتفاظ.");
+    if (giftsPerViewer < 1) recommendations.push("جرّب Call-to-action للهدايا كل 5-8 دقائق مع هدف واضح.");
+    if ((speakerSummary?.speakers || 0) <= 1) recommendations.push("زِد التفاعل بإضافة متحدثين أو فقرة أسئلة مباشرة.");
+    if (!recommendations.length) recommendations.push("الأداء جيد: كرّر نفس توقيت البث والمحتوى في الجلسة القادمة.");
+
+    return res.json({
+      success: true,
+      data: {
+        streamId,
+        startedAt: stream.startedAt,
+        endedAt: stream.endedAt,
+        durationSec,
+        peakViewers: Number(stream.peakViewers || 0),
+        uniqueViewers: uniqueCount,
+        totalGifts: giftsTotal,
+        giftEvents: Number(giftSummary?.events || 0),
+        giftSenders: Number(giftSummary?.senders || 0),
+        avgWatchSec,
+        totalWatchSec: Math.round(Number(watchSummary?.totalWatchSec || 0)),
+        avgRetentionPct: Math.round(avgRetentionPct * 10) / 10,
+        speakersCount: Number(speakerSummary?.speakers || 0),
+        topCountries: topCountries.map((c: any) => ({ country: c.country, viewers: Number(c.viewers || 0) })),
+        recommendations,
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err }, "Post stream report error");
+    return res.status(500).json({ success: false, message: "خطأ في بناء التقرير" });
+  }
+});
+
+async function buildStreamAnalytics(db: any, streamId: string, stream: any) {
+  const viewerSessions = await db.select({
+    joinedAt: schema.streamViewers.joinedAt,
+    leftAt: schema.streamViewers.leftAt,
+  }).from(schema.streamViewers)
+    .where(eq(schema.streamViewers.streamId, streamId));
+
+  const giftEvents = await db.select({
+    createdAt: schema.giftTransactions.createdAt,
+    totalPrice: schema.giftTransactions.totalPrice,
+  }).from(schema.giftTransactions)
+    .where(eq(schema.giftTransactions.streamId, streamId));
+
+  const startedAtMs = new Date(stream.startedAt).getTime();
+  const endedAtMs = stream.endedAt ? new Date(stream.endedAt).getTime() : Date.now();
+  const durationMs = Math.max(60_000, endedAtMs - startedAtMs);
+  const binsCount = 6;
+  const bins = Array.from({ length: binsCount }).map((_, idx) => {
+    const start = startedAtMs + Math.floor((durationMs * idx) / binsCount);
+    const end = idx === binsCount - 1 ? endedAtMs : startedAtMs + Math.floor((durationMs * (idx + 1)) / binsCount);
+    const midpoint = Math.floor((start + end) / 2);
+
+    const activeViewers = viewerSessions.filter((session: any) => {
+      const joined = session.joinedAt ? new Date(session.joinedAt).getTime() : 0;
+      const left = session.leftAt ? new Date(session.leftAt).getTime() : endedAtMs;
+      return joined <= midpoint && left >= midpoint;
+    }).length;
+
+    const joins = viewerSessions.filter((session: any) => {
+      const joined = session.joinedAt ? new Date(session.joinedAt).getTime() : 0;
+      return joined >= start && joined < end;
+    }).length;
+
+    const gifts = giftEvents.filter((g: any) => {
+      const at = g.createdAt ? new Date(g.createdAt).getTime() : 0;
+      return at >= start && at < end;
+    });
+
+    const giftsValue = gifts.reduce((sum: number, g: any) => sum + Number(g.totalPrice || 0), 0);
+    const minuteMark = Math.max(0, Math.round((start - startedAtMs) / 60_000));
+
+    return {
+      label: `+${minuteMark}m`,
+      activeViewers,
+      joins,
+      giftsCount: gifts.length,
+      giftsValue,
+      startIso: new Date(start).toISOString(),
+      endIso: new Date(end).toISOString(),
+    };
+  });
+
+  return {
+    streamId,
+    startedAt: stream.startedAt,
+    endedAt: stream.endedAt,
+    durationSec: Math.round(durationMs / 1000),
+    bins,
+  };
+}
+
+// GET /streams/:id/analytics — creator dashboard timeline
+router.get("/streams/:id/analytics", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.postStreamReportEnabled) {
+      return res.status(403).json({ success: false, message: "تحليلات البث غير مفعلة حالياً" });
+    }
+
+    const analytics = await buildStreamAnalytics(db, streamId, stream);
+    return res.json({ success: true, data: analytics });
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream analytics error");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل تحليلات البث" });
+  }
+});
+
+// GET /streams/:id/analytics/export — creator dashboard CSV export
+router.get("/streams/:id/analytics/export", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.creatorAnalyticsCsvEnabled) {
+      return res.status(403).json({ success: false, message: "تصدير CSV غير مفعل" });
+    }
+
+    const analytics = await buildStreamAnalytics(db, streamId, stream);
+    const header = "Label,ActiveViewers,Joins,GiftsCount,GiftsValue,Start,End";
+    const rows = analytics.bins.map((b: any) => `${b.label},${b.activeViewers},${b.joins},${b.giftsCount},${b.giftsValue},${b.startIso},${b.endIso}`);
+    const csv = [header, ...rows].join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="stream-analytics-${streamId}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send("\uFEFF" + csv);
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream analytics export error");
+    return res.status(500).json({ success: false, message: "خطأ في تصدير التحليلات" });
+  }
+});
+
+// POST /streams/:id/director-events — store Smart Director interactions
+router.post("/streams/:id/director-events", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.smartDirectorTelemetryEnabled) {
+      return res.json({ success: true, data: { stored: false, reason: "disabled" } });
+    }
+
+    const tipId = String(req.body?.tipId || "").trim().slice(0, 80);
+    const action = String(req.body?.action || "").trim();
+    if (!tipId || !["shown", "accepted", "dismissed"].includes(action)) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    const metadata = req.body?.metadata && typeof req.body.metadata === "object"
+      ? JSON.stringify(req.body.metadata)
+      : null;
+
+    const [created] = await db.insert(schema.streamDirectorEvents).values({
+      streamId,
+      hostId: userId,
+      tipId,
+      action,
+      metadata,
+    }).returning();
+
+    return res.json({ success: true, data: created });
+  } catch (err: any) {
+    socialLog.error({ err }, "Director event store error");
+    return res.status(500).json({ success: false, message: "خطأ في حفظ الحدث" });
+  }
+});
+
+// POST /streams/:id/clips/auto — create a clip marker from engagement peaks
+router.post("/streams/:id/clips/auto", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const flags = await getLiveFeatureFlags(db);
+    if (!flags.autoClipsEnabled) {
+      return res.json({ success: true, data: { stored: false, reason: "disabled" } });
+    }
+
+    const cueType = String(req.body?.cueType || "").trim();
+    const title = String(req.body?.title || "لقطة تلقائية").trim().slice(0, 120);
+    const reason = String(req.body?.reason || "").trim().slice(0, 240);
+    const score = Math.max(0, Math.min(100, Number(req.body?.score || 0)));
+    const lookbackSec = Math.max(5, Math.min(120, Number(req.body?.lookbackSec || 20)));
+    const forwardSec = Math.max(5, Math.min(120, Number(req.body?.forwardSec || 20)));
+    const validCueTypes = ["chat_burst", "gift_burst", "viewer_spike", "retention_recovery"];
+    if (!validCueTypes.includes(cueType) || !reason) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    // Cooldown/dedupe: avoid writing noisy clips from repeated triggers.
+    const [lastClip] = await db.select({
+      id: schema.streamAutoClips.id,
+      cueType: schema.streamAutoClips.cueType,
+      createdAt: schema.streamAutoClips.createdAt,
+    }).from(schema.streamAutoClips)
+      .where(eq(schema.streamAutoClips.streamId, streamId))
+      .orderBy(desc(schema.streamAutoClips.createdAt))
+      .limit(1);
+
+    const now = Date.now();
+    if (lastClip?.createdAt) {
+      const secondsSinceLast = (now - new Date(lastClip.createdAt).getTime()) / 1000;
+      if (secondsSinceLast < 45 && String(lastClip.cueType) === cueType) {
+        return res.json({ success: true, data: { stored: false, reason: "cooldown" } });
+      }
+    }
+
+    const startedAtMs = new Date(stream.startedAt).getTime();
+    const currentOffsetSec = Math.max(0, Math.floor((now - startedAtMs) / 1000));
+    const startOffsetSec = Math.max(0, currentOffsetSec - lookbackSec);
+    const endOffsetSec = currentOffsetSec + forwardSec;
+
+    const metadata = req.body?.metadata && typeof req.body.metadata === "object"
+      ? JSON.stringify(req.body.metadata)
+      : null;
+
+    const [created] = await db.insert(schema.streamAutoClips).values({
+      streamId,
+      hostId: userId,
+      cueType,
+      title,
+      reason,
+      startOffsetSec,
+      endOffsetSec,
+      score,
+      metadata,
+    }).returning();
+
+    return res.json({ success: true, data: created });
+  } catch (err: any) {
+    socialLog.error({ err }, "Auto clip capture error");
+    return res.status(500).json({ success: false, message: "خطأ في إنشاء المقطع التلقائي" });
+  }
+});
+
+// GET /streams/:id/clips — list generated auto clips for host review
+router.get("/streams/:id/clips", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const streamId = paramStr(req.params.id);
+    const stream = await storage.getStream(streamId);
+    if (!stream) return res.status(404).json({ success: false, message: "البث غير موجود" });
+    if (stream.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
+
+    const clips = await db.select().from(schema.streamAutoClips)
+      .where(eq(schema.streamAutoClips.streamId, streamId))
+      .orderBy(desc(schema.streamAutoClips.score), desc(schema.streamAutoClips.createdAt))
+      .limit(20);
+
+    return res.json({ success: true, data: clips });
+  } catch (err: any) {
+    socialLog.error({ err }, "List auto clips error");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل المقاطع" });
+  }
+});
+
 // ═══════════════════════════════════════════════════════
 // ── Pinned Message — الرسالة المثبتة ──
 // ═══════════════════════════════════════════════════════
@@ -3305,7 +4228,7 @@ router.post("/streams/:id/poll/:pollId/vote", async (req: Request, res: Response
     // Atomic vote update — safe parameterized JSON path
     const optionPath = `{${option}}`;
     const [updated] = await db.update(schema.streamPolls).set({
-      votes: sql`jsonb_set(${schema.streamPolls.votes}::jsonb, ${optionPath}::text[], (COALESCE((${schema.streamPolls.votes}::jsonb->>${ option })::int, 0) + 1)::text::jsonb)`,
+      votes: sql`jsonb_set(${schema.streamPolls.votes}::jsonb, ${optionPath}::text[], (COALESCE((${schema.streamPolls.votes}::jsonb->>${option})::int, 0) + 1)::text::jsonb)`,
       voterIds: sql`(${schema.streamPolls.voterIds}::jsonb || ${sql`${JSON.stringify([userId])}::jsonb`})::text`,
     }).where(
       and(
@@ -3325,11 +4248,11 @@ router.post("/streams/:id/poll/:pollId/vote", async (req: Request, res: Response
         .limit(1);
       const pollPayload = activePoll
         ? {
-            ...activePoll,
-            options: JSON.parse(activePoll.options),
-            votes: JSON.parse(activePoll.votes),
-            voterIds: JSON.parse(activePoll.voterIds),
-          }
+          ...activePoll,
+          options: JSON.parse(activePoll.options),
+          votes: JSON.parse(activePoll.votes),
+          voterIds: JSON.parse(activePoll.voterIds),
+        }
         : null;
       io.to(`room:${streamId}`).emit("stream-poll-update", { streamId, poll: pollPayload });
       io.to(`room:${streamId}`).emit("poll-updated", { pollId, votes, totalVoters: newVoterIds.length });
@@ -3430,7 +4353,10 @@ router.delete("/streams/:id/banned-words/:wordId", async (req: Request, res: Res
     if (!stream || stream.userId !== userId) return res.status(403).json({ success: false });
     const db = getDb();
     if (!db) return res.status(500).json({ success: false });
-    await db.delete(schema.streamBannedWords).where(eq(schema.streamBannedWords.id, wordId));
+    await db.delete(schema.streamBannedWords).where(and(
+      eq(schema.streamBannedWords.id, wordId),
+      eq(schema.streamBannedWords.streamId, streamId),
+    ));
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false });
@@ -3497,10 +4423,16 @@ router.post("/streams/:id/record/stop", async (req: Request, res: Response) => {
 // ── Auto-Translation — الترجمة التلقائية ──
 // ═══════════════════════════════════════════════════════
 
-const SUPPORTED_LANGS = [
-  "ar", "en", "fr", "es", "de", "tr", "pt", "ru",
-  "hi", "ur", "fa", "zh", "ja", "ko", "id",
-];
+const LANG_CODE_REGEX = /^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/;
+
+function normalizeLangCode(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const normalized = input.trim().replace(/_/g, "-");
+  if (!normalized) return null;
+  if (!LANG_CODE_REGEX.test(normalized)) return null;
+  const [base, region] = normalized.split("-");
+  return region ? `${base.toLowerCase()}-${region.toUpperCase()}` : base.toLowerCase();
+}
 
 // ── Translation rate limiting (max 30 per minute per user) ──
 const translateLimiter = rateLimit({
@@ -3508,7 +4440,7 @@ const translateLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.session as any)?.userId || req.ip || "unknown",
+  keyGenerator: (req) => (req.session as any)?.userId || ipKeyGenerator(req.ip || "127.0.0.1"),
   message: { success: false, message: "عدد كبير من طلبات الترجمة. حاول بعد دقيقة" },
 });
 
@@ -3526,17 +4458,19 @@ router.post("/translate", translateLimiter, async (req: Request, res: Response) 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
       return res.status(400).json({ success: false, message: "النص مطلوب" });
     }
-    if (!targetLang || !SUPPORTED_LANGS.includes(targetLang)) {
-      return res.status(400).json({ success: false, message: "لغة الهدف غير مدعومة" });
+    const normalizedTarget = normalizeLangCode(targetLang);
+    if (!normalizedTarget) {
+      return res.status(400).json({ success: false, message: "رمز لغة الهدف غير صالح" });
     }
     if (text.length > 5000) {
       return res.status(400).json({ success: false, message: "النص طويل جداً" });
     }
 
-    const sl = sourceLang && SUPPORTED_LANGS.includes(sourceLang) ? sourceLang : "auto";
+    const normalizedSource = normalizeLangCode(sourceLang);
+    const sl = normalizedSource || "auto";
     // Map language codes to Google Translate codes
     const langMap: Record<string, string> = { zh: "zh-CN", fa: "fa" };
-    const tl = langMap[targetLang] || targetLang;
+    const tl = langMap[normalizedTarget] || normalizedTarget;
     const slMapped = sl === "auto" ? "auto" : (langMap[sl] || sl);
 
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(slMapped)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text.trim())}`;

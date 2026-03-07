@@ -11,14 +11,26 @@ import { createLogger } from "../logger";
 const lkLog = createLogger("livekit");
 
 // ── ENV Configuration ──
-const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || "ablox_livekit_key";
-const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || "ablox_livekit_secret_2026_secure";
-const LIVEKIT_URL = process.env.LIVEKIT_URL || "http://localhost:7880";
-const LIVEKIT_PUBLIC_URL = process.env.LIVEKIT_PUBLIC_URL || "ws://localhost:7880";
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return value.trim();
+}
+
+function getLiveKitConfig() {
+  return {
+    apiKey: requireEnv("LIVEKIT_API_KEY"),
+    apiSecret: requireEnv("LIVEKIT_API_SECRET"),
+    url: requireEnv("LIVEKIT_URL"),
+    publicUrl: requireEnv("LIVEKIT_PUBLIC_URL"),
+  };
+}
 
 /** Publicly accessible LiveKit WebSocket URL (for clients) */
 export function getLiveKitPublicUrl(): string {
-  return LIVEKIT_PUBLIC_URL;
+  return getLiveKitConfig().publicUrl;
 }
 
 /** Room service client for server-side room management */
@@ -26,9 +38,10 @@ let roomService: RoomServiceClient | null = null;
 
 function getRoomService(): RoomServiceClient {
   if (!roomService) {
+    const cfg = getLiveKitConfig();
     // Use internal Docker URL for server-side communication
-    const host = LIVEKIT_URL.replace(/^ws/, "http");
-    roomService = new RoomServiceClient(host, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+    const host = cfg.url.replace(/^ws/, "http");
+    roomService = new RoomServiceClient(host, cfg.apiKey, cfg.apiSecret);
   }
   return roomService;
 }
@@ -51,7 +64,8 @@ export async function generateLiveKitToken(
   isSpeaker: boolean = false,
   ttlSeconds: number = 4 * 60 * 60
 ): Promise<string> {
-  const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+  const cfg = getLiveKitConfig();
+  const token = new AccessToken(cfg.apiKey, cfg.apiSecret, {
     identity: participantId,
     name: participantName,
     ttl: ttlSeconds,

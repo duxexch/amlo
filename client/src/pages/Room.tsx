@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield, WifiOff, Loader2 } from "lucide-react";
+import { X, Mic, MicOff, Video as VideoIcon, VideoOff, Gift, Send, Heart, UserPlus, Users, UserCheck, MessageCircle, Share2, MoreHorizontal, Crown, Shield, WifiOff, Loader2, Timer } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
@@ -8,11 +8,11 @@ import { useTranslation } from "react-i18next";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 import { walletApi, giftsApi, followApi, streamsApi } from "@/lib/socialApi";
-import { livekitStreamManager, type StreamState } from "@/lib/livekitStreamManager";
+import { livekitStreamManager, type LiveKitDebugStats, type StreamState } from "@/lib/livekitStreamManager";
 import { toast } from "sonner";
 
 interface ChatMessage {
-  id: number;
+  id: number | string;
   type: 'message' | 'join' | 'gift' | 'follow';
   user: {
     id: string;
@@ -39,7 +39,7 @@ function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['u
     if (user.id && user.id !== 'me' && user.id !== 'unknown') {
       followApi.counts(user.id).then(c => {
         if (!cancelled) setStats(prev => ({ ...prev, followers: c.followers || 0, following: c.following || 0 }));
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return () => { cancelled = true; };
   }, [user.id]);
@@ -61,7 +61,7 @@ function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['u
       <div className="h-20 bg-gradient-to-r from-primary/40 via-pink-500/30 to-primary/20 relative mx-4 rounded-2xl overflow-hidden">
         <div className="absolute inset-0 opacity-10" />
       </div>
-      
+
       {/* Avatar */}
       <div className="flex justify-center -mt-10 relative z-10">
         <div className="w-20 h-20 rounded-full border-4 border-[#0c0c1d] overflow-hidden ring-2 ring-primary/50 shadow-[0_0_15px_rgba(168,85,247,0.4)]">
@@ -78,7 +78,7 @@ function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['u
           {user.badge === 'top' && <Crown className="w-4 h-4 text-pink-400" />}
         </div>
         <p className="text-white/40 text-xs mt-0.5">@{user.username}</p>
-        
+
         {/* Level */}
         <div className="flex items-center justify-center gap-1 mt-2">
           <span className="bg-gradient-to-r from-primary to-pink-500 text-white text-[10px] font-black px-3 py-1 rounded-full">
@@ -106,11 +106,10 @@ function UserProfilePopup({ user, onClose, onFollow, t }: { user: ChatMessage['u
         <div className="flex gap-3 mt-5">
           <button
             onClick={() => onFollow(user.id)}
-            className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
-              user.isFollowed
-                ? 'bg-white/10 text-white/60 border border-white/10'
-                : 'bg-primary text-white shadow-[0_0_15px_rgba(168,85,247,0.4)] hover:bg-primary/80'
-            }`}
+            className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${user.isFollowed
+              ? 'bg-white/10 text-white/60 border border-white/10'
+              : 'bg-primary text-white shadow-[0_0_15px_rgba(168,85,247,0.4)] hover:bg-primary/80'
+              }`}
           >
             <span className="flex items-center justify-center gap-1.5">
               {user.isFollowed ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
@@ -225,7 +224,7 @@ export function Room() {
   const [coinBalance, setCoinBalance] = useState(0);
   const [heartCount, setHeartCount] = useState(0);
   const [showGiftModal, setShowGiftModal] = useState(false);
-  const [hearts, setHearts] = useState<{id: number, x: number}[]>([]);
+  const [hearts, setHearts] = useState<{ id: number, x: number }[]>([]);
   const [selectedUser, setSelectedUser] = useState<ChatMessage['user'] | null>(null);
   const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
   const [inputValue, setInputValue] = useState('');
@@ -242,6 +241,39 @@ export function Room() {
   const [lkState, setLkState] = useState<StreamState>("idle");
   const [isHost, setIsHost] = useState(false);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+  const [lkQualityHint, setLkQualityHint] = useState<string>("unknown");
+  const [rtcStats, setRtcStats] = useState<LiveKitDebugStats | null>(null);
+  const [rtcHistory, setRtcHistory] = useState<LiveKitDebugStats[]>([]);
+
+  const preferredVideoQuality = useMemo<"low" | "medium" | "high">(() => (
+    conn.quality === "poor" || conn.quality === "offline" || conn.dataSaver
+      ? "low"
+      : conn.quality === "fair"
+        ? "medium"
+        : "high"
+  ), [conn.dataSaver, conn.quality]);
+
+  const rtcSeverity = useMemo<"ok" | "warn" | "bad">(() => {
+    if (!rtcStats) return "ok";
+    const loss = rtcStats.packetLossPct ?? 0;
+    const rtt = rtcStats.rttMs ?? 0;
+    const jitter = rtcStats.jitterMs ?? 0;
+    if (loss >= 3 || rtt >= 350 || jitter >= 50) return "bad";
+    if (loss >= 1 || rtt >= 200 || jitter >= 25) return "warn";
+    return "ok";
+  }, [rtcStats]);
+
+  const rtcPanelClass = useMemo(() => {
+    if (rtcSeverity === "bad") return "border-red-500/30 bg-red-500/12 text-red-100";
+    if (rtcSeverity === "warn") return "border-amber-500/30 bg-amber-500/10 text-amber-100";
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
+  }, [rtcSeverity]);
+
+  const rttTrend = useMemo(() => {
+    const values = rtcHistory.map((s) => s.rttMs ?? 0);
+    const peak = Math.max(1, ...values);
+    return values.map((value) => Math.max(3, Math.round((value / peak) * 16)));
+  }, [rtcHistory]);
 
   // Keep max 40 messages in buffer (prevents DOM bloat in long streams)
   const MAX_MESSAGES = conn.quality === 'poor' ? 20 : 40;
@@ -256,7 +288,7 @@ export function Room() {
       heartTimersRef.current.forEach(t => clearTimeout(t));
     };
   }, []);
-  
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Auto-scroll to bottom
@@ -266,26 +298,29 @@ export function Room() {
 
   // Load stream info, coin balance, gift catalog, and join as viewer
   useEffect(() => {
-    walletApi.balance().then(b => setCoinBalance(b?.coins || 0)).catch(() => {});
-    giftsApi.list().then(g => setGiftCatalog(g || [])).catch(() => {});
+    walletApi.balance().then(b => setCoinBalance(b?.coins || 0)).catch(() => { });
+    giftsApi.list().then(g => setGiftCatalog(g || [])).catch(() => { });
     // Fetch stream details
     streamsApi.detail(roomId).then(s => {
       if (s) setStreamInfo(s);
-    }).catch(() => {});
+    }).catch(() => { });
     // Track viewer join
-    streamsApi.join(roomId).catch(() => {});
+    streamsApi.join(roomId).catch(() => { });
 
     // ── Connect to LiveKit for real video/audio ──
     streamsApi.token(roomId).then(({ token, wsUrl, role }) => {
       const hostMode = role === "host";
       setIsHost(hostMode);
+      if (hostMode && !conn.allowVideo) setVideoOn(false);
+
       livekitStreamManager.connect(wsUrl, token, role as any, {
         onStateChange: (state) => setLkState(state),
+        onConnectionQualityChanged: (q) => setLkQualityHint(q),
         onRemoteVideoTrack: (track, _participantId) => {
           if (remoteVideoRef.current) {
             const stream = new MediaStream([track]);
             remoteVideoRef.current.srcObject = stream;
-            remoteVideoRef.current.play().catch(() => {});
+            remoteVideoRef.current.play().catch(() => { });
             setHasRemoteVideo(true);
           }
         },
@@ -299,26 +334,64 @@ export function Room() {
           if (localVideoRef.current) {
             const stream = new MediaStream([track]);
             localVideoRef.current.srcObject = stream;
-            localVideoRef.current.play().catch(() => {});
+            localVideoRef.current.play().catch(() => { });
           }
         },
         onParticipantCount: (count) => setViewerCount(count),
         onError: (msg) => console.warn("[LiveKit Room]", msg),
       }, {
-        publishVideo: hostMode,
+        publishVideo: hostMode && conn.allowVideo,
         publishAudio: hostMode,
-        videoQuality: "medium",
-      }).catch(() => {});
+        videoQuality: preferredVideoQuality,
+      }).catch(() => { });
     }).catch((err) => {
       console.warn("[LiveKit] Token failed, room will be chat-only:", err);
     });
 
     return () => {
       // Track viewer leave + disconnect LiveKit on unmount
-      streamsApi.leave(roomId).catch(() => {});
+      streamsApi.leave(roomId).catch(() => { });
       livekitStreamManager.disconnect();
     };
   }, [roomId]);
+
+  // Auto-degrade host camera when network is weak.
+  useEffect(() => {
+    if (!isHost) return;
+    if (!conn.allowVideo && videoOn) {
+      livekitStreamManager.toggleCamera().then(() => setVideoOn(false)).catch(() => { });
+    }
+  }, [conn.allowVideo, isHost, videoOn]);
+
+  // Apply adaptive quality to host camera without reconnecting.
+  useEffect(() => {
+    if (!isHost || !videoOn || lkState !== "connected") return;
+    livekitStreamManager.setVideoQuality(preferredVideoQuality).catch(() => { });
+  }, [isHost, lkState, preferredVideoQuality, videoOn]);
+
+  // Host-only WebRTC diagnostics for RTT/jitter/loss.
+  useEffect(() => {
+    if (!isHost || lkState !== "connected") {
+      setRtcStats(null);
+      setRtcHistory([]);
+      return;
+    }
+
+    let active = true;
+    const poll = async () => {
+      const stats = await livekitStreamManager.getWebRtcStats();
+      if (!active || !stats) return;
+      setRtcStats(stats);
+      setRtcHistory((prev) => [...prev, stats].slice(-12));
+    };
+
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [isHost, lkState]);
 
   // Socket: join room, listen for messages, viewer count, gifts
   useEffect(() => {
@@ -330,16 +403,20 @@ export function Room() {
       if (!data?.message) return;
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400', 'text-yellow-400'];
       const limit = maxMessagesRef.current;
-      setMessages(prev => [...prev.slice(-(limit - 1)), {
-        id: data.id || Date.now(),
-        type: 'message',
-        user: data.user
-          ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, username: data.user.username || data.user.id, isFollowed: false }
-          : { id: 'unknown', name: tRef.current("room.anonymous", "مجهول"), username: 'unknown', avatar: avatarImg, level: 1, isFollowed: false },
-        text: data.message,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        timestamp: data.ts || Date.now(),
-      }]);
+      const msgId = data.id || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setMessages(prev => {
+        if (prev.some(m => String(m.id) === String(msgId))) return prev;
+        return [...prev.slice(-(limit - 1)), {
+          id: msgId,
+          type: 'message',
+          user: data.user
+            ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1, username: data.user.username || data.user.id, isFollowed: false }
+            : { id: 'unknown', name: tRef.current("room.anonymous", "مجهول"), username: 'unknown', avatar: avatarImg, level: 1, isFollowed: false },
+          text: data.message,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          timestamp: data.ts || Date.now(),
+        }];
+      });
     };
 
     const handleViewerCount = (count: number) => setViewerCount(count);
@@ -380,7 +457,7 @@ export function Room() {
   const addHeart = () => {
     const id = Date.now();
     const x = Math.random() * 100;
-    setHearts(prev => [...prev, {id, x}]);
+    setHearts(prev => [...prev, { id, x }]);
     setHeartCount(prev => prev + 1);
     const timer = setTimeout(() => {
       setHearts(prev => prev.filter(h => h.id !== id));
@@ -420,20 +497,12 @@ export function Room() {
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
+    if (conn.quality === "offline") return;
     socketManager.emit('chat-message', {
       roomId,
       message: inputValue.trim(),
       user: { id: 'me', name: t("room.you", "أنت") },
     });
-    // Optimistic local add
-    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
-      id: Date.now(),
-      type: 'message',
-      user: { id: 'me', name: t("room.you", "أنت"), username: 'me', avatar: avatarImg, level: 10, isFollowed: false },
-      text: inputValue,
-      color: 'text-primary',
-      timestamp: Date.now(),
-    }]);
     setInputValue('');
   };
 
@@ -485,7 +554,7 @@ export function Room() {
           </div>
         )}
       </div>
-      
+
       {/* Gradient overlays */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none" />
       <div className="absolute bottom-0 left-0 right-0 h-[55%] bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
@@ -506,7 +575,7 @@ export function Room() {
               <UserPlus className="w-3.5 h-3.5 text-white" />
             </button>
           </div>
-          
+
           <div className="flex gap-1.5">
             <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold px-2 py-0.5 rounded-md backdrop-blur-md flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
@@ -522,7 +591,7 @@ export function Room() {
           <button aria-label={t("room.shareBtn", "مشاركة")} className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center">
             <Share2 className="w-4 h-4 text-white" />
           </button>
-          <button 
+          <button
             onClick={() => setLocation('/')}
             aria-label={t("room.closeBtn", "إغلاق")}
             className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-destructive hover:border-destructive transition-colors"
@@ -532,10 +601,61 @@ export function Room() {
         </div>
       </div>
 
+      {/* Network status */}
+      <div className="absolute top-[76px] left-3 right-3 z-30 flex items-center gap-2">
+        <div className={`inline-flex items-center gap-1 text-[10px] font-bold border rounded-full px-2 py-0.5 ${conn.quality === "offline"
+          ? "text-red-300 border-red-500/30 bg-red-500/15"
+          : conn.quality === "poor"
+            ? "text-red-200 border-red-400/25 bg-red-400/10"
+            : conn.quality === "fair"
+              ? "text-amber-200 border-amber-400/30 bg-amber-400/10"
+              : "text-emerald-200 border-emerald-400/30 bg-emerald-400/10"
+          }`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+          {conn.qualityLabel}
+        </div>
+        <div className={`text-[10px] font-semibold ${lkQualityHint === "poor"
+          ? "text-red-300"
+          : lkQualityHint === "good"
+            ? "text-amber-200"
+            : lkQualityHint === "excellent"
+              ? "text-emerald-200"
+              : "text-white/40"
+          }`}>
+          {t("live.linkQuality", "جودة البث")}: {lkQualityHint}
+        </div>
+      </div>
+
+      {isHost && (
+        <div className="absolute top-[102px] left-3 right-3 z-30">
+          <div className={`inline-flex flex-wrap items-center gap-2 rounded-xl border backdrop-blur-md px-3 py-1.5 text-[10px] ${rtcPanelClass}`}>
+            <span className="inline-flex items-center gap-1 text-white/85 font-semibold">
+              <Timer className="w-3 h-3" />
+              {t("live.webrtcStats", "إحصائيات WebRTC")}
+            </span>
+            <span>RTT: {rtcStats?.rttMs != null ? `${Math.round(rtcStats.rttMs)}ms` : "--"}</span>
+            <span>Jitter: {rtcStats?.jitterMs != null ? `${Math.round(rtcStats.jitterMs)}ms` : "--"}</span>
+            <span>Loss: {rtcStats?.packetLossPct != null ? `${rtcStats.packetLossPct.toFixed(1)}%` : "--"}</span>
+            <span className="text-white/70">Status: {rtcSeverity === "bad" ? "Critical" : rtcSeverity === "warn" ? "Warning" : "Healthy"}</span>
+            {rttTrend.length > 0 && (
+              <div className="inline-flex items-end gap-[2px] h-5 rounded-md border border-white/10 bg-black/25 px-1 py-0.5">
+                {rttTrend.map((h, idx) => (
+                  <span
+                    key={`${rtcHistory[idx]?.sampledAt || idx}`}
+                    className={`w-1 rounded-sm ${rtcSeverity === "bad" ? "bg-red-300/80" : rtcSeverity === "warn" ? "bg-amber-300/80" : "bg-emerald-300/80"}`}
+                    style={{ height: `${h}px` }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Right side action buttons (TikTok-style vertical) */}
       <div className="absolute right-3 bottom-[140px] flex flex-col items-center gap-4 z-30">
         {/* Heart */}
-        <button 
+        <button
           onClick={addHeart}
           aria-label={t("room.likeBtn", "إعجاب")}
           className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
@@ -547,7 +667,7 @@ export function Room() {
         </button>
 
         {/* Gift */}
-        <button 
+        <button
           onClick={() => setShowGiftModal(true)}
           aria-label={t("room.giftBtn", "هدية")}
           className="flex flex-col items-center gap-1 active:scale-90 transition-transform"
@@ -559,7 +679,7 @@ export function Room() {
         </button>
 
         {/* Camera toggle — Real LiveKit control */}
-        <button 
+        <button
           onClick={async () => {
             if (!isHost) return;
             try {
@@ -576,7 +696,7 @@ export function Room() {
         </button>
 
         {/* Mic toggle — Real LiveKit control */}
-        <button 
+        <button
           onClick={async () => {
             if (!isHost) return;
             try {
@@ -630,12 +750,12 @@ export function Room() {
       <AnimatePresence>
         {selectedUser && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/50" 
-              onClick={() => setSelectedUser(null)} 
+              className="absolute inset-0 bg-black/50"
+              onClick={() => setSelectedUser(null)}
             />
             <UserProfilePopup
               user={{ ...selectedUser, isFollowed: followedUsers.has(selectedUser.id) }}
@@ -651,19 +771,21 @@ export function Room() {
       <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-[env(safe-area-inset-bottom,8px)] pt-2 bg-gradient-to-t from-black/60 to-transparent">
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSend()}
-              placeholder={t("room.inputPlaceholder")} 
+              placeholder={t("room.inputPlaceholder")}
               className="w-full bg-white/10 backdrop-blur-md border border-white/15 rounded-full py-2.5 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/30"
+              disabled={conn.quality === "offline"}
             />
           </div>
-          <button 
+          <button
             onClick={handleSend}
             aria-label={t("room.sendBtn", "إرسال")}
-            className="w-10 h-10 shrink-0 rounded-full bg-primary/80 flex items-center justify-center hover:bg-primary transition-colors"
+            disabled={conn.quality === "offline"}
+            className="w-10 h-10 shrink-0 rounded-full bg-primary/80 flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40"
           >
             <Send className="w-4 h-4 text-white" />
           </button>
@@ -675,7 +797,7 @@ export function Room() {
         {showGiftModal && (
           <div className="fixed inset-0 z-[100] flex items-end justify-center">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowGiftModal(false)} />
-            <motion.div 
+            <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
@@ -683,7 +805,7 @@ export function Room() {
               className="relative w-full max-w-lg bg-[#0c0c1d]/95 backdrop-blur-2xl rounded-t-[32px] p-6 border-t border-white/10 max-h-[70vh] flex flex-col"
             >
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-white/20 rounded-full" />
-              
+
               <div className="flex justify-between items-center mb-6 mt-4">
                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
                   <Gift className="text-primary w-5 h-5" />
@@ -711,17 +833,17 @@ export function Room() {
                     }}
                     className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-primary hover:bg-primary/10 transition-all group hover:-translate-y-1"
                   >
-                    <img 
-                      src={gift.icon || giftImg} 
-                      alt={gift.name || gift.nameAr || "Gift"} 
-                      className="w-12 h-12 object-contain group-hover:scale-110 transition-transform" 
+                    <img
+                      src={gift.icon || giftImg}
+                      alt={gift.name || gift.nameAr || "Gift"}
+                      className="w-12 h-12 object-contain group-hover:scale-110 transition-transform"
                       style={{ filter: gift.icon ? undefined : `hue-rotate(${i * 45}deg)` }}
                     />
                     <span className="text-xs font-black text-white">{gift.price}</span>
                   </button>
                 ))}
               </div>
-              
+
               <div className="mt-4 pt-4 border-t border-white/10 flex justify-end">
                 <button className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-8 rounded-xl shadow-[0_0_15px_rgba(168,85,247,0.4)]">
                   {t("room.giftRecharge")}

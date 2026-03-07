@@ -84,15 +84,40 @@ export const authApi = {
       body: JSON.stringify(prefs),
     }),
 
+  getChatTranslationPreferences: () =>
+    request<{
+      success: boolean; data: {
+        chatAutoTranslate: boolean;
+        chatShowOriginalText: boolean;
+        chatTranslateLang: string;
+      }
+    }>("/chat-translation-preferences"),
+
+  updateChatTranslationPreferences: (prefs: {
+    chatAutoTranslate?: boolean;
+    chatShowOriginalText?: boolean;
+    chatTranslateLang?: string;
+  }) =>
+    request<{
+      success: boolean; data: {
+        chatAutoTranslate: boolean;
+        chatShowOriginalText: boolean;
+        chatTranslateLang: string;
+      }
+    }>("/chat-translation-preferences", {
+      method: "PUT",
+      body: JSON.stringify(prefs),
+    }),
+
   // OTP
   sendOtp: (email: string) =>
-    request<{ success: boolean; message: string; cooldownSeconds?: number }>("/otp/send", {
+    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string }>("/otp/send", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
 
   sendRegisterOtp: (email: string) =>
-    request<{ success: boolean; message: string; cooldownSeconds?: number }>("/otp/send-register", {
+    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string }>("/otp/send-register", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -172,7 +197,7 @@ export const profileApi = {
 // ── Login OTP (alternative to PIN) ──
 export const loginOtpApi = {
   sendOtp: () =>
-    request<{ success: boolean; message: string; email?: string }>("/login/otp", { method: "POST" }),
+    request<{ success: boolean; message: string; email?: string; devCode?: string }>("/login/otp", { method: "POST" }),
 
   verifyOtp: (code: string) =>
     request<{ success: boolean; data?: any }>("/login/otp-verify", {

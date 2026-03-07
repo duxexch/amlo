@@ -13,17 +13,20 @@ import {
   MessageCircle, Search, Send, Phone, Video,
   Check, CheckCheck, Clock, Coins, Loader2,
   MoreVertical, Trash2, X, ShieldCheck, Flag,
-  Ban, Lock, Unlock, Languages, Reply, Copy,
+  Ban, Lock, Unlock, Languages, Reply, Copy, Bell,
   SmilePlus, Smile, Image, Mic, ChevronDown,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
-import { useActiveChat, useReportModal, useMessageTranslation } from "./chatHooks";
+import { useActiveChat, useReportModal, useAutoMessageTranslations } from "./chatHooks";
 import type { ChatMessage, Conversation, ChatSettings } from "./chatTypes";
 import { chatApi } from "@/lib/socialApi";
+import { authApi } from "@/lib/authApi";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
 import { toast } from "sonner";
+import { socketManager, type ConnectionInfo } from "@/lib/socketManager";
+import { LANGUAGES } from "@/i18n";
 
 // ── Date label helper ──
 function formatDateLabel(dateStr: string, t: any): string {
@@ -39,18 +42,32 @@ function formatDateLabel(dateStr: string, t: any): string {
 
 // ── Common emojis ──
 const EMOJI_CATEGORIES = [
-  { icon: "😀", label: "وجوه", emojis: ["😀","😂","😍","🥰","😎","😊","🤣","😭","😱","🤩","😢","😡","🤔","😏","😴","🥺","😤","🫡","🤗","😇","🙃","😜","🤭","😬","🥴"] },
-  { icon: "❤️", label: "رموز", emojis: ["❤️","🔥","💯","✨","💀","⭐","💫","🌈","💐","🏆","🎯","💎","🪄","🫶","💕","💖","💝","❤️‍🔥","🖤","💙"] },
-  { icon: "👍", label: "إيماءات", emojis: ["👍","👏","💪","🙏","✌️","🤝","👋","🫰","🤙","👊","✊","🤞","🤟","🫵","☝️","👆","👇","👉","👈","🤌"] },
-  { icon: "🎉", label: "أنشطة", emojis: ["🎉","🎊","🎁","🎂","🎈","🎵","🎶","🎮","⚽","🏀","🎲","🎯","🎪","🎭","🎤","🎧","🎸","🎺","🎻","🪘"] },
-  { icon: "🍔", label: "طعام", emojis: ["🍔","🍕","🍟","🌮","🍣","🍩","🍪","🍰","☕","🧃","🍫","🍭","🍿","🥤","🧁","🍦","🍜","🥙","🍗","🥗"] },
-  { icon: "🐱", label: "حيوانات", emojis: ["🐱","🐶","🐻","🦁","🐼","🦊","🐸","🐧","🦋","🐝","🐢","🐬","🦄","🐴","🐰","🐨","🐮","🐷","🐵","🦅"] },
+  { icon: "😀", label: "وجوه", emojis: ["😀", "😂", "😍", "🥰", "😎", "😊", "🤣", "😭", "😱", "🤩", "😢", "😡", "🤔", "😏", "😴", "🥺", "😤", "🫡", "🤗", "😇", "🙃", "😜", "🤭", "😬", "🥴"] },
+  { icon: "❤️", label: "رموز", emojis: ["❤️", "🔥", "💯", "✨", "💀", "⭐", "💫", "🌈", "💐", "🏆", "🎯", "💎", "🪄", "🫶", "💕", "💖", "💝", "❤️‍🔥", "🖤", "💙"] },
+  { icon: "👍", label: "إيماءات", emojis: ["👍", "👏", "💪", "🙏", "✌️", "🤝", "👋", "🫰", "🤙", "👊", "✊", "🤞", "🤟", "🫵", "☝️", "👆", "👇", "👉", "👈", "🤌"] },
+  { icon: "🎉", label: "أنشطة", emojis: ["🎉", "🎊", "🎁", "🎂", "🎈", "🎵", "🎶", "🎮", "⚽", "🏀", "🎲", "🎯", "🎪", "🎭", "🎤", "🎧", "🎸", "🎺", "🎻", "🪘"] },
+  { icon: "🍔", label: "طعام", emojis: ["🍔", "🍕", "🍟", "🌮", "🍣", "🍩", "🍪", "🍰", "☕", "🧃", "🍫", "🍭", "🍿", "🥤", "🧁", "🍦", "🍜", "🥙", "🍗", "🥗"] },
+  { icon: "🐱", label: "حيوانات", emojis: ["🐱", "🐶", "🐻", "🦁", "🐼", "🦊", "🐸", "🐧", "🦋", "🐝", "🐢", "🐬", "🦄", "🐴", "🐰", "🐨", "🐮", "🐷", "🐵", "🦅"] },
 ];
+
+type ChatNotifyMode = "all" | "sound" | "push" | "off";
+
+function getChatNotifyMode(): ChatNotifyMode {
+  try {
+    const mode = localStorage.getItem("ablox_chat_notify_mode");
+    if (mode === "all" || mode === "sound" || mode === "push" || mode === "off") return mode;
+  } catch { }
+  return "all";
+}
+
+function setChatNotifyMode(mode: ChatNotifyMode) {
+  try { localStorage.setItem("ablox_chat_notify_mode", mode); } catch { }
+}
 
 // ── Message Bubble with full context menu ──
 const MessageBubble = memo(function MessageBubble({
   msg, isMe, showAvatar, otherUser, onReport, onReply, onDelete, onDeleteForMe, onRetry, onOpenImage, lang,
-  batchReactions,
+  batchReactions, translationText, translationLoading, detectedLang, targetLang, showOriginalText, onTranslateNow,
 }: {
   msg: ChatMessage; isMe: boolean; showAvatar: boolean; otherUser: any;
   onReport: (msg: ChatMessage) => void; onReply: (msg: ChatMessage) => void;
@@ -58,8 +75,14 @@ const MessageBubble = memo(function MessageBubble({
   onOpenImage: (url: string) => void;
   onRetry?: (msg: ChatMessage) => void; lang: string;
   batchReactions?: Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>;
+  translationText?: string | null;
+  translationLoading?: boolean;
+  detectedLang?: string;
+  targetLang: string;
+  showOriginalText: boolean;
+  onTranslateNow: () => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [reactions, setReactions] = useState<Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>>(batchReactions || []);
@@ -67,10 +90,15 @@ const MessageBubble = memo(function MessageBubble({
     const mine = batchReactions?.find(r => r.userId === "me" || r.isMine);
     return mine?.emoji || null;
   });
-  const { translatedText, isTranslating, showTranslation, handleTranslate } = useMessageTranslation(msg.content, i18n.language);
   const [swipeX, setSwipeX] = useState(0);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hasTranslated = Boolean(
+    translationText &&
+    msg.content &&
+    translationText.trim().length > 0 &&
+    translationText.trim() !== msg.content.trim(),
+  );
 
   // Update reactions when batch data changes
   useEffect(() => {
@@ -211,28 +239,38 @@ const MessageBubble = memo(function MessageBubble({
         )}
 
         <div
-          className={`rounded-2xl px-4 py-2.5 cursor-pointer ${
-            isMe ? "bg-primary text-white rounded-bl-md" : "bg-white/8 text-white rounded-br-md"
-          }`}
+          className={`rounded-2xl px-4 py-2.5 cursor-pointer ${isMe ? "bg-primary text-white rounded-bl-md" : "bg-white/8 text-white rounded-br-md"
+            }`}
           onContextMenu={e => { e.preventDefault(); setShowMenu(true); }}
         >
           {msg.type === "image" && msg.mediaUrl && (
             <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2 cursor-zoom-in hover:opacity-90 transition-opacity" onClick={(e) => { e.stopPropagation(); onOpenImage(msg.mediaUrl!); }} />
           )}
-          {msg.content && <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>}
-          {showTranslation && translatedText && (
+          {msg.content && (showOriginalText || !hasTranslated) && (
+            <p className="text-sm leading-relaxed whitespace-pre-wrap" dir="auto">{msg.content}</p>
+          )}
+          {hasTranslated && (
             <div className="mt-1.5 pt-1.5 border-t border-white/10">
-              <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-80 italic">{translatedText}</p>
+              <p className="text-[10px] opacity-60 mb-1" dir="ltr">
+                {`${(detectedLang || "auto").toUpperCase()} -> ${targetLang.toUpperCase()}`}
+              </p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-90" dir="auto">{translationText}</p>
+            </div>
+          )}
+          {!hasTranslated && translationLoading && msg.content && (
+            <div className="mt-1.5 pt-1.5 border-t border-white/10 flex items-center gap-1.5 text-[11px] opacity-70">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {t("chat.translating", "جاري الترجمة...")}
             </div>
           )}
           <div className={`flex items-center gap-1 mt-1 ${isMe ? "justify-start" : "justify-end"}`}>
             {msg.content && (
               <button
-                onClick={e => { e.stopPropagation(); handleTranslate(); }}
-                className={`hover:opacity-100 transition-opacity ${showTranslation ? "opacity-70" : "opacity-30"}`}
+                onClick={e => { e.stopPropagation(); onTranslateNow(); }}
+                className={`hover:opacity-100 transition-opacity ${(hasTranslated || translationLoading) ? "opacity-70" : "opacity-30"}`}
                 title={t("chat.translate", "ترجمة")}
               >
-                {isTranslating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
+                {translationLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
               </button>
             )}
             <span className="text-[10px] opacity-50">{formatTime(new Date(msg.createdAt), lang)}</span>
@@ -260,9 +298,8 @@ const MessageBubble = memo(function MessageBubble({
             }, {} as Record<string, { count: number; names: string[] }>)).map(([emoji, data]) => (
               <button
                 key={emoji}
-                className={`bg-white/10 border rounded-full px-1.5 py-0.5 text-xs hover:scale-110 transition-transform ${
-                  myReaction === emoji ? "border-primary/40 bg-primary/10" : "border-white/10"
-                }`}
+                className={`bg-white/10 border rounded-full px-1.5 py-0.5 text-xs hover:scale-110 transition-transform ${myReaction === emoji ? "border-primary/40 bg-primary/10" : "border-white/10"
+                  }`}
                 onClick={() => handleReaction(emoji)}
                 title={(data as { count: number; names: string[] }).names.join("، ")}
               >
@@ -331,7 +368,7 @@ const MessageBubble = memo(function MessageBubble({
               exit={{ opacity: 0, scale: 0.8 }}
               className="absolute bottom-full left-0 rtl:left-auto rtl:right-0 mb-1 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl p-2 flex flex-wrap gap-1 max-w-[200px] z-50"
             >
-              {["👍","❤️","😂","😢","😡","🔥","🎉","👏"].map(emoji => (
+              {["👍", "❤️", "😂", "😢", "😡", "🔥", "🎉", "👏"].map(emoji => (
                 <button key={emoji} onClick={() => handleReaction(emoji)}
                   className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg hover:bg-white/10 transition-colors ${myReaction === emoji ? "bg-primary/20 ring-1 ring-primary/30" : ""}`}>
                   {emoji}
@@ -397,9 +434,8 @@ function ReportModal({ msg, onClose, onSubmit }: { msg: ChatMessage; onClose: ()
         <div className="grid grid-cols-2 gap-2 mb-4">
           {categories.map(cat => (
             <button key={cat.value} onClick={() => setCategory(cat.value)}
-              className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                category === cat.value ? "bg-red-500/20 border border-red-500/30 text-red-400" : "bg-white/5 border border-white/10 text-white/50 hover:bg-white/10"
-              }`}>{cat.label}</button>
+              className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${category === cat.value ? "bg-red-500/20 border border-red-500/30 text-red-400" : "bg-white/5 border border-white/10 text-white/50 hover:bg-white/10"
+                }`}>{cat.label}</button>
           ))}
         </div>
         <textarea value={reason} onChange={e => setReason(e.target.value)}
@@ -440,9 +476,8 @@ function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
       <div className="flex gap-1 mb-2 pb-2 border-b border-white/5">
         {EMOJI_CATEGORIES.map((cat, i) => (
           <button key={i} onClick={() => setActiveCategory(i)}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all ${
-              activeCategory === i ? "bg-primary/20 scale-110" : "hover:bg-white/5"
-            }`}>
+            className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all ${activeCategory === i ? "bg-primary/20 scale-110" : "hover:bg-white/5"
+              }`}>
             {cat.icon}
           </button>
         ))}
@@ -475,6 +510,20 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [notifyMode, setNotifyModeState] = useState<ChatNotifyMode>(() => getChatNotifyMode());
+  const [showNotifyMenu, setShowNotifyMenu] = useState(false);
+  const [showTranslateMenu, setShowTranslateMenu] = useState(false);
+  const [translateLang, setTranslateLang] = useState(() => localStorage.getItem("ablox_translate_lang") || i18n.language || "ar");
+  const [customLangCode, setCustomLangCode] = useState("");
+  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(() => {
+    const raw = localStorage.getItem("ablox_chat_auto_translate");
+    return raw !== "0";
+  });
+  const [showOriginalText, setShowOriginalText] = useState(() => {
+    const raw = localStorage.getItem("ablox_chat_show_original_text");
+    return raw !== "0";
+  });
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo>(() => socketManager.getConnectionInfo());
   const lang = i18n.language || "ar";
 
   const chat = useActiveChat(conversations, setConversations, settings);
@@ -489,6 +538,71 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const [reactionsMap, setReactionsMap] = useState<Record<string, Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>>>({});
   const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifyMenuRef = useRef<HTMLDivElement>(null);
+  const translateMenuRef = useRef<HTMLDivElement>(null);
+  const prefsSyncReadyRef = useRef(false);
+
+  const { translations, loadingById, forceTranslateMessage, normalizedTargetLang } = useAutoMessageTranslations({
+    messages: chat.messages,
+    targetLang: translateLang,
+    enabled: autoTranslateEnabled,
+  });
+
+  useEffect(() => {
+    localStorage.setItem("ablox_translate_lang", translateLang);
+  }, [translateLang]);
+
+  useEffect(() => {
+    localStorage.setItem("ablox_chat_auto_translate", autoTranslateEnabled ? "1" : "0");
+  }, [autoTranslateEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem("ablox_chat_show_original_text", showOriginalText ? "1" : "0");
+  }, [showOriginalText]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPreferences = async () => {
+      try {
+        const res = await authApi.getChatTranslationPreferences();
+        const prefs = (res as any)?.data || {};
+        if (cancelled) return;
+
+        if (typeof prefs.chatAutoTranslate === "boolean") {
+          setAutoTranslateEnabled(prefs.chatAutoTranslate);
+        }
+        if (typeof prefs.chatShowOriginalText === "boolean") {
+          setShowOriginalText(prefs.chatShowOriginalText);
+        }
+        if (typeof prefs.chatTranslateLang === "string" && prefs.chatTranslateLang.trim()) {
+          setTranslateLang(prefs.chatTranslateLang.trim());
+        }
+      } catch {
+        // Keep local fallback without interrupting chat UX.
+      } finally {
+        if (!cancelled) prefsSyncReadyRef.current = true;
+      }
+    };
+
+    void loadPreferences();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!prefsSyncReadyRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void authApi.updateChatTranslationPreferences({
+        chatAutoTranslate: autoTranslateEnabled,
+        chatShowOriginalText: showOriginalText,
+        chatTranslateLang: translateLang,
+      }).catch(() => {
+        // Silent fail to avoid noisy toasts during background sync.
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [autoTranslateEnabled, showOriginalText, translateLang]);
 
   // Batch-fetch reactions when messages change — debounced to avoid excessive calls
   useEffect(() => {
@@ -501,7 +615,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
       chatApi.getBatchReactions(ids).then((res: any) => {
         const data = res?.data || res || {};
         if (typeof data === "object") setReactionsMap(data);
-      }).catch(() => {});
+      }).catch(() => { });
     }, 300);
     return () => { if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current); };
   }, [chat.messages.length, chat.reactionVersion]);
@@ -528,6 +642,29 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
     return () => document.removeEventListener("mousedown", handler);
   }, [showEmojiPicker]);
 
+  // Click-outside to close notification menu
+  useEffect(() => {
+    if (!showNotifyMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (notifyMenuRef.current && !notifyMenuRef.current.contains(e.target as Node)) {
+        setShowNotifyMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showNotifyMenu]);
+
+  useEffect(() => {
+    if (!showTranslateMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (translateMenuRef.current && !translateMenuRef.current.contains(e.target as Node)) {
+        setShowTranslateMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showTranslateMenu]);
+
   // ESC to close emoji picker & lightbox
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -540,6 +677,12 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
     return () => document.removeEventListener("keydown", handler);
   }, [showEmojiPicker, lightboxUrl]);
 
+  // Live connection quality updates for chat reliability hints.
+  useEffect(() => {
+    const unsub = socketManager.onQualityChange((info) => setConnectionInfo(info));
+    return () => unsub();
+  }, []);
+
   // Auto-open the initial conversation on mount
   useEffect(() => {
     if (initialConv) {
@@ -551,6 +694,10 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (connectionInfo.quality === "offline") {
+        toast.error(t("chat.offlineCannotSend", "لا يوجد اتصال بالإنترنت حالياً"));
+        return;
+      }
       chat.sendMessage(t);
     }
   };
@@ -611,7 +758,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
     } catch {
       // Fallback to sequential delete
       for (const id of ids) {
-        try { await chat.deleteMyMessage(id); } catch {}
+        try { await chat.deleteMyMessage(id); } catch { }
       }
     }
     setSelectedMsgs(new Set());
@@ -633,6 +780,39 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   };
 
   const displayMsgs = chat.msgSearch ? chat.filteredMessages : chat.messages;
+  const isOffline = connectionInfo.quality === "offline";
+  const isPoorNetwork = connectionInfo.quality === "poor";
+  const qualityStyle = isOffline
+    ? "text-red-300 bg-red-500/10 border-red-500/20"
+    : isPoorNetwork
+      ? "text-amber-300 bg-amber-500/10 border-amber-500/20"
+      : "text-emerald-300 bg-emerald-500/10 border-emerald-500/20";
+  const qualityLabel = isOffline
+    ? t("chat.connectionOffline", "غير متصل")
+    : isPoorNetwork
+      ? t("chat.connectionWeak", "اتصال ضعيف")
+      : t("chat.connectionGood", "اتصال جيد");
+
+  const applyNotifyMode = async (mode: ChatNotifyMode) => {
+    setNotifyModeState(mode);
+    setChatNotifyMode(mode);
+    if ((mode === "all" || mode === "push") && typeof Notification !== "undefined" && Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch { }
+    }
+    setShowNotifyMenu(false);
+    toast.success(t("social.notificationsUpdated", "تم تحديث إعدادات الإشعارات"));
+  };
+
+  const applyCustomLanguage = () => {
+    const normalized = customLangCode.trim().replace(/_/g, "-");
+    if (!/^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,8})?$/.test(normalized)) {
+      toast.error(t("chat.invalidLangCode", "رمز اللغة غير صالح"));
+      return;
+    }
+    setTranslateLang(normalized);
+    setShowTranslateMenu(false);
+    setCustomLangCode("");
+  };
 
   return (
     <>
@@ -677,6 +857,103 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
+                  <div className="relative" ref={translateMenuRef}>
+                    <button
+                      onClick={() => setShowTranslateMenu((v) => !v)}
+                      className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${showTranslateMenu ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/40"}`}
+                      title={t("chat.translateLang", "لغة الترجمة")}
+                    >
+                      <Languages className="w-3.5 h-3.5" />
+                    </button>
+                    <AnimatePresence>
+                      {showTranslateMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50 w-64 p-2"
+                        >
+                          <div className="flex items-center justify-between mb-2 px-1">
+                            <span className="text-[11px] text-white/70 font-semibold">{t("chat.autoTranslate", "الترجمة التلقائية")}</span>
+                            <button
+                              onClick={() => setAutoTranslateEnabled((v) => !v)}
+                              className={`px-2 py-1 rounded-md text-[10px] ${autoTranslateEnabled ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-white/50"}`}
+                            >
+                              {autoTranslateEnabled ? t("common.on", "تشغيل") : t("common.off", "إيقاف")}
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between mb-2 px-1">
+                            <span className="text-[11px] text-white/70 font-semibold">{t("chat.showOriginal", "إظهار النص الأصلي")}</span>
+                            <button
+                              onClick={() => setShowOriginalText((v) => !v)}
+                              className={`px-2 py-1 rounded-md text-[10px] ${showOriginalText ? "bg-cyan-500/20 text-cyan-300" : "bg-white/10 text-white/50"}`}
+                            >
+                              {showOriginalText ? t("common.on", "تشغيل") : t("common.off", "إيقاف")}
+                            </button>
+                          </div>
+
+                          <select
+                            value={translateLang}
+                            onChange={(e) => setTranslateLang(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white/80 mb-2"
+                          >
+                            {LANGUAGES.map((l) => (
+                              <option key={l.code} value={l.code}>{l.flag} {l.nativeLabel}</option>
+                            ))}
+                          </select>
+
+                          <div className="flex items-center gap-1">
+                            <input
+                              value={customLangCode}
+                              onChange={(e) => setCustomLangCode(e.target.value)}
+                              placeholder={t("chat.customLangCode", "رمز لغة مخصص مثل pt-BR")}
+                              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-white/25"
+                            />
+                            <button
+                              onClick={applyCustomLanguage}
+                              className="px-2.5 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-semibold"
+                            >
+                              {t("common.apply", "تطبيق")}
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <div className="relative" ref={notifyMenuRef}>
+                    <button
+                      onClick={() => setShowNotifyMenu((v) => !v)}
+                      className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${showNotifyMenu ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/40"}`}
+                      title={t("social.notifications", "الإشعارات")}
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                    </button>
+                    <AnimatePresence>
+                      {showNotifyMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[150px]"
+                        >
+                          {[
+                            { key: "all", label: t("social.notifyAll", "الكل") },
+                            { key: "sound", label: t("social.notifySound", "صوت فقط") },
+                            { key: "push", label: t("social.notifyPush", "إشعار فقط") },
+                            { key: "off", label: t("social.notifyOff", "إيقاف") },
+                          ].map((opt) => (
+                            <button
+                              key={opt.key}
+                              onClick={() => applyNotifyMode(opt.key as ChatNotifyMode)}
+                              className={`w-full text-start px-3 py-2 text-xs transition-colors ${notifyMode === opt.key ? "bg-primary/20 text-primary font-semibold" : "text-white/65 hover:bg-white/5"}`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                   {/* In-conversation search */}
                   <button onClick={() => chat.setShowMsgSearch(!chat.showMsgSearch)}
                     className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${chat.showMsgSearch ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-white/40"}`}>
@@ -712,9 +989,8 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
                           className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[170px]">
                           <button onClick={chat.handleToggleBlock}
-                            className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm ${
-                              chat.blockStatus?.blockedByMe ? "text-emerald-400 hover:bg-emerald-500/10" : "text-red-400 hover:bg-red-500/10"
-                            } transition-colors`}>
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm ${chat.blockStatus?.blockedByMe ? "text-emerald-400 hover:bg-emerald-500/10" : "text-red-400 hover:bg-red-500/10"
+                              } transition-colors`}>
                             {chat.blockStatus?.blockedByMe ? (
                               <><Unlock className="w-4 h-4" />{t("chat.unblock", "إلغاء الحظر")}</>
                             ) : (
@@ -729,6 +1005,16 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
               </>
             )}
           </div>
+
+          {(isOffline || isPoorNetwork) && (
+            <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02]">
+              <div className={`inline-flex items-center gap-2 text-[11px] px-2.5 py-1 rounded-full border ${qualityStyle}`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                {qualityLabel}
+                {isPoorNetwork && <span className="text-white/60">· {t("chat.sendMayDelay", "قد يتأخر الإرسال")}</span>}
+              </div>
+            </div>
+          )}
 
           {/* ── In-conversation search bar ── */}
           <AnimatePresence>
@@ -829,30 +1115,35 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   )}
                   <div className={`flex items-center gap-2 ${selectMode ? "cursor-pointer" : ""}`}
                     onClick={selectMode && isMe ? () => toggleSelectMsg(msg.id) : undefined}>
-                  {selectMode && isMe && (
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                      selectedMsgs.has(msg.id) ? "border-primary bg-primary" : "border-white/20"
-                    }`}>
-                      {selectedMsgs.has(msg.id) && <Check className="w-3 h-3 text-white" />}
+                    {selectMode && isMe && (
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${selectedMsgs.has(msg.id) ? "border-primary bg-primary" : "border-white/20"
+                        }`}>
+                        {selectedMsgs.has(msg.id) && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <MessageBubble
+                        msg={msg}
+                        isMe={isMe}
+                        showAvatar={showAvatar}
+                        otherUser={chat.activeConv?.otherUser}
+                        onReport={m => setReportTarget(m)}
+                        onReply={m => chat.setReplyTo(m)}
+                        onDelete={id => chat.deleteMyMessage(id, "forEveryone")}
+                        onDeleteForMe={id => chat.deleteMyMessage(id, "forMe")}
+                        onRetry={m => chat.retryMessage(m, t)}
+                        onOpenImage={url => setLightboxUrl(url)}
+                        lang={lang}
+                        batchReactions={reactionsMap[msg.id]}
+                        translationText={translations[msg.id]?.text || null}
+                        translationLoading={Boolean(loadingById[msg.id])}
+                        detectedLang={translations[msg.id]?.detectedLang}
+                        targetLang={normalizedTargetLang}
+                        showOriginalText={showOriginalText}
+                        onTranslateNow={() => forceTranslateMessage(msg)}
+                      />
                     </div>
-                  )}
-                  <div className="flex-1">
-                    <MessageBubble
-                      msg={msg}
-                      isMe={isMe}
-                      showAvatar={showAvatar}
-                      otherUser={chat.activeConv?.otherUser}
-                      onReport={m => setReportTarget(m)}
-                      onReply={m => chat.setReplyTo(m)}
-                      onDelete={id => chat.deleteMyMessage(id, "forEveryone")}
-                      onDeleteForMe={id => chat.deleteMyMessage(id, "forMe")}
-                      onRetry={m => chat.retryMessage(m, t)}
-                      onOpenImage={url => setLightboxUrl(url)}
-                      lang={lang}
-                      batchReactions={reactionsMap[msg.id]}
-                    />
                   </div>
-                </div>
                 </div>
               );
             })}
@@ -932,7 +1223,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   <>
                     <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
                     <button onClick={() => imageInputRef.current?.click()}
-                      disabled={chat.sendingMsg || chat.blockStatus?.isBlocked}
+                      disabled={isOffline || chat.sendingMsg || chat.blockStatus?.isBlocked}
                       className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-white/5 text-white/30 hover:text-white/50 transition-all">
                       <Image className="w-4.5 h-4.5" />
                     </button>
@@ -942,10 +1233,9 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                 {/* Voice recording */}
                 {settings?.chat_media_enabled && (
                   <button onClick={toggleVoiceRecording}
-                    disabled={chat.sendingMsg || chat.blockStatus?.isBlocked}
-                    className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
-                      isRecording ? "bg-red-500/20 text-red-400 animate-pulse" : "hover:bg-white/5 text-white/30 hover:text-white/50"
-                    }`}>
+                    disabled={isOffline || chat.sendingMsg || chat.blockStatus?.isBlocked}
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${isRecording ? "bg-red-500/20 text-red-400 animate-pulse" : "hover:bg-white/5 text-white/30 hover:text-white/50"
+                      }`}>
                     <Mic className="w-4.5 h-4.5" />
                   </button>
                 )}
@@ -955,16 +1245,15 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                   placeholder={t("social.typeMessage", "اكتب رسالة...")}
                   rows={1}
                   className="flex-1 bg-white/5 border border-white/8 rounded-xl py-2.5 px-4 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-primary/30 transition-all resize-none max-h-24 overflow-y-auto"
-                  disabled={chat.blockStatus?.isBlocked}
+                  disabled={isOffline || chat.blockStatus?.isBlocked}
                   onInput={(e) => { const el = e.currentTarget; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 96) + 'px'; }} />
 
                 <button onClick={() => chat.sendMessage(t)}
-                  disabled={!chat.newMessage.trim() || chat.sendingMsg || chat.blockStatus?.isBlocked}
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 ${
-                    chat.newMessage.trim() && !chat.sendingMsg
-                      ? "bg-primary text-white shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_25px_rgba(var(--primary-rgb),0.5)]"
-                      : "bg-white/5 text-white/20"
-                  }`}>
+                  disabled={isOffline || !chat.newMessage.trim() || chat.sendingMsg || chat.blockStatus?.isBlocked}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 ${chat.newMessage.trim() && !chat.sendingMsg && !isOffline
+                    ? "bg-primary text-white shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_25px_rgba(var(--primary-rgb),0.5)]"
+                    : "bg-white/5 text-white/20"
+                    }`}>
                   {chat.sendingMsg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>

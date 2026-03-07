@@ -170,6 +170,58 @@ export async function applyDatabaseConstraints(): Promise<void> {
          ALTER TABLE friendships ADD CONSTRAINT friendships_no_self CHECK (sender_id != receiver_id);
        END IF;
      END $$;`,
+    // ── Notification preferences extensions (safe migrations) ──
+    `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_auto_translate boolean NOT NULL DEFAULT true;`,
+    `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_show_original_text boolean NOT NULL DEFAULT true;`,
+    `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_translate_lang text NOT NULL DEFAULT 'ar';`,
+    // ── Chat/query performance indexes — safe + idempotent ──
+    `CREATE INDEX IF NOT EXISTS conv_active_p1_last_idx ON conversations (participant1_id, last_message_at DESC) WHERE is_active = true;`,
+    `CREATE INDEX IF NOT EXISTS conv_active_p2_last_idx ON conversations (participant2_id, last_message_at DESC) WHERE is_active = true;`,
+    `CREATE INDEX IF NOT EXISTS msg_conv_created_desc_idx ON messages (conversation_id, created_at DESC, id DESC);`,
+    `CREATE INDEX IF NOT EXISTS msg_unread_conv_idx ON messages (conversation_id, is_read, created_at DESC) WHERE is_deleted = false;`,
+    // ── Daily missions tables (safe bootstrap) ──
+    `CREATE TABLE IF NOT EXISTS user_daily_missions (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mission_date date NOT NULL,
+      streak_count integer NOT NULL DEFAULT 1,
+      xp_awarded integer NOT NULL DEFAULT 0,
+      coins_awarded integer NOT NULL DEFAULT 0,
+      metadata text,
+      claimed_at timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT uq_user_daily_missions_date UNIQUE (user_id, mission_date)
+    );`,
+    `CREATE INDEX IF NOT EXISTS user_daily_missions_user_idx ON user_daily_missions (user_id);`,
+    `CREATE INDEX IF NOT EXISTS user_daily_missions_date_idx ON user_daily_missions (mission_date);`,
+    // ── Smart Director telemetry + auto clips (safe bootstrap) ──
+    `CREATE TABLE IF NOT EXISTS stream_director_events (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      stream_id varchar NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+      host_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      tip_id text NOT NULL,
+      action text NOT NULL,
+      metadata text,
+      created_at timestamp NOT NULL DEFAULT now()
+    );`,
+    `CREATE INDEX IF NOT EXISTS stream_director_events_stream_idx ON stream_director_events (stream_id);`,
+    `CREATE INDEX IF NOT EXISTS stream_director_events_host_idx ON stream_director_events (host_id);`,
+    `CREATE INDEX IF NOT EXISTS stream_director_events_created_idx ON stream_director_events (created_at);`,
+    `CREATE TABLE IF NOT EXISTS stream_auto_clips (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      stream_id varchar NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+      host_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      cue_type text NOT NULL,
+      title text NOT NULL,
+      reason text NOT NULL,
+      start_offset_sec integer NOT NULL,
+      end_offset_sec integer NOT NULL,
+      score integer NOT NULL DEFAULT 0,
+      metadata text,
+      created_at timestamp NOT NULL DEFAULT now()
+    );`,
+    `CREATE INDEX IF NOT EXISTS stream_auto_clips_stream_idx ON stream_auto_clips (stream_id);`,
+    `CREATE INDEX IF NOT EXISTS stream_auto_clips_host_idx ON stream_auto_clips (host_id);`,
+    `CREATE INDEX IF NOT EXISTS stream_auto_clips_created_idx ON stream_auto_clips (created_at);`,
   ];
 
   try {

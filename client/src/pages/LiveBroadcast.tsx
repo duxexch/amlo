@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Video, Mic, MicOff, Headphones, Radio, Users, Eye, Crown, Shield, Flame, Play, UserPlus, X, Send, Heart, Gift, Share2, VideoOff, Phone, PhoneOff, UserCheck, MessageCircle, Plus, Languages, Loader2, WifiOff, Search, Calendar, BarChart3, Pin, PinOff, Vote, Monitor, MonitorOff, Circle, Square, Settings, Ban, VolumeX, Volume2, ChevronDown, Clock, Sparkles, Tag, Filter, ArrowLeft, Maximize, Minimize, PictureInPicture2, Timer } from "lucide-react";
+import { Video, Mic, MicOff, Headphones, Radio, Users, Eye, Crown, Shield, Flame, Play, UserPlus, X, Send, Heart, Gift, Share2, VideoOff, Phone, PhoneOff, UserCheck, MessageCircle, Plus, Languages, Loader2, WifiOff, Search, Calendar, BarChart3, Pin, PinOff, Vote, Monitor, MonitorOff, Circle, Square, Settings, Ban, VolumeX, Volume2, ChevronDown, Clock, Sparkles, Tag, Filter, ArrowLeft, Maximize, Minimize, PictureInPicture2, Timer, Download } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import giftImg from "@/assets/images/gift-3d.png";
@@ -9,7 +9,7 @@ import { getSocket, socketManager } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
 import { streamsApi, walletApi, giftsApi, translateApi } from "@/lib/socialApi";
 import { authApi } from "@/lib/authApi";
-import { livekitStreamManager, type StreamState, type StreamRole } from "@/lib/livekitStreamManager";
+import { livekitStreamManager, type LiveKitDebugStats, type StreamState, type StreamRole } from "@/lib/livekitStreamManager";
 import { toast } from "sonner";
 
 // Stream categories
@@ -192,7 +192,7 @@ function AudioStreamCard({ stream, onClick }: { stream: StreamItem; onClick: () 
 // ══════════════════════════════════════════════════════════
 
 interface ChatMsg {
-  id: number;
+  id: number | string;
   type: 'message' | 'join' | 'invite' | 'leave';
   user: { id: string; name: string; avatar: string; level: number; badge?: string };
   text?: string;
@@ -243,7 +243,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [inputValue, setInputValue] = useState('');
-  const [hearts, setHearts] = useState<{id: number; x: number}[]>([]);
+  const [hearts, setHearts] = useState<{ id: number; x: number }[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [speakers, setSpeakers] = useState<{ id: string; name: string; avatar: string }[]>([]);
   const [isHost, setIsHost] = useState(false);
@@ -263,6 +263,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   const [activePoll, setActivePoll] = useState<any>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [giftAnimations, setGiftAnimations] = useState<{ id: number; name: string; image: string; sender: string }[]>([]);
+  const [liveViewerCount, setLiveViewerCount] = useState(stream.viewers || stream.viewerCount || 0);
   const conn = useConnectionQuality();
   const MAX_MESSAGES = conn.quality === 'poor' ? 25 : 50;
   const maxMessagesRef = useRef(MAX_MESSAGES);
@@ -300,7 +301,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
         // Keep DB viewer metrics in sync for non-host audience.
         if (!hostMode) {
           joinedAsViewer = true;
-          streamsApi.join(stream.id).catch(() => {});
+          streamsApi.join(stream.id).catch(() => { });
         }
 
         // Fetch LiveKit token
@@ -336,13 +337,13 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     initLiveKit();
 
     // Fetch pinned message & active poll
-    streamsApi.detail(stream.id).then((d: any) => { if (d?.pinnedMessage) setPinnedMessage(d.pinnedMessage); }).catch(() => {});
-    streamsApi.getActivePoll(stream.id).then((p: any) => { if (p?.id) setActivePoll(p); }).catch(() => {});
+    streamsApi.detail(stream.id).then((d: any) => { if (d?.pinnedMessage) setPinnedMessage(d.pinnedMessage); }).catch(() => { });
+    streamsApi.getActivePoll(stream.id).then((p: any) => { if (p?.id) setActivePoll(p); }).catch(() => { });
 
     return () => {
       cancelled = true;
       if (joinedAsViewer) {
-        streamsApi.leave(stream.id).catch(() => {});
+        streamsApi.leave(stream.id).catch(() => { });
       }
       livekitStreamManager.disconnect();
     };
@@ -358,16 +359,26 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       if (!data?.message) return;
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
       const limit = maxMessagesRef.current;
-      setMessages(prev => [...prev.slice(-(limit - 1)), {
-        id: data.id || Date.now(),
-        type: 'message',
-        user: data.user
-          ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 }
-          : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
-        text: data.message,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        timestamp: data.ts || Date.now(),
-      }]);
+      const msgId = data.id || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setMessages(prev => {
+        if (prev.some(m => String(m.id) === String(msgId))) return prev;
+        return [...prev.slice(-(limit - 1)), {
+          id: msgId,
+          type: 'message',
+          user: data.user
+            ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 }
+            : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
+          text: data.message,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          timestamp: data.ts || Date.now(),
+        }];
+      });
+    };
+
+    const handleViewerCount = (count: number) => {
+      if (typeof count === 'number' && Number.isFinite(count) && count >= 0) {
+        setLiveViewerCount(count);
+      }
     };
 
     const handleSpeakerJoined = (data: any) => {
@@ -401,6 +412,9 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
 
     const handleSpeakerDeclined = (data: any) => {
       if (data?.roomId === roomId) {
+        if (isHost && data?.userId) {
+          streamsApi.demote(stream.id, String(data.userId)).catch(() => { });
+        }
         setMessages(prev => [...prev, {
           id: Date.now(),
           type: 'leave',
@@ -433,6 +447,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     };
 
     socket.on('chat-message', handleChatMessage);
+    socket.on('viewer-count', handleViewerCount);
     socket.on('speaker-joined', handleSpeakerJoined);
     socket.on('speaker-removed', handleSpeakerRemoved);
     socket.on('speaker-invite', handleSpeakerInvite);
@@ -445,6 +460,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     return () => {
       socket.emit('leave-room', roomId);
       socket.off('chat-message', handleChatMessage);
+      socket.off('viewer-count', handleViewerCount);
       socket.off('speaker-joined', handleSpeakerJoined);
       socket.off('speaker-removed', handleSpeakerRemoved);
       socket.off('speaker-invite', handleSpeakerInvite);
@@ -454,7 +470,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       socket.off('stream-poll-update', handlePollUpdate);
       socket.off('stream-force-ended', handleStreamForceEnded);
     };
-  }, [onClose, stream.id, t]);
+  }, [isHost, onClose, stream.id, t]);
 
   // Fetch viewers when invite modal opens
   useEffect(() => {
@@ -484,14 +500,6 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       message: inputValue.trim(),
       user: { id: currentUserId || 'me', name: currentUserName || t('live.you', 'أنت') },
     });
-    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
-      id: Date.now(),
-      type: 'message',
-      user: { id: currentUserId || 'me', name: currentUserName || t('live.you', 'أنت'), avatar: avatarImg, level: 10 },
-      text: inputValue,
-      color: 'text-primary',
-      timestamp: Date.now(),
-    }]);
     setInputValue('');
   };
 
@@ -503,7 +511,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
       hostName: stream.host,
     });
     // Pre-promote in LiveKit so they can publish when they accept
-    streamsApi.promote(stream.id, user.id).catch(() => {});
+    streamsApi.promote(stream.id, user.id).catch(() => { });
     setMessages(prev => [...prev, {
       id: Date.now(),
       type: 'invite',
@@ -519,7 +527,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     const socket = getSocket();
     socket.emit('remove-speaker', { roomId: stream.id, targetUserId: speakerId });
     // Also revoke LiveKit publish permission
-    streamsApi.demote(stream.id, speakerId).catch(() => {});
+    streamsApi.demote(stream.id, speakerId).catch(() => { });
   };
 
   const acceptInvite = async () => {
@@ -529,11 +537,9 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
     setPendingInvite(null);
     setIsSpeaker(true);
 
-    // Promote in LiveKit — request new token with speaker role and start publishing audio
+    // Reconnect with speaker token after invite acceptance so publishing is authorized.
     try {
-      await streamsApi.promote(stream.id, currentUserId);
-      // Reconnect with speaker permissions to start publishing audio
-      const tokenRes = await streamsApi.token(stream.id);
+      const tokenRes = await streamsApi.token(stream.id, 'speaker');
       if (tokenRes?.token && tokenRes?.wsUrl) {
         livekitStreamManager.disconnect();
         await livekitStreamManager.connect(tokenRes.wsUrl, tokenRes.token, 'speaker', {
@@ -601,7 +607,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
               <p className="text-white text-xs font-bold leading-tight">{stream.host}</p>
               <div className="flex items-center gap-1 text-white/70 text-[10px]">
                 <Users className="w-2.5 h-2.5" />
-                <span>{stream.viewers}</span>
+                <span>{liveViewerCount}</span>
               </div>
             </div>
           </div>
@@ -670,7 +676,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
                 {/* Sound wave indicator — active when speaking via LiveKit */}
                 {activeSpeakerIds.has(stream.userId || '') && (
                   <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
-                    {[1,2,3].map(i => (
+                    {[1, 2, 3].map(i => (
                       <motion.div key={i} className="w-[2px] bg-emerald-400 rounded-full" animate={{ height: [2, 8 + Math.random() * 4, 3] }} transition={{ duration: 0.6 + i * 0.1, repeat: Infinity }} />
                     ))}
                   </div>
@@ -691,7 +697,7 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
                   </div>
                   {activeSpeakerIds.has(speaker.id) && (
                     <div className="absolute -top-1 -right-1 flex items-end gap-[1px]">
-                      {[1,2].map(j => (
+                      {[1, 2].map(j => (
                         <motion.div key={j} className="w-[2px] bg-cyan-400/60 rounded-full" animate={{ height: [2, 6 + Math.random() * 3, 2] }} transition={{ duration: 0.8 + j * 0.15, repeat: Infinity }} />
                       ))}
                     </div>
@@ -979,8 +985,8 @@ function GiftModalContent({ streamId, onClose }: { streamId: string; onClose: ()
   const [giftCatalog, setGiftCatalog] = useState<any[]>([]);
 
   useEffect(() => {
-    walletApi.balance().then(r => setCoinBalance(r.coins || 0)).catch(() => {});
-    giftsApi.list().then(setGiftCatalog).catch(() => {});
+    walletApi.balance().then(r => setCoinBalance(r.coins || 0)).catch(() => { });
+    giftsApi.list().then(setGiftCatalog).catch(() => { });
   }, []);
 
   const sendGift = async (gift: any) => {
@@ -1184,11 +1190,31 @@ function HostStatsModal({ streamId, onClose }: { streamId: string; onClose: () =
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [stats, setStats] = useState<any>(null);
+  const [report, setReport] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [autoClips, setAutoClips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    streamsApi.stats(streamId).then(setStats).catch(() => {}).finally(() => setLoading(false));
+    Promise.all([
+      streamsApi.stats(streamId).catch(() => null),
+      streamsApi.report(streamId).catch(() => null),
+      streamsApi.analytics(streamId).catch(() => null),
+      streamsApi.autoClips(streamId).catch(() => []),
+    ]).then(([s, r, a, clips]) => {
+      setStats(s);
+      setReport(r);
+      setAnalytics(a);
+      setAutoClips(Array.isArray(clips) ? clips : []);
+    }).finally(() => setLoading(false));
   }, [streamId]);
+
+  const formatOffset = (totalSec: number) => {
+    const sec = Math.max(0, Number(totalSec || 0));
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center" dir={dir}>
@@ -1228,6 +1254,85 @@ function HostStatsModal({ streamId, onClose }: { streamId: string; onClose: () =
                     <span className="text-yellow-400 text-xs font-bold">{g.total}</span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {report && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <span className="text-white/60 text-xs">{t("live.avgRetention", "متوسط الاحتفاظ")}</span>
+                  <span className="text-emerald-300 font-bold text-sm">{report.avgRetentionPct ?? 0}%</span>
+                </div>
+                <div className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <span className="text-white/60 text-xs">{t("live.avgWatch", "متوسط المشاهدة")}</span>
+                  <span className="text-white font-bold text-sm">{Math.round((report.avgWatchSec || 0) / 60)} {t("live.min", "د")}</span>
+                </div>
+                {Array.isArray(report.topCountries) && report.topCountries.length > 0 && (
+                  <div className="bg-white/5 rounded-xl p-3">
+                    <p className="text-white/60 text-xs mb-2">{t("live.topCountries", "أعلى الدول")}</p>
+                    {report.topCountries.slice(0, 3).map((c: any, idx: number) => (
+                      <div key={`${c.country}-${idx}`} className="flex items-center justify-between py-1">
+                        <span className="text-white text-xs">{c.country}</span>
+                        <span className="text-white/80 text-xs">{c.viewers}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(report.recommendations) && report.recommendations.length > 0 && (
+                  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
+                    <p className="text-primary text-xs font-bold mb-2">{t("live.nextStreamTips", "اقتراحات البث القادم")}</p>
+                    {report.recommendations.slice(0, 3).map((tip: string, idx: number) => (
+                      <p key={idx} className="text-white/80 text-xs leading-relaxed">• {tip}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analytics?.bins?.length > 0 && (
+              <div className="bg-white/5 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-white/60 text-xs">{t("live.analyticsTimeline", "اتجاه الأداء أثناء البث")}</p>
+                  <a
+                    href={streamsApi.analyticsExportUrl(streamId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80"
+                  >
+                    <Download className="w-3 h-3" />
+                    {t("live.exportCsv", "تصدير CSV")}
+                  </a>
+                </div>
+                <div className="flex items-end gap-1.5 h-16">
+                  {analytics.bins.map((b: any, idx: number) => {
+                    const max = Math.max(1, ...analytics.bins.map((x: any) => Number(x.activeViewers || 0)));
+                    const h = Math.max(6, Math.round((Number(b.activeViewers || 0) / max) * 56));
+                    return (
+                      <div key={`${b.label}-${idx}`} className="flex-1 min-w-0 flex flex-col items-center gap-1">
+                        <div className="w-full rounded-md bg-primary/70" style={{ height: `${h}px` }} />
+                        <span className="text-[9px] text-white/35">{b.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-white/40 mt-2">{t("live.analyticsHint", "الأعمدة تمثل عدد المشاهدين النشطين عبر مراحل البث")}</p>
+              </div>
+            )}
+
+            {autoClips.length > 0 && (
+              <div className="bg-white/5 rounded-xl p-3">
+                <p className="text-white/60 text-xs mb-2">{t("live.autoClips", "مقاطع تلقائية مقترحة")}</p>
+                <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                  {autoClips.slice(0, 8).map((clip: any) => (
+                    <div key={clip.id} className="rounded-lg bg-black/20 border border-white/10 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-white font-semibold truncate">{clip.title}</p>
+                        <span className="text-[10px] text-primary/90 shrink-0">{formatOffset(clip.startOffsetSec)} - {formatOffset(clip.endOffsetSec)}</span>
+                      </div>
+                      <p className="text-[10px] text-white/60 mt-1 leading-relaxed">{clip.reason}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1291,7 +1396,7 @@ function ModerationModal({ streamId, onClose }: { streamId: string; onClose: () 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    streamsApi.getBannedWords(streamId).then(setWords).catch(() => {}).finally(() => setLoading(false));
+    streamsApi.getBannedWords(streamId).then(setWords).catch(() => { }).finally(() => setLoading(false));
   }, [streamId]);
 
   const addWord = async () => {
@@ -1366,7 +1471,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const [inputValue, setInputValue] = useState('');
-  const [hearts, setHearts] = useState<{id: number; x: number}[]>([]);
+  const [hearts, setHearts] = useState<{ id: number; x: number }[]>([]);
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showModeration, setShowModeration] = useState(false);
@@ -1382,6 +1487,8 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   const [activePoll, setActivePoll] = useState<any>(null);
   const [quality, setQuality] = useState("high");
   const [giftAnimations, setGiftAnimations] = useState<{ id: number; name: string; image: string; sender: string }[]>([]);
+  const [liveViewerCount, setLiveViewerCount] = useState(stream.viewers || stream.viewerCount || 0);
+  const [lkQualityHint, setLkQualityHint] = useState<string>("unknown");
   const [isPiP, setIsPiP] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -1392,6 +1499,89 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
   const heartTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [lkState, setLkState] = useState<StreamState>('idle');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [rtcStats, setRtcStats] = useState<LiveKitDebugStats | null>(null);
+  const [rtcHistory, setRtcHistory] = useState<LiveKitDebugStats[]>([]);
+  const [directorTip, setDirectorTip] = useState<{
+    id: "poll" | "gift-cta" | "retention-cta";
+    title: string;
+    desc: string;
+    actionLabel: string;
+  } | null>(null);
+  const dismissedTipsRef = useRef<Record<string, number>>({});
+  const autoClipCooldownRef = useRef<Record<string, number>>({});
+  const lastDirectorShownRef = useRef<{ id: string; at: number } | null>(null);
+  const recentChatTsRef = useRef<number[]>([]);
+  const recentGiftTsRef = useRef<number[]>([]);
+  const viewerTrendRef = useRef<Array<{ ts: number; count: number }>>([]);
+
+  const trackDirectorEvent = useCallback((tipId: string, action: "shown" | "accepted" | "dismissed", metadata?: Record<string, unknown>) => {
+    if (!isHost) return;
+    streamsApi.directorEvent(stream.id, { tipId, action, metadata }).catch(() => { });
+  }, [isHost, stream.id]);
+
+  const captureAutoClip = useCallback((
+    cueType: "chat_burst" | "gift_burst" | "viewer_spike" | "retention_recovery",
+    title: string,
+    reason: string,
+    score: number,
+    metadata?: Record<string, unknown>,
+  ) => {
+    if (!isHost) return;
+    const now = Date.now();
+    if (now - (autoClipCooldownRef.current[cueType] || 0) < 60_000) return;
+    autoClipCooldownRef.current[cueType] = now;
+    streamsApi.captureAutoClip(stream.id, {
+      cueType,
+      title,
+      reason,
+      score,
+      lookbackSec: 20,
+      forwardSec: 25,
+      metadata,
+    }).catch(() => { });
+  }, [isHost, stream.id]);
+
+  const effectiveVideoQuality = useMemo<"low" | "medium" | "high">(() => {
+    if (conn.dataSaver || conn.quality === "poor" || conn.quality === "offline") return "low";
+    if (conn.quality === "fair") return quality === "high" ? "medium" : (quality as "low" | "medium");
+    return quality as "low" | "medium" | "high";
+  }, [conn.dataSaver, conn.quality, quality]);
+
+  const networkBadgeClass = useMemo(() => {
+    if (conn.quality === "offline") return "text-red-300 border-red-500/30 bg-red-500/15";
+    if (conn.quality === "poor") return "text-red-200 border-red-400/25 bg-red-400/10";
+    if (conn.quality === "fair") return "text-amber-200 border-amber-400/30 bg-amber-400/10";
+    return "text-emerald-200 border-emerald-400/30 bg-emerald-400/10";
+  }, [conn.quality]);
+
+  const lkQualityClass = useMemo(() => {
+    if (lkQualityHint === "poor") return "text-red-300";
+    if (lkQualityHint === "good") return "text-amber-200";
+    if (lkQualityHint === "excellent") return "text-emerald-200";
+    return "text-white/40";
+  }, [lkQualityHint]);
+
+  const rtcSeverity = useMemo<"ok" | "warn" | "bad">(() => {
+    if (!rtcStats) return "ok";
+    const loss = rtcStats.packetLossPct ?? 0;
+    const rtt = rtcStats.rttMs ?? 0;
+    const jitter = rtcStats.jitterMs ?? 0;
+    if (loss >= 3 || rtt >= 350 || jitter >= 50) return "bad";
+    if (loss >= 1 || rtt >= 200 || jitter >= 25) return "warn";
+    return "ok";
+  }, [rtcStats]);
+
+  const rtcPanelClass = useMemo(() => {
+    if (rtcSeverity === "bad") return "border-red-500/30 bg-red-500/12 text-red-100";
+    if (rtcSeverity === "warn") return "border-amber-500/30 bg-amber-500/10 text-amber-100";
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
+  }, [rtcSeverity]);
+
+  const rttTrend = useMemo(() => {
+    const values = rtcHistory.map((s) => s.rttMs ?? 0);
+    const peak = Math.max(1, ...values);
+    return values.map((value) => Math.max(3, Math.round((value / peak) * 16)));
+  }, [rtcHistory]);
 
   // Cleanup heart timers on unmount
   useEffect(() => {
@@ -1415,11 +1605,12 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
         const hostMode = !!(userId && stream.userId && userId === stream.userId);
         setIsHost(hostMode);
+        if (hostMode && !conn.allowVideo) setCamOn(false);
 
         // Keep DB viewer metrics in sync for non-host audience.
         if (!hostMode) {
           joinedAsViewer = true;
-          streamsApi.join(stream.id).catch(() => {});
+          streamsApi.join(stream.id).catch(() => { });
         }
 
         setLkState('connecting');
@@ -1430,36 +1621,81 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
 
         await livekitStreamManager.connect(wsUrl, token, role as StreamRole, {
           onStateChange: (state: StreamState) => { if (!cancelled) setLkState(state); },
-          onActiveSpeakersChanged: () => {},
+          onActiveSpeakersChanged: () => { },
           onError: () => { if (!cancelled) setLkState('failed'); },
+          onConnectionQualityChanged: (q: string, participantId: string) => {
+            if (!cancelled && (!participantId || participantId === userId)) setLkQualityHint(q);
+          },
           onRemoteVideoTrack: (track: MediaStreamTrack) => {
             if (videoRef.current) {
               videoRef.current.srcObject = new MediaStream([track]);
-              videoRef.current.play().catch(() => {});
+              videoRef.current.play().catch(() => { });
             }
           },
           onLocalVideoTrack: (track: MediaStreamTrack) => {
             if (videoRef.current) {
               videoRef.current.srcObject = new MediaStream([track]);
-              videoRef.current.play().catch(() => {});
+              videoRef.current.play().catch(() => { });
             }
           },
-        }, { publishVideo: hostMode, publishAudio: hostMode });
+        }, {
+          publishVideo: hostMode && conn.allowVideo,
+          publishAudio: hostMode,
+          videoQuality: effectiveVideoQuality,
+        });
       } catch { if (!cancelled) setLkState('failed'); }
     };
     init();
     // Fetch pinned message & active poll
-    streamsApi.detail(stream.id).then((d: any) => { if (d?.pinnedMessage) setPinnedMessage(d.pinnedMessage); }).catch(() => {});
-    streamsApi.getActivePoll(stream.id).then((p: any) => { if (p?.id) setActivePoll(p); }).catch(() => {});
+    streamsApi.detail(stream.id).then((d: any) => { if (d?.pinnedMessage) setPinnedMessage(d.pinnedMessage); }).catch(() => { });
+    streamsApi.getActivePoll(stream.id).then((p: any) => { if (p?.id) setActivePoll(p); }).catch(() => { });
 
     return () => {
       cancelled = true;
       if (joinedAsViewer) {
-        streamsApi.leave(stream.id).catch(() => {});
+        streamsApi.leave(stream.id).catch(() => { });
       }
       livekitStreamManager.disconnect();
     };
-  }, [stream.id, stream.userId]);
+  }, [conn.allowVideo, effectiveVideoQuality, stream.id, stream.userId]);
+
+  // Auto-degrade host camera when network becomes too weak.
+  useEffect(() => {
+    if (!isHost) return;
+    if (!conn.allowVideo && camOn) {
+      livekitStreamManager.toggleCamera().then(() => setCamOn(false)).catch(() => { });
+    }
+  }, [camOn, conn.allowVideo, isHost]);
+
+  // Apply host-selected quality profile without reconnecting LiveKit.
+  useEffect(() => {
+    if (!isHost || !camOn || lkState !== "connected") return;
+    livekitStreamManager.setVideoQuality(effectiveVideoQuality).catch(() => { });
+  }, [camOn, effectiveVideoQuality, isHost, lkState]);
+
+  // Poll WebRTC stats for host diagnostics panel.
+  useEffect(() => {
+    if (!isHost || lkState !== "connected") {
+      setRtcStats(null);
+      setRtcHistory([]);
+      return;
+    }
+
+    let active = true;
+    const poll = async () => {
+      const stats = await livekitStreamManager.getWebRtcStats();
+      if (!active || !stats) return;
+      setRtcStats(stats);
+      setRtcHistory((prev) => [...prev, stats].slice(-12));
+    };
+
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [isHost, lkState]);
 
   // Socket events
   useEffect(() => {
@@ -1468,17 +1704,33 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
 
     const handleChat = (data: any) => {
       if (!data?.message) return;
+      recentChatTsRef.current.push(Date.now());
+      recentChatTsRef.current = recentChatTsRef.current.filter((ts) => Date.now() - ts <= 180000);
       const colors = ['text-blue-400', 'text-pink-400', 'text-green-400', 'text-orange-400', 'text-cyan-400'];
       const limit = maxMessagesRef.current;
-      setMessages(prev => [...prev.slice(-(limit - 1)), {
-        id: data.id || Date.now(), type: 'message',
-        user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 } : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
-        text: data.message, color: colors[Math.floor(Math.random() * colors.length)], timestamp: data.ts || Date.now(),
-      }]);
+      const msgId = data.id || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setMessages(prev => {
+        if (prev.some(m => String(m.id) === String(msgId))) return prev;
+        return [...prev.slice(-(limit - 1)), {
+          id: msgId, type: 'message',
+          user: data.user ? { ...data.user, avatar: data.user.avatar || avatarImg, level: data.user.level || 1 } : { id: 'unknown', name: 'مجهول', avatar: avatarImg, level: 1 },
+          text: data.message, color: colors[Math.floor(Math.random() * colors.length)], timestamp: data.ts || Date.now(),
+        }];
+      });
+    };
+
+    const handleViewerCount = (count: number) => {
+      if (typeof count === 'number' && Number.isFinite(count) && count >= 0) {
+        setLiveViewerCount(count);
+        viewerTrendRef.current.push({ ts: Date.now(), count });
+        viewerTrendRef.current = viewerTrendRef.current.filter((v) => Date.now() - v.ts <= 300000);
+      }
     };
 
     const handleGiftReceived = (data: any) => {
       if (data?.streamId === stream.id || data?.roomId === stream.id) {
+        recentGiftTsRef.current.push(Date.now());
+        recentGiftTsRef.current = recentGiftTsRef.current.filter((ts) => Date.now() - ts <= 300000);
         setGiftAnimations(prev => [...prev, { id: Date.now(), name: data.giftName || 'هدية', image: data.giftImage || giftImg, sender: data.senderName || '' }]);
       }
     };
@@ -1498,6 +1750,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     };
 
     socket.on('chat-message', handleChat);
+    socket.on('viewer-count', handleViewerCount);
     socket.on('gift-received', handleGiftReceived);
     socket.on('stream-pinned', handlePinned);
     socket.on('stream-poll-update', handlePollUpdate);
@@ -1506,6 +1759,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     return () => {
       socket.emit('leave-room', stream.id);
       socket.off('chat-message', handleChat);
+      socket.off('viewer-count', handleViewerCount);
       socket.off('gift-received', handleGiftReceived);
       socket.off('stream-pinned', handlePinned);
       socket.off('stream-poll-update', handlePollUpdate);
@@ -1513,17 +1767,146 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     };
   }, [onClose, stream.id, t]);
 
+  // Smart Director: host-only realtime engagement recommendations.
+  useEffect(() => {
+    if (!isHost) {
+      setDirectorTip(null);
+      return;
+    }
+
+    const pickTip = () => {
+      const now = Date.now();
+      const canShow = (key: string) => now - (dismissedTipsRef.current[key] || 0) > 120000;
+
+      const chatLast90s = recentChatTsRef.current.filter((ts) => now - ts <= 90000).length;
+      const giftsLast3m = recentGiftTsRef.current.filter((ts) => now - ts <= 180000).length;
+      const trend = viewerTrendRef.current.filter((p) => now - p.ts <= 180000);
+
+      if (chatLast90s >= 18 && liveViewerCount >= 12) {
+        captureAutoClip(
+          "chat_burst",
+          t("live.autoClipChatTitle", "لقطة تفاعل دردشة"),
+          t("live.autoClipChatReason", "حدثت قفزة واضحة في رسائل الدردشة خلال آخر 90 ثانية."),
+          Math.min(100, 55 + chatLast90s),
+          { chatLast90s, liveViewerCount },
+        );
+      }
+
+      if (giftsLast3m >= 5) {
+        captureAutoClip(
+          "gift_burst",
+          t("live.autoClipGiftTitle", "لقطة اندفاع هدايا"),
+          t("live.autoClipGiftReason", "تم تسجيل موجة هدايا قوية خلال آخر 3 دقائق."),
+          Math.min(100, 50 + giftsLast3m * 8),
+          { giftsLast3m },
+        );
+      }
+
+      if (trend.length >= 4) {
+        const first = Number(trend[0]?.count || 0);
+        const last = Number(trend[trend.length - 1]?.count || 0);
+        if (last - first >= Math.max(8, Math.floor(first * 0.35))) {
+          captureAutoClip(
+            "viewer_spike",
+            t("live.autoClipSpikeTitle", "لقطة قفزة مشاهدين"),
+            t("live.autoClipSpikeReason", "ارتفع عدد المشاهدين بشكل ملحوظ في نافذة قصيرة."),
+            Math.min(100, 45 + (last - first) * 4),
+            { first, last },
+          );
+        }
+
+        const minCount = Math.min(...trend.map((p) => Number(p.count || 0)));
+        if (first - minCount >= 6 && last - minCount >= 6) {
+          captureAutoClip(
+            "retention_recovery",
+            t("live.autoClipRecoveryTitle", "لقطة استعادة الجمهور"),
+            t("live.autoClipRecoveryReason", "تعافى الجمهور بعد هبوط مؤقت في عدد المشاهدين."),
+            Math.min(100, 40 + (last - minCount) * 5),
+            { first, minCount, last },
+          );
+        }
+      }
+
+      if (!activePoll && chatLast90s < 4 && liveViewerCount >= 8 && canShow("poll")) {
+        setDirectorTip({
+          id: "poll",
+          title: t("live.directorPollTitle", "المخرج الذكي: فعّل تصويت"),
+          desc: t("live.directorPollDesc", "التفاعل في الدردشة منخفض، التصويت يرفع المشاركة بسرعة."),
+          actionLabel: t("live.directorStartPoll", "إنشاء تصويت"),
+        });
+        return;
+      }
+
+      if (giftsLast3m === 0 && liveViewerCount >= 20 && canShow("gift-cta")) {
+        setDirectorTip({
+          id: "gift-cta",
+          title: t("live.directorGiftTitle", "المخرج الذكي: حدد هدف هدايا"),
+          desc: t("live.directorGiftDesc", "لا توجد هدايا مؤخرًا رغم عدد المشاهدين، جرّب CTA مباشر."),
+          actionLabel: t("live.directorPinGoal", "تثبيت CTA"),
+        });
+        return;
+      }
+
+      if (trend.length >= 3 && canShow("retention-cta")) {
+        const first = trend[0].count;
+        const last = trend[trend.length - 1].count;
+        if (first >= 10 && last <= Math.floor(first * 0.8)) {
+          setDirectorTip({
+            id: "retention-cta",
+            title: t("live.directorRetentionTitle", "المخرج الذكي: استعد الزخم"),
+            desc: t("live.directorRetentionDesc", "انخفض عدد المشاهدين، أرسل رسالة مثبتة تحفّز التفاعل الآن."),
+            actionLabel: t("live.directorPinMessage", "تثبيت رسالة"),
+          });
+          return;
+        }
+      }
+
+      setDirectorTip(null);
+    };
+
+    const timer = setInterval(pickTip, 15000);
+    pickTip();
+    return () => clearInterval(timer);
+  }, [activePoll, captureAutoClip, isHost, liveViewerCount, t]);
+
+  useEffect(() => {
+    if (!isHost || !directorTip) return;
+    const now = Date.now();
+    const last = lastDirectorShownRef.current;
+    if (last && last.id === directorTip.id && now - last.at < 30_000) return;
+    lastDirectorShownRef.current = { id: directorTip.id, at: now };
+    trackDirectorEvent(directorTip.id, "shown", { liveViewerCount });
+  }, [directorTip, isHost, liveViewerCount, trackDirectorEvent]);
+
+  const runDirectorTipAction = async () => {
+    if (!directorTip) return;
+    const tipId = directorTip.id;
+    try {
+      if (directorTip.id === "poll") {
+        setShowCreatePoll(true);
+      } else if (directorTip.id === "gift-cta") {
+        const msg = t("live.directorGiftPinned", "هدف البث: أول 20 هدية خلال 10 دقائق! شاركونا الآن");
+        await streamsApi.pin(stream.id, msg);
+        setPinnedMessage(msg);
+      } else {
+        const msg = t("live.directorRetentionPinned", "اكتبوا (تم) في الشات وسنبدأ فقرة تفاعلية حالًا!");
+        await streamsApi.pin(stream.id, msg);
+        setPinnedMessage(msg);
+      }
+      trackDirectorEvent(tipId, "accepted", { liveViewerCount });
+      dismissedTipsRef.current[tipId] = Date.now();
+      setDirectorTip(null);
+    } catch {
+      toast.error(t("common.error", "حدث خطأ"));
+    }
+  };
+
   const handleSend = () => {
     if (!inputValue.trim()) return;
     socketManager.emit('chat-message', {
       roomId: stream.id, message: inputValue.trim(),
       user: { id: currentUserId || 'me', name: currentUserName || t('live.you', 'أنت') },
     });
-    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), {
-      id: Date.now(), type: 'message',
-      user: { id: currentUserId || 'me', name: currentUserName || t('live.you', 'أنت'), avatar: avatarImg, level: 10 },
-      text: inputValue, color: 'text-primary', timestamp: Date.now(),
-    }]);
     setInputValue('');
   };
 
@@ -1638,7 +2021,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
             <div>
               <p className="text-white text-xs font-bold leading-tight">{stream.host}</p>
               <div className="flex items-center gap-1 text-white/70 text-[10px]">
-                <Eye className="w-2.5 h-2.5" /><span>{stream.viewers}</span>
+                <Eye className="w-2.5 h-2.5" /><span>{liveViewerCount}</span>
               </div>
             </div>
           </div>
@@ -1678,6 +2061,82 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
           </div>
         )}
       </div>
+
+      {/* Network status */}
+      <div className="relative z-20 px-4 mt-2 flex items-center gap-2">
+        <div className={`inline-flex items-center gap-1 text-[10px] font-bold border rounded-full px-2 py-0.5 ${networkBadgeClass}`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+          {conn.qualityLabel}
+        </div>
+        <div className={`text-[10px] font-semibold ${lkQualityClass}`}>
+          {t("live.linkQuality", "جودة البث")}: {lkQualityHint}
+        </div>
+        {(conn.quality === "poor" || conn.quality === "offline" || conn.dataSaver) && (
+          <div className="text-[10px] text-white/50">
+            {t("live.autoReducedQuality", "تم تقليل جودة الفيديو تلقائياً")}
+          </div>
+        )}
+      </div>
+
+      {/* Smart Director tip for hosts */}
+      {isHost && directorTip && (
+        <div className="relative z-20 px-4 mt-2">
+          <div className="rounded-xl border border-primary/30 bg-primary/12 backdrop-blur-md p-3 text-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-primary flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {directorTip.title}
+                </p>
+                <p className="text-[11px] text-white/80 mt-1 leading-relaxed">{directorTip.desc}</p>
+                <button
+                  onClick={runDirectorTipAction}
+                  className="mt-2 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-primary/25 text-primary hover:bg-primary/35 transition-colors"
+                >
+                  {directorTip.actionLabel}
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  trackDirectorEvent(directorTip.id, "dismissed", { liveViewerCount });
+                  dismissedTipsRef.current[directorTip.id] = Date.now();
+                  setDirectorTip(null);
+                }}
+                className="text-white/40 hover:text-white/80"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Host WebRTC Diagnostics */}
+      {isHost && (
+        <div className="relative z-20 px-4 mt-2">
+          <div className={`inline-flex flex-wrap items-center gap-2 rounded-xl border backdrop-blur-md px-3 py-1.5 text-[10px] ${rtcPanelClass}`}>
+            <span className="inline-flex items-center gap-1 text-white/85 font-semibold">
+              <Timer className="w-3 h-3" />
+              {t("live.webrtcStats", "إحصائيات WebRTC")}
+            </span>
+            <span>RTT: {rtcStats?.rttMs != null ? `${Math.round(rtcStats.rttMs)}ms` : "--"}</span>
+            <span>Jitter: {rtcStats?.jitterMs != null ? `${Math.round(rtcStats.jitterMs)}ms` : "--"}</span>
+            <span>Loss: {rtcStats?.packetLossPct != null ? `${rtcStats.packetLossPct.toFixed(1)}%` : "--"}</span>
+            <span className="text-white/70">Status: {rtcSeverity === "bad" ? "Critical" : rtcSeverity === "warn" ? "Warning" : "Healthy"}</span>
+            {rttTrend.length > 0 && (
+              <div className="inline-flex items-end gap-[2px] h-5 rounded-md border border-white/10 bg-black/25 px-1 py-0.5">
+                {rttTrend.map((h, idx) => (
+                  <span
+                    key={`${rtcHistory[idx]?.sampledAt || idx}`}
+                    className={`w-1 rounded-sm ${rtcSeverity === "bad" ? "bg-red-300/80" : rtcSeverity === "warn" ? "bg-amber-300/80" : "bg-emerald-300/80"}`}
+                    style={{ height: `${h}px` }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Pinned Message */}
       <div className="relative z-20 mt-2">
@@ -1770,7 +2229,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
           </>
         )}
         {/* Viewer controls */}
-        {!isHost && (
+        {isHost && (
           <QualitySelector current={quality} onChange={setQuality} />
         )}
         <button onClick={addHeart} className="active:scale-90 transition-transform">
@@ -1869,6 +2328,10 @@ export function LiveBroadcast() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StreamItem[] | null>(null);
   const [followNotif, setFollowNotif] = useState<{ host: string; title: string; streamId: string } | null>(null);
+  const [liveFlags, setLiveFlags] = useState<{ liveRecommendationEnabled: boolean; postStreamReportEnabled: boolean }>({
+    liveRecommendationEnabled: true,
+    postStreamReportEnabled: true,
+  });
 
   const categoryLabels: Record<string, string> = {
     all: t("live.catAll", "الكل"),
@@ -1904,7 +2367,11 @@ export function LiveBroadcast() {
   const fetchStreams = useCallback((category?: string) => {
     setLoading(true);
     const cat = category && category !== 'all' ? category : undefined;
-    streamsApi.active(cat)
+    const sourcePromise = liveFlags.liveRecommendationEnabled
+      ? streamsApi.recommended(cat).catch(() => streamsApi.active(cat))
+      : streamsApi.active(cat);
+
+    sourcePromise
       .then((streams: any[]) => {
         const vids: StreamItem[] = [];
         const auds: StreamItem[] = [];
@@ -1916,8 +2383,17 @@ export function LiveBroadcast() {
         setVideoStreams(vids);
         setAudioStreams(auds);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
+  }, [liveFlags.liveRecommendationEnabled]);
+
+  useEffect(() => {
+    streamsApi.featureFlags()
+      .then((flags) => setLiveFlags({
+        liveRecommendationEnabled: flags?.liveRecommendationEnabled !== false,
+        postStreamReportEnabled: flags?.postStreamReportEnabled !== false,
+      }))
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -1928,7 +2404,7 @@ export function LiveBroadcast() {
   useEffect(() => {
     streamsApi.scheduled()
       .then((data: any[]) => setScheduledStreams(data.map(parseStream)))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Follow notification listener (stream-started socket event)
@@ -1974,7 +2450,7 @@ export function LiveBroadcast() {
         setCreateScheduleTime("");
         if (createScheduledAt) {
           // Scheduled stream — refresh scheduled list
-          streamsApi.scheduled().then((data: any[]) => setScheduledStreams(data.map(parseStream))).catch(() => {});
+          streamsApi.scheduled().then((data: any[]) => setScheduledStreams(data.map(parseStream))).catch(() => { });
         } else if (createType === "audio") {
           const item = parseStream({ ...res, type: "audio" });
           setSelectedAudioRoom(item);
@@ -2076,11 +2552,10 @@ export function LiveBroadcast() {
           <button
             key={cat}
             onClick={() => setSelectedCategory(cat)}
-            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${
-              selectedCategory === cat
-                ? "bg-primary/20 text-primary border-primary/30"
-                : "bg-white/5 text-white/40 border-white/5 hover:bg-white/10"
-            }`}
+            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${selectedCategory === cat
+              ? "bg-primary/20 text-primary border-primary/30"
+              : "bg-white/5 text-white/40 border-white/5 hover:bg-white/10"
+              }`}
           >
             {categoryLabels[cat] || cat}
           </button>
@@ -2091,11 +2566,10 @@ export function LiveBroadcast() {
       <div className="flex gap-2 bg-white/[0.03] p-1.5 rounded-2xl border border-white/5">
         <button
           onClick={() => setActiveTab("video")}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${
-            activeTab === "video"
-              ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
-              : "text-white/40 hover:text-white/60 hover:bg-white/5"
-          }`}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === "video"
+            ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
+            : "text-white/40 hover:text-white/60 hover:bg-white/5"
+            }`}
         >
           <Video className={`w-5 h-5 ${activeTab === "video" ? "text-blue-400" : ""}`} />
           {t("live.videoLive")}
@@ -2105,11 +2579,10 @@ export function LiveBroadcast() {
         </button>
         <button
           onClick={() => setActiveTab("audio")}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${
-            activeTab === "audio"
-              ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
-              : "text-white/40 hover:text-white/60 hover:bg-white/5"
-          }`}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === "audio"
+            ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+            : "text-white/40 hover:text-white/60 hover:bg-white/5"
+            }`}
         >
           <Headphones className={`w-5 h-5 ${activeTab === "audio" ? "text-emerald-400" : ""}`} />
           {t("live.audioLive")}
@@ -2252,22 +2725,20 @@ export function LiveBroadcast() {
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => setCreateType("live")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
-                    createType === "live"
-                      ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30"
-                      : "text-white/40 bg-white/5 border border-white/5"
-                  }`}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${createType === "live"
+                    ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30"
+                    : "text-white/40 bg-white/5 border border-white/5"
+                    }`}
                 >
                   <Video className="w-4 h-4" />
                   {t("live.videoLive", "بث فيديو")}
                 </button>
                 <button
                   onClick={() => setCreateType("audio")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${
-                    createType === "audio"
-                      ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30"
-                      : "text-white/40 bg-white/5 border border-white/5"
-                  }`}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${createType === "audio"
+                    ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30"
+                    : "text-white/40 bg-white/5 border border-white/5"
+                    }`}
                 >
                   <Headphones className="w-4 h-4" />
                   {t("live.audioLive", "غرفة صوتية")}
@@ -2295,11 +2766,10 @@ export function LiveBroadcast() {
                     <button
                       key={cat}
                       onClick={() => setCreateCategory(cat)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                        createCategory === cat
-                          ? "bg-primary/20 text-primary border-primary/30"
-                          : "bg-white/5 text-white/40 border-white/5"
-                      }`}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${createCategory === cat
+                        ? "bg-primary/20 text-primary border-primary/30"
+                        : "bg-white/5 text-white/40 border-white/5"
+                        }`}
                     >
                       {categoryLabels[cat] || cat}
                     </button>

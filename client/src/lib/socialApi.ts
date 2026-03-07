@@ -70,6 +70,13 @@ export const chatApi = {
     request("/conversations", { method: "POST", body: JSON.stringify({ receiverId }) }),
   messages: (conversationId: string, page = 1) =>
     request<any[]>(`/conversations/${conversationId}/messages?page=${page}`),
+  messagesCursor: (conversationId: string, cursor?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<{ messages: any[]; nextCursor: string | null; hasMore: boolean }>(
+      `/conversations/${conversationId}/messages?${params.toString()}`,
+    );
+  },
   sendMessage: (conversationId: string, data: {
     content?: string;
     type?: string;
@@ -97,6 +104,15 @@ export const chatApi = {
       { method: "POST", body: JSON.stringify({ messageIds }) },
     ),
   unreadCount: () => request<{ unread: number; friendRequests: number }>("/unread-count"),
+  metrics: () => request<{
+    sentTotal: number;
+    sendErrors: number;
+    avgSendLatencyMs: number;
+    fetchTotal: number;
+    fetchErrors: number;
+    avgFetchLatencyMs: number;
+    timestamp: string;
+  }>("/chat/metrics"),
   settings: () => request<{
     chat_media_enabled: boolean;
     chat_voice_call_enabled: boolean;
@@ -158,6 +174,8 @@ export const walletApi = {
     request("/wallet/recharge", { method: "POST", body: JSON.stringify(data) }),
   withdraw: (data: { amount: number; paymentMethodId?: string; paymentDetails?: string }) =>
     request("/wallet/withdraw", { method: "POST", body: JSON.stringify(data) }),
+  paymentMethods: (usage: "deposit" | "withdrawal" = "withdrawal") =>
+    request<any[]>(`/wallet/payment-methods?usage=${usage}`),
   withdrawalRequests: (page = 1) => request<any>(`/wallet/withdrawal-requests?page=${page}`),
   incomeChart: (days = 30) => request<any>(`/wallet/income-chart?days=${days}`),
   cancelWithdrawal: (withdrawalId: string) =>
@@ -226,12 +244,36 @@ export const followApi = {
 
 // ── Streams ──
 export const streamsApi = {
+  featureFlags: () => request<{
+    liveRecommendationEnabled: boolean;
+    postStreamReportEnabled: boolean;
+    liveGamificationEnabled: boolean;
+    creatorAnalyticsCsvEnabled: boolean;
+    smartDirectorTelemetryEnabled: boolean;
+    autoClipsEnabled: boolean;
+  }>("/feature-flags"),
   active: (category?: string) => request<any[]>(`/streams/active${category ? `?category=${category}` : ""}`),
+  recommended: (category?: string) => request<any[]>(`/streams/recommended${category ? `?category=${category}` : ""}`),
   scheduled: () => request<any[]>("/streams/scheduled"),
   search: (q: string) => request<any[]>(`/streams/search?q=${encodeURIComponent(q)}`),
   detail: (id: string) => request<any>(`/streams/${id}`),
   my: () => request<any>("/streams/my"),
   stats: (id: string) => request<any>(`/streams/${id}/stats`),
+  report: (id: string) => request<any>(`/streams/${id}/report`),
+  analytics: (id: string) => request<any>(`/streams/${id}/analytics`),
+  analyticsExportUrl: (id: string) => `${API_BASE}/streams/${id}/analytics/export`,
+  directorEvent: (id: string, data: { tipId: string; action: "shown" | "accepted" | "dismissed"; metadata?: Record<string, unknown> }) =>
+    request<any>(`/streams/${id}/director-events`, { method: "POST", body: JSON.stringify(data) }),
+  captureAutoClip: (id: string, data: {
+    cueType: "chat_burst" | "gift_burst" | "viewer_spike" | "retention_recovery";
+    title: string;
+    reason: string;
+    score?: number;
+    lookbackSec?: number;
+    forwardSec?: number;
+    metadata?: Record<string, unknown>;
+  }) => request<any>(`/streams/${id}/clips/auto`, { method: "POST", body: JSON.stringify(data) }),
+  autoClips: (id: string) => request<any[]>(`/streams/${id}/clips`),
   create: (data: { title: string; type: "live" | "audio"; tags?: string[]; category?: string; scheduledAt?: string }) =>
     request<any>("/streams/create", { method: "POST", body: JSON.stringify(data) }),
   end: (id: string) => request<any>(`/streams/${id}/end`, { method: "POST" }),
@@ -283,6 +325,12 @@ export const streamsApi = {
     request(`/streams/${streamId}/record/start`, { method: "POST" }),
   stopRecording: (streamId: string) =>
     request(`/streams/${streamId}/record/stop`, { method: "POST" }),
+};
+
+// ── Gamification ──
+export const gamificationApi = {
+  daily: () => request<any>("/gamification/daily"),
+  claim: () => request<any>("/gamification/claim", { method: "POST" }),
 };
 
 // ── Auto-Translation — الترجمة التلقائية ──

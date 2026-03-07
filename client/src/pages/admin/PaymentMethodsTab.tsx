@@ -8,7 +8,7 @@ import { adminPaymentMethods } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import { useConfirmDialog } from "../wallet/helpers";
 import type { PaymentMethod } from "./financeTypes";
-import { PM_TYPE_OPTIONS, PM_ICONS, COUNTRY_OPTIONS } from "./financeTypes";
+import { PM_TYPE_OPTIONS, PM_USAGE_OPTIONS, PM_ICONS, COUNTRY_OPTIONS } from "./financeTypes";
 
 // ════════════════════════════════════════════════════════════
 // FORM FIELD (local utility)
@@ -46,6 +46,7 @@ export function PaymentMethodsTab({ search }: { search: string }) {
   const [formLoading, setFormLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "", nameAr: "", icon: "💳", type: "card", provider: "",
+    usageTarget: "both" as "deposit" | "withdrawal" | "both",
     countries: [] as string[], minAmount: "", maxAmount: "", fee: "", instructions: "",
   });
 
@@ -62,7 +63,7 @@ export function PaymentMethodsTab({ search }: { search: string }) {
 
   const openCreate = () => {
     setEditMethod(null);
-    setFormData({ name: "", nameAr: "", icon: "💳", type: "card", provider: "", countries: [], minAmount: "", maxAmount: "", fee: "", instructions: "" });
+    setFormData({ name: "", nameAr: "", icon: "💳", type: "card", provider: "", usageTarget: "both", countries: [], minAmount: "", maxAmount: "", fee: "", instructions: "" });
     setFormError("");
     setShowForm(true);
   };
@@ -75,6 +76,7 @@ export function PaymentMethodsTab({ search }: { search: string }) {
       icon: pm.icon,
       type: pm.type,
       provider: pm.provider,
+      usageTarget: pm.usageTarget || "both",
       countries: pm.countries || [],
       minAmount: String(pm.minAmount),
       maxAmount: String(pm.maxAmount),
@@ -150,6 +152,13 @@ export function PaymentMethodsTab({ search }: { search: string }) {
   };
 
   const getTypeLabel = (type: string) => { const opt = PM_TYPE_OPTIONS.find((o) => o.value === type); return opt ? t(opt.labelKey) : type; };
+  const getUsageLabel = (usage?: string) => {
+    switch (usage) {
+      case "deposit": return "ايداع/شراء";
+      case "withdrawal": return "سحب";
+      default: return "كلاهما";
+    }
+  };
   const getTypeStyle = (type: string) => {
     switch (type) {
       case "card": return "bg-blue-400/10 text-blue-400 border-blue-400/20";
@@ -253,6 +262,10 @@ export function PaymentMethodsTab({ search }: { search: string }) {
                   <span className="text-white/60 font-medium">{pm.provider || "—"}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/30">اتجاه الاستخدام</span>
+                  <span className="text-white/60 font-medium">{getUsageLabel(pm.usageTarget)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
                   <span className="text-white/30">{t("admin.finances.pmLimits")}</span>
                   <span className="text-white/60 font-mono">${pm.minAmount} – ${pm.maxAmount}</span>
                 </div>
@@ -345,8 +358,8 @@ export function PaymentMethodsTab({ search }: { search: string }) {
                   <FormField label={t("admin.finances.nameAr")} value={formData.nameAr} onChange={(v) => setFormData((f) => ({ ...f, nameAr: v }))} placeholder={t("admin.finances.nameArPlaceholder")} />
                 </div>
 
-                {/* Type + Provider */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Type + Usage + Provider */}
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs text-white/40 font-medium mb-1.5 block">{t("admin.finances.pmType")}</label>
                     <select
@@ -355,6 +368,16 @@ export function PaymentMethodsTab({ search }: { search: string }) {
                       onChange={(e) => setFormData((f) => ({ ...f, type: e.target.value }))}
                     >
                       {PM_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{t(o.labelKey)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/40 font-medium mb-1.5 block">اتجاه الاستخدام</label>
+                    <select
+                      className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white/70 focus:outline-none"
+                      value={formData.usageTarget}
+                      onChange={(e) => setFormData((f) => ({ ...f, usageTarget: e.target.value as "deposit" | "withdrawal" | "both" }))}
+                    >
+                      {PM_USAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
                   <FormField label={t("admin.finances.pmProvider")} value={formData.provider} onChange={(v) => setFormData((f) => ({ ...f, provider: v }))} placeholder="Stripe, PayPal..." />

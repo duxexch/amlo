@@ -43,10 +43,12 @@ export function Wallet() {
   } = useWalletTransactions(activeTab);
   const {
     withdrawAmount, withdrawDisplayAmount, withdrawMethod, setWithdrawMethod,
+    availableWithdrawMethods,
     withdrawSubmitting, withdrawError, withdrawSuccess,
     showWithdrawConfirm, setShowWithdrawConfirm,
     bankName, setBankName, accountNumber, setAccountNumber, accountHolder, setAccountHolder,
     paypalEmail, setPaypalEmail, usdtNetwork, setUsdtNetwork, usdtAddress, setUsdtAddress, usdtError, setUsdtError,
+    customPaymentDetails, setCustomPaymentDetails,
     withdrawalRequests, wrLoading, wrHasMore, wrLoadingMore, cancellingWr,
     withdrawLimits, conversionRate,
     handleWithdrawAmountChange, setQuickAmount,
@@ -112,6 +114,12 @@ export function Wallet() {
   ];
 
   const tierIcons = [Compass, Plane, Rocket, Star, Crown, Zap];
+
+  const resolveMethodLabel = (id: string | null | undefined) => {
+    if (!id) return "-";
+    const found = availableWithdrawMethods.find((m) => m.id === id);
+    return found?.nameAr || found?.name || getMethodLabel(id);
+  };
 
   // Income chart max for scaling
   const chartMax = Math.max(...incomeChart.map(d => d.total), 1);
@@ -636,18 +644,18 @@ export function Wallet() {
               <div className="space-y-3">
                 <label className="text-sm font-bold text-white/50">{t("wallet.withdrawMethod")}</label>
                 <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { key: "bank", label: t("wallet.methodBank"), icon: <CreditCard className="w-4 h-4" /> },
-                    { key: "paypal", label: "PayPal", icon: <BadgeDollarSign className="w-4 h-4" /> },
-                    { key: "usdt", label: "USDT", icon: <Coins className="w-4 h-4" /> },
-                  ].map(m => (
-                    <button key={m.key} onClick={() => setWithdrawMethod(m.key)}
+                  {(availableWithdrawMethods.length > 0 ? availableWithdrawMethods : [
+                    { id: "bank", nameAr: t("wallet.methodBank"), icon: "💳" },
+                    { id: "paypal", name: "PayPal", icon: "🅿️" },
+                    { id: "usdt", name: "USDT", icon: "🪙" },
+                  ]).map((m: any) => (
+                    <button key={m.id || m.key} onClick={() => setWithdrawMethod(m.id || m.key)}
                       className={`py-3.5 rounded-2xl font-bold text-sm transition-all duration-200 border flex items-center justify-center gap-2 ${
-                        withdrawMethod === m.key
+                        withdrawMethod === (m.id || m.key)
                           ? "bg-violet-600/80 text-white border-violet-500/50 shadow-md shadow-violet-500/15"
                           : "bg-white/[0.03] text-white/40 border-white/[0.06] hover:text-white/70 hover:bg-white/[0.06]"
                       }`}>
-                      {m.icon} {m.label}
+                      {m.id === "bank" ? <CreditCard className="w-4 h-4" /> : m.id === "paypal" ? <BadgeDollarSign className="w-4 h-4" /> : m.id === "usdt" ? <Coins className="w-4 h-4" /> : <WalletIcon className="w-4 h-4" />} {(m.nameAr || m.name)}
                     </button>
                   ))}
                 </div>
@@ -693,6 +701,16 @@ export function Wallet() {
                           : `${usdtNetwork.toUpperCase()}`}
                       </p>
                     )}
+                  </motion.div>
+                )}
+                {!["bank", "paypal", "usdt"].includes(withdrawMethod) && (
+                  <motion.div key="custom" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <textarea
+                      placeholder={t("wallet.paymentInstructions", "تفاصيل وسيلة الدفع")}
+                      value={customPaymentDetails}
+                      onChange={(e) => setCustomPaymentDetails(e.target.value)}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl py-3.5 px-5 text-white text-sm focus:outline-none focus:border-violet-500/50 transition-all placeholder:text-white/20 resize-none h-24"
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -756,7 +774,7 @@ export function Wallet() {
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-bold text-sm">{wr.amount?.toLocaleString()} {t("common.coins")}</p>
                           <p className="text-white/20 text-xs mt-0.5">{wr.createdAt ? new Date(wr.createdAt).toLocaleString(i18n.language) : ""}</p>
-                          {wr.paymentMethodId && <p className="text-white/15 text-[10px] mt-0.5">{getMethodLabel(wr.paymentMethodId)}</p>}
+                          {wr.paymentMethodId && <p className="text-white/15 text-[10px] mt-0.5">{resolveMethodLabel(wr.paymentMethodId)}</p>}
                         </div>
                         <div className="shrink-0 flex items-center gap-2">
                           {getStatusBadge(wr.status)}
@@ -822,7 +840,7 @@ export function Wallet() {
                 <div className="h-px bg-white/[0.06]" />
                 <div className="flex justify-between text-sm">
                   <span className="text-white/40">{t("wallet.withdrawMethod")}</span>
-                  <span className="text-white font-black">{getMethodLabel(withdrawMethod)}</span>
+                  <span className="text-white font-black">{resolveMethodLabel(withdrawMethod)}</span>
                 </div>
               </div>
 

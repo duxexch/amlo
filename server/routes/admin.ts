@@ -1195,10 +1195,42 @@ router.post("/wallets/:userId/adjust", requireAdmin, async (req, res) => {
 // PAYMENT METHODS — طرق الدفع (DB-backed)
 // ══════════════════════════════════════════════════════════
 
+function parsePaymentMethodDetails(raw: unknown): { provider: string; countries: string[]; fee: string; usageTarget: "deposit" | "withdrawal" | "both" } {
+  const fallback = { provider: "", countries: ["*"], fee: "0", usageTarget: "both" as const };
+  if (!raw) return fallback;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const obj = (parsed && typeof parsed === "object") ? parsed as Record<string, unknown> : {};
+    const countries = Array.isArray(obj.countries)
+      ? obj.countries.map((c) => String(c || "").toUpperCase()).filter(Boolean)
+      : ["*"];
+    const usage = String(obj.usageTarget || obj.usage || "both");
+    const usageTarget = usage === "deposit" || usage === "withdrawal" ? usage : "both";
+    return {
+      provider: String(obj.provider || ""),
+      countries: countries.length ? countries : ["*"],
+      fee: String(obj.fee || "0"),
+      usageTarget,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 router.get("/payment-methods", requireAdmin, async (_req, res) => {
   try {
     const methods = await storage.getPaymentMethods();
-    return res.json({ success: true, data: methods });
+    const normalized = (methods || []).map((m: any) => {
+      const details = parsePaymentMethodDetails(m.accountDetails);
+      return {
+        ...m,
+        provider: details.provider,
+        countries: details.countries,
+        fee: details.fee,
+        usageTarget: details.usageTarget,
+      };
+    });
+    return res.json({ success: true, data: normalized });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في تحميل طرق الدفع" });
   }
@@ -1210,28 +1242,30 @@ router.post("/payment-methods", requireAdmin, async (req, res) => {
       name: z.string().min(1).max(100),
       nameAr: z.string().min(1).max(100),
       icon: z.string().max(10).default("💳"),
-      type: z.enum(["deposit", "withdrawal", "both"]),
+      type: z.string().min(1).max(60).default("manual"),
+      usageTarget: z.enum(["deposit", "withdrawal", "both"]).default("both"),
       provider: z.string().max(100).optional(),
       countries: z.array(z.string()).optional(),
       minAmount: z.number().int().min(1).default(1),
       maxAmount: z.number().int().min(1).default(50000),
       fee: z.string().max(20).default("0"),
       instructions: z.string().max(2000).optional(),
+      isActive: z.boolean().optional(),
     });
     const parsed = paymentMethodSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || "بيانات غير صالحة" });
-    const { name, nameAr, icon, type, provider, countries, minAmount, maxAmount, fee, instructions } = parsed.data;
+    const { name, nameAr, icon, type, usageTarget, provider, countries, minAmount, maxAmount, fee, instructions, isActive } = parsed.data;
 
     const pm = await storage.createPaymentMethod({
       name,
       nameAr,
       icon: icon || "💳",
       type,
-      accountDetails: JSON.stringify({ provider: provider || "", countries: countries || ["*"], fee: fee || "0" }),
+      accountDetails: JSON.stringify({ provider: provider || "", countries: (countries || ["*"]).map((c) => String(c).toUpperCase()), fee: fee || "0", usageTarget }),
       minAmount: String(minAmount || 1),
       maxAmount: String(maxAmount || 50000),
       instructions: instructions || "",
-      isActive: true,
+      isActive: isActive ?? true,
     });
 
     await storage.addAdminLog(req.session.adminId!, "create_payment_method", "payment_method", pm?.id || "", `Created: ${name}`);
@@ -1247,14 +1281,37 @@ router.patch("/payment-methods/:id", requireAdmin, async (req, res) => {
     const pm = await storage.getPaymentMethod(paramStr(req.params.id));
     if (!pm) return res.status(404).json({ success: false, message: "طريقة الدفع غير موجودة" });
 
-    const allowed = ["name", "nameAr", "type", "isActive", "countries", "minAmount", "maxAmount", "fee", "instructions"];
+    const allowed = ["name", "nameAr", "icon", "type", "isActive", "minAmount", "maxAmount", "instructions"];
     const updateData: any = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updateData[key] = req.body[key];
     }
 
+    const existingDetails = parsePaymentMethodDetails((pm as any).accountDetails);
+    const nextDetails = {
+      provider: req.body.provider !== undefined ? String(req.body.provider || "") : existingDetails.provider,
+      countries: req.body.countries !== undefined
+        ? (Array.isArray(req.body.countries) ? req.body.countries : ["*"]).map((c: unknown) => String(c || "").toUpperCase()).filter(Boolean)
+        : existingDetails.countries,
+      fee: req.body.fee !== undefined ? String(req.body.fee || "0") : existingDetails.fee,
+      usageTarget: req.body.usageTarget === "deposit" || req.body.usageTarget === "withdrawal" || req.body.usageTarget === "both"
+        ? req.body.usageTarget
+        : existingDetails.usageTarget,
+    };
+    updateData.accountDetails = JSON.stringify({
+      provider: nextDetails.provider,
+      countries: nextDetails.countries.length ? nextDetails.countries : ["*"],
+      fee: nextDetails.fee,
+      usageTarget: nextDetails.usageTarget,
+    });
+
     const updated = await storage.updatePaymentMethod(paramStr(req.params.id), updateData);
-    return res.json({ success: true, data: updated });
+    if (!updated) return res.status(404).json({ success: false, message: "طريقة الدفع غير موجودة" });
+    const details = parsePaymentMethodDetails((updated as any).accountDetails);
+    return res.json({
+      success: true,
+      data: { ...updated, provider: details.provider, countries: details.countries, fee: details.fee, usageTarget: details.usageTarget },
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
