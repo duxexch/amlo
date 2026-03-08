@@ -1251,7 +1251,7 @@ setInterval(async () => {
       })
       .where(and(
         eq(schema.worldSessions.status, "searching"),
-        sql`${schema.worldSessions.startedAt} < NOW() - INTERVAL '${STALE_SEARCH_MAX_MINUTES} minutes'`,
+        sql`${schema.worldSessions.startedAt} < NOW() - (${STALE_SEARCH_MAX_MINUTES} * INTERVAL '1 minute')`,
       ));
   } catch (err) {
     worldLog.warn({ err }, "World stale-session cleanup failed");
