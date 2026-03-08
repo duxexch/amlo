@@ -23,6 +23,7 @@ import { useLocation } from "wouter";
 import { useConversations } from "./chat/chatHooks";
 import { ChatPopupModal } from "./chat/ChatPopupModal";
 import type { Conversation, NewMessagePayload } from "./chat/chatTypes";
+import { resolveMessageSendState } from "./chat/chatTypes";
 import { socketManager } from "@/lib/socketManager";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
@@ -156,6 +157,7 @@ function OnlineStrip({ friends, onChat, onSearch }: { friends: any[]; onChat: (i
 function ConversationItem({ conv, onClick, isTyping }: { conv: any; onClick: () => void; isTyping?: boolean }) {
   const timeStr = formatTime(new Date(conv.lastMessageAt || conv.lastMessage?.createdAt || Date.now()));
   const isMe = conv.lastMessage?.senderId !== conv.otherUser?.id;
+  const sendState = conv.lastMessage ? resolveMessageSendState(conv.lastMessage) : null;
 
   return (
     <motion.button
@@ -179,9 +181,9 @@ function ConversationItem({ conv, onClick, isTyping }: { conv: any; onClick: () 
             ) : (
               <>
                 {isMe && (
-                  conv.lastMessage?._pending
+                  sendState === "queued" || sendState === "sending" || sendState === "retrying"
                     ? <Clock className="w-3 h-3 text-white/30 shrink-0" />
-                    : conv.lastMessage?.isRead
+                    : sendState === "read"
                       ? <CheckCheck className="w-3 h-3 text-primary/60 shrink-0" />
                       : <Check className="w-3 h-3 text-white/40 shrink-0" />
                 )}

@@ -50,5 +50,31 @@ export interface WalletPaymentMethodOption {
   maxAmount?: string | number;
 }
 
+export type ProviderUnavailableReasonCode =
+  | "gateway_disabled"
+  | "country_restricted"
+  | "credentials_missing"
+  | "no_deposit_method"
+  | "amount_out_of_range";
+
+export interface WalletDepositProvider {
+  key: string;
+  displayName: string;
+  mode: string;
+  priority: number;
+  countries?: string[];
+  hasCredentials?: boolean;
+  requiredCredentials?: string[];
+  isReady?: boolean;
+  available?: boolean;
+}
+
+export interface WalletUnavailableProvider extends WalletDepositProvider {
+  reasonCode?: ProviderUnavailableReasonCode;
+  reasonText?: string;
+  minAmount?: number;
+  maxAmount?: number;
+}
+
 // Re-export schema types
 export type { WalletTransaction, WithdrawalRequest };

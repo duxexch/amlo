@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { chatApi, callsApi, chatBlocksApi, messageReportsApi, translateApi, uploadMedia } from "@/lib/socialApi";
+import { outboxGet, outboxListByConversation, outboxMarkFailed, outboxMarkPending, outboxRemove, outboxUpsert } from "@/lib/chatOutbox";
 import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { playNotificationCue } from "@/lib/notificationCenter";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import type {
   ViewMode, NewMessagePayload, TypingPayload, MessagesReadPayload,
   ChatBlockedPayload, ReportCategory,
 } from "./chatTypes";
+import { withSendState } from "./chatTypes";
 
 // ── Typing throttle: per-conversation (fixes shared global state issue) ──
 const TYPING_THROTTLE_MS = 2500;
@@ -85,6 +87,12 @@ function revokeBlobUrlIfNeeded(url?: string | null) {
 
 function createClientMessageId(): string {
   return `cm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function inferFilename(type: "image" | "video" | "voice"): string {
+  if (type === "image") return `image-${Date.now()}.jpg`;
+  if (type === "video") return `video-${Date.now()}.mp4`;
+  return `voice-${Date.now()}.webm`;
 }
 
 /** Hook: Manage conversations list + settings */
@@ -190,6 +198,8 @@ export function useActiveChat(
   const [reactionVersion, setReactionVersion] = useState(0);
   const messagesRef = useRef<ChatMessage[]>([]);
   const retryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const flushingOutboxRef = useRef(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -201,6 +211,10 @@ export function useActiveChat(
       for (const m of messagesRef.current) revokeBlobUrlIfNeeded(m.mediaUrl);
       retryTimersRef.current.forEach((timer) => clearTimeout(timer));
       retryTimersRef.current.clear();
+      uploadControllersRef.current.forEach((controller) => {
+        try { controller.abort(); } catch { }
+      });
+      uploadControllersRef.current.clear();
     };
   }, []);
 
@@ -320,7 +334,7 @@ export function useActiveChat(
 
     const handleMessagesRead = (data: MessagesReadPayload) => {
       if (data.conversationId === activeConvRef.current?.id) {
-        setMessages(prev => prev.map(m => (m.senderId === "me" ? { ...m, isRead: true } : m)));
+        setMessages(prev => prev.map(m => (m.senderId === "me" ? withSendState({ ...m, isRead: true }, "read") : m)));
       }
     };
 
@@ -356,7 +370,7 @@ export function useActiveChat(
 
     const handleMessageDelivered = (data: { messageId: string; conversationId: string }) => {
       if (activeConvRef.current?.id === data.conversationId) {
-        setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, _delivered: true } : m));
+        setMessages(prev => prev.map(m => m.id === data.messageId ? withSendState({ ...m, _delivered: true }, "delivered") : m));
       }
     };
 
@@ -425,7 +439,35 @@ export function useActiveChat(
       const msgArr = (Array.isArray((msgsRes as any)?.messages)
         ? (msgsRes as any).messages
         : (Array.isArray(msgsRes) ? msgsRes : [])) as ChatMessage[];
-      setMessages(msgArr);
+      const outboxItems = await outboxListByConversation(conv.id).catch(() => [] as any[]);
+      const pendingMessages: ChatMessage[] = await Promise.all((outboxItems || []).map(async (it: any) => {
+        let mediaUrl: string | null = null;
+        if ((it.type === "image" || it.type === "video" || it.type === "voice") && it.blob) {
+          mediaUrl = URL.createObjectURL(it.blob);
+        }
+        return {
+          id: it.id,
+          conversationId: it.conversationId,
+          senderId: "me",
+          clientMessageId: it.clientMessageId || undefined,
+          content: it.content || (it.type === "image" ? "📷 صورة" : it.type === "video" ? "🎬 فيديو" : it.type === "voice" ? "🎤 رسالة صوتية" : ""),
+          type: it.type,
+          mediaUrl,
+          createdAt: it.createdAt,
+          isRead: false,
+          isDeleted: false,
+          coinsCost: 0,
+          _pending: true,
+          _failed: it.status === "failed",
+          _retryCount: Number(it.attempts || 0),
+          _sendState: it.status === "failed" ? "failed" : "queued",
+          _uploadProgress: it.type === "text" ? undefined : 0,
+        };
+      }));
+
+      const existingIds = new Set(msgArr.map((m) => m.id));
+      const merged = [...msgArr, ...pendingMessages.filter((m) => !existingIds.has(m.id))];
+      setMessages(merged);
       setMessagesCursor((msgsRes as any)?.nextCursor || null);
       setHasMoreMessages(Boolean((msgsRes as any)?.hasMore ?? (msgArr.length >= 50)));
       setBlockStatus(blockSt as BlockStatus);
@@ -483,12 +525,85 @@ export function useActiveChat(
     lastTypingEmitMap.clear();
     retryTimersRef.current.forEach((timer) => clearTimeout(timer));
     retryTimersRef.current.clear();
+    uploadControllersRef.current.forEach((controller) => {
+      try { controller.abort(); } catch { }
+    });
+    uploadControllersRef.current.clear();
   };
 
   const isTransientSendError = (err: any) => {
     const status = Number(err?.status || 0);
     return !status || status === 408 || status >= 500;
   };
+
+  const flushOutbox = useCallback(async (conversationId?: string) => {
+    if (!conversationId || flushingOutboxRef.current) return;
+    if (socketManager.getConnectionInfo().quality === "offline") return;
+
+    flushingOutboxRef.current = true;
+    try {
+      const pending = await outboxListByConversation(conversationId);
+      if (!pending.length) return;
+
+      for (const item of pending) {
+        try {
+          await outboxMarkPending(item.id);
+          if (item.type === "text") {
+            if (!item.content?.trim()) {
+              await outboxMarkFailed(item.id, "Missing content");
+              continue;
+            }
+
+            const sentMsg = await chatApi.sendMessage(conversationId, {
+              content: item.content,
+              type: "text",
+              clientMessageId: item.clientMessageId,
+              ...(item.replyToId ? { replyToId: item.replyToId } : {}),
+            }) as any;
+
+            setMessages(prev => prev.map(m => m.id === item.id ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m));
+            await outboxRemove(item.id);
+          } else {
+            if (!item.blob) {
+              await outboxMarkFailed(item.id, "Missing media blob");
+              continue;
+            }
+            const mediaUrl = await uploadMedia(item.blob, item.filename || inferFilename(item.type), (progress) => {
+              setMessages(prev => prev.map(m => m.id === item.id
+                ? { ...withSendState(m, "sending"), _uploadProgress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))) }
+                : m
+              ));
+            });
+            const sentMsg = await chatApi.sendMessage(conversationId, {
+              content: item.content || (item.type === "image" ? "📷 صورة" : item.type === "video" ? "🎬 فيديو" : "🎤 رسالة صوتية"),
+              type: item.type,
+              mediaUrl,
+              clientMessageId: item.clientMessageId,
+            }) as any;
+
+            setMessages(prev => prev.map(m => m.id === item.id ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m));
+            await outboxRemove(item.id);
+          }
+        } catch (err: any) {
+          if (!isTransientSendError(err)) {
+            await outboxMarkFailed(item.id, err?.message || "Send failed");
+            setMessages(prev => prev.map(m => m.id === item.id ? withSendState(m, "failed") : m));
+          }
+        }
+      }
+    } finally {
+      flushingOutboxRef.current = false;
+    }
+  }, [setConversations]);
+
+  useEffect(() => {
+    if (!activeConv?.id) return;
+    void flushOutbox(activeConv.id);
+    const timer = setInterval(() => {
+      void flushOutbox(activeConv.id);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [activeConv?.id, flushOutbox]);
 
   const scheduleAutoRetry = useCallback((params: {
     tempId: string;
@@ -502,7 +617,7 @@ export function useActiveChat(
     const { tempId, clientMessageId, conversationId, content, replyToId, attempt, t } = params;
     const maxAttempts = 5;
     if (attempt > maxAttempts) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+      setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
       toast.error(t("chat.sendFailed", "فشل إرسال الرسالة"));
       return;
     }
@@ -513,7 +628,7 @@ export function useActiveChat(
     const jitter = 0.85 + Math.random() * 0.5;
     const delayMs = Math.min(30000, Math.round((offlineBase * (2 ** (attempt - 1)) * weakFactor) * jitter));
     setMessages(prev => prev.map(m => m.id === tempId
-      ? { ...m, _pending: true, _failed: false, _retryCount: attempt, _nextRetryAt: new Date(Date.now() + delayMs).toISOString() }
+      ? withSendState({ ...m, _retryCount: attempt, _nextRetryAt: new Date(Date.now() + delayMs).toISOString() }, "retrying")
       : m
     ));
 
@@ -535,7 +650,7 @@ export function useActiveChat(
           ...(replyToId ? { replyToId } : {}),
         }) as any;
 
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, senderId: "me", _pending: false } : m));
+        setMessages(prev => prev.map(m => m.id === tempId ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m));
         setConversations(prev => prev.map(c => c.id === conversationId
           ? { ...c, lastMessage: { ...sentMsg, content }, lastMessageAt: sentMsg.createdAt }
           : c
@@ -545,7 +660,7 @@ export function useActiveChat(
         if (isTransientSendError(err)) {
           scheduleAutoRetry({ tempId, clientMessageId, conversationId, content, replyToId, attempt: attempt + 1, t });
         } else {
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+          setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
           retryTimersRef.current.delete(tempId);
           toast.error(err?.message || t("chat.sendFailed", "فشل إرسال الرسالة"));
         }
@@ -579,12 +694,25 @@ export function useActiveChat(
       coinsCost: 0,
       isEncrypted: true,
       _pending: true,
+      _sendState: "sending",
       replyToId,
       replyToContent,
       replyToSenderName,
     };
 
     setMessages(prev => [...prev, optimisticMsg]);
+    await outboxUpsert({
+      id: tempId,
+      conversationId: activeConv.id,
+      type: "text",
+      content,
+      clientMessageId,
+      replyToId,
+      createdAt: optimisticMsg.createdAt,
+      attempts: 0,
+      status: "pending",
+    }).catch(() => { });
+
     setNewMessage("");
     setReplyTo(null);
     setTimeout(() => scrollToBottom(), 50);
@@ -602,8 +730,9 @@ export function useActiveChat(
       }) as any;
 
       setMessages(prev =>
-        prev.map(m => m.id === tempId ? { ...sentMsg, senderId: "me", _pending: false } : m)
+        prev.map(m => m.id === tempId ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m)
       );
+      await outboxRemove(tempId).catch(() => { });
 
       setConversations(prev =>
         prev.map(c => c.id === activeConv.id
@@ -614,13 +743,16 @@ export function useActiveChat(
     } catch (err: any) {
       // Mark as failed instead of removing (allows retry)
       if (err.status === 402) {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+        setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(tempId, err?.message || "Insufficient balance").catch(() => { });
         toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
       } else if (err.status === 429) {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+        setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(tempId, err?.message || "Rate limited").catch(() => { });
         toast.error(err.message || t("chat.rateLimited", "أنت ترسل بسرعة كبيرة، حاول بعد قليل"));
       } else if (err.status === 403) {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+        setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(tempId, err?.message || "Blocked").catch(() => { });
         toast.error(err.message || t("chat.blocked", "تم الحظر"));
       } else {
         if (isTransientSendError(err)) {
@@ -634,7 +766,8 @@ export function useActiveChat(
             t,
           });
         } else {
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+          setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+          await outboxMarkFailed(tempId, err?.message || "Send failed").catch(() => { });
           toast.error(err?.message || t("chat.sendFailed", "فشل إرسال الرسالة"));
         }
       }
@@ -663,26 +796,50 @@ export function useActiveChat(
       isDeleted: false,
       coinsCost: 0,
       _pending: true,
+      _sendState: "sending",
+      _uploadProgress: 0,
     };
 
     setMessages(prev => [...prev, optimisticMsg]);
+    await outboxUpsert({
+      id: tempId,
+      conversationId: activeConv.id,
+      type,
+      content: optimisticMsg.content || undefined,
+      clientMessageId: createClientMessageId(),
+      blob: file,
+      filename: file instanceof File ? file.name : inferFilename(type),
+      createdAt: optimisticMsg.createdAt,
+      attempts: 0,
+      status: "pending",
+    }).catch(() => { });
+
     setTimeout(() => scrollToBottom(), 50);
 
     try {
       setSendingMsg(true);
+      const uploadController = new AbortController();
+      uploadControllersRef.current.set(tempId, uploadController);
       // Upload file first
-      const mediaUrl = await uploadMedia(file, file instanceof File ? file.name : undefined);
+      const mediaUrl = await uploadMedia(file, file instanceof File ? file.name : undefined, (progress) => {
+        setMessages(prev => prev.map(m => m.id === tempId
+          ? { ...withSendState(m, "sending"), _uploadProgress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))) }
+          : m
+        ));
+      }, uploadController.signal);
       // Then send message with the server URL
       const sentMsg = await chatApi.sendMessage(activeConv.id, {
         content: type === "image" ? "📷 صورة" : (type === "video" ? "🎬 فيديو" : "🎤 رسالة صوتية"),
         type,
         mediaUrl,
+        clientMessageId: (await outboxGet(tempId).catch(() => null))?.clientMessageId,
       }) as any;
 
       setMessages(prev =>
-        prev.map(m => m.id === tempId ? { ...sentMsg, senderId: "me", _pending: false } : m)
+        prev.map(m => m.id === tempId ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m)
       );
       revokeBlobUrlIfNeeded(localUrl);
+      await outboxRemove(tempId).catch(() => { });
 
       setConversations(prev =>
         prev.map(c => c.id === activeConv.id
@@ -692,16 +849,39 @@ export function useActiveChat(
       );
     } catch (err: any) {
       // Mark as failed instead of removing (allows retry) — keep blob URL alive for retry
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
+      setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+      const isAbort = err instanceof DOMException ? err.name === "AbortError" : String(err?.name || "").toLowerCase() === "aborterror";
+      await outboxMarkFailed(tempId, isAbort ? "Canceled by user" : (err?.message || "Upload failed")).catch(() => { });
       if (err.status === 402) {
         toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
+      } else if (isAbort) {
+        toast.error(t("chat.uploadCanceled", "تم إلغاء الرفع"));
       } else {
         toast.error(err.message || t("chat.uploadFailed", "فشل في الرفع"));
       }
     } finally {
+      uploadControllersRef.current.delete(tempId);
       setSendingMsg(false);
     }
   }, [activeConv, sendingMsg, blockStatus, setConversations]);
+
+  const cancelPendingMessage = useCallback(async (msg: ChatMessage, t: any) => {
+    const timer = retryTimersRef.current.get(msg.id);
+    if (timer) {
+      clearTimeout(timer);
+      retryTimersRef.current.delete(msg.id);
+    }
+
+    const controller = uploadControllersRef.current.get(msg.id);
+    if (controller) {
+      try { controller.abort(); } catch { }
+      uploadControllersRef.current.delete(msg.id);
+    }
+
+    setMessages(prev => prev.map(m => m.id === msg.id ? withSendState({ ...m, _uploadProgress: m._uploadProgress }, "failed") : m));
+    await outboxMarkFailed(msg.id, "Canceled by user").catch(() => { });
+    toast.error(t("chat.uploadCanceled", "تم إلغاء الإرسال"));
+  }, []);
 
   /** Retry a failed message — directly calls API instead of relying on setState */
   const retryMessage = useCallback(async (failedMsg: ChatMessage, t: any) => {
@@ -714,7 +894,8 @@ export function useActiveChat(
     }
 
     // Mark as pending (retrying)
-    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _failed: false, _pending: true } : m));
+    setMessages(prev => prev.map(m => m.id === failedMsg.id ? withSendState(m, "retrying") : m));
+    await outboxMarkPending(failedMsg.id).catch(() => { });
 
     if (failedMsg.type === "text" && failedMsg.content) {
       try {
@@ -727,8 +908,9 @@ export function useActiveChat(
           ...(failedMsg.replyToId ? { replyToId: failedMsg.replyToId } : {}),
         }) as any;
         setMessages(prev =>
-          prev.map(m => m.id === failedMsg.id ? { ...sentMsg, senderId: "me", _pending: false } : m)
+          prev.map(m => m.id === failedMsg.id ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m)
         );
+        await outboxRemove(failedMsg.id).catch(() => { });
         setConversations(prev =>
           prev.map(c => c.id === activeConv.id
             ? { ...c, lastMessage: { ...sentMsg, content: failedMsg.content }, lastMessageAt: sentMsg.createdAt }
@@ -736,7 +918,8 @@ export function useActiveChat(
           )
         );
       } catch (err: any) {
-        setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _pending: false, _failed: true } : m));
+        setMessages(prev => prev.map(m => m.id === failedMsg.id ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(failedMsg.id, err?.message || "Retry failed").catch(() => { });
         if (err.status === 402) {
           toast.error(t("chat.notEnoughCoins", "رصيد غير كافي"));
         } else if (err.status === 429) {
@@ -751,14 +934,15 @@ export function useActiveChat(
       }
     } else if ((failedMsg.type === "image" || failedMsg.type === "video" || failedMsg.type === "voice") && failedMsg.mediaUrl) {
       try {
-        const resp = await fetch(failedMsg.mediaUrl);
-        const blob = await resp.blob();
+        const outboxItem = await outboxGet(failedMsg.id).catch(() => null);
+        const blob = outboxItem?.blob ? outboxItem.blob : await (await fetch(failedMsg.mediaUrl)).blob();
         // Remove failed and re-send via sendMedia
         setMessages(prev => prev.filter(m => m.id !== failedMsg.id));
         revokeBlobUrlIfNeeded(failedMsg.mediaUrl);
         sendMedia(blob, failedMsg.type, t);
       } catch {
-        setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _pending: false, _failed: true } : m));
+        setMessages(prev => prev.map(m => m.id === failedMsg.id ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(failedMsg.id, "Retry media failed").catch(() => { });
         toast.error(t("chat.retryFailed", "فشل في إعادة المحاولة"));
       }
     }
@@ -841,7 +1025,7 @@ export function useActiveChat(
     showBlockMenu, setShowBlockMenu,
     replyTo, setReplyTo,
     messagesEndRef, messagesTopRef, messagesContainerRef, inputRef,
-    openConversation, goBack, sendMessage, sendMedia, retryMessage, handleInputChange, handleToggleBlock,
+    openConversation, goBack, sendMessage, sendMedia, retryMessage, cancelPendingMessage, handleInputChange, handleToggleBlock,
     deleteMyMessage,
     typingConvIds,
     showNewMsgIndicator, scrollToBottom,

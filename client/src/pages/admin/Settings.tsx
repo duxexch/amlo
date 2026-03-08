@@ -6,7 +6,7 @@ import {
   Smartphone, Mail, MessageSquare, ImageIcon, Link2, ChevronDown,
   ChevronUp, ExternalLink, Copy, Plus, Trash2, AlertCircle, Radio,
   GripVertical, X, UserCheck, Video, Bell, MousePointerClick, Coins,
-  Phone, Navigation, MapPin, Download, Link as LinkIcon, Info
+  Phone, Navigation, MapPin, Download, Link as LinkIcon, Info, Upload,
 } from "lucide-react";
 import { adminSettings, adminFeatured, adminAnnouncementPopup } from "@/lib/adminApi";
 import { worldAdminApi } from "@/lib/worldApi";
@@ -16,12 +16,13 @@ import { useTranslation } from "react-i18next";
 // TYPES
 // ══════════════════════════════════════════════════════════
 
-type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload";
+type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds";
 
 interface TabConfig {
   id: TabId;
   icon: React.ElementType;
   labelKey: string;
+  fallbackLabel: string;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -101,10 +102,9 @@ function SaveButton({ saving, saved, onClick, label }: { saving: boolean; saved:
     <button
       onClick={onClick}
       disabled={saving}
-      className={`flex items-center gap-2 px-5 h-10 text-sm font-bold rounded-xl transition-all ${
-        saved ? "bg-green-500/20 text-green-400 border border-green-500/20" :
-        "bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20"
-      }`}
+      className={`flex items-center gap-2 px-5 h-10 text-sm font-bold rounded-xl transition-all ${saved ? "bg-green-500/20 text-green-400 border border-green-500/20" :
+          "bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20"
+        }`}
     >
       {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
       {saved ? "✓" : label}
@@ -971,7 +971,7 @@ function AnnouncementPopupTab() {
     setLoading(true);
     adminAnnouncementPopup.get()
       .then(res => { if (res.success && res.data) setData(res.data); })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -1034,7 +1034,7 @@ function AnnouncementPopupTab() {
             <span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-all ${data.enabled ? "ltr:left-[22px] rtl:right-[22px]" : "ltr:left-0.5 rtl:right-0.5"}`} />
           </button>
         </div>
-        
+
         {/* Show Once */}
         <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
           <div>
@@ -1131,21 +1131,19 @@ function AnnouncementPopupTab() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => updateButton(i, "style", "primary")}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                      btn.style === "primary"
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${btn.style === "primary"
                         ? "bg-primary text-white border border-primary/50"
                         : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
-                    }`}
+                      }`}
                   >
                     {t("admin.settings.popup.stylePrimary")}
                   </button>
                   <button
                     onClick={() => updateButton(i, "style", "secondary")}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                      btn.style === "secondary"
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${btn.style === "secondary"
                         ? "bg-white/20 text-white border border-white/30"
                         : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
-                    }`}
+                      }`}
                   >
                     {t("admin.settings.popup.styleSecondary")}
                   </button>
@@ -1182,11 +1180,10 @@ function AnnouncementPopupTab() {
               {data.buttons.map((btn, i) => (
                 <div
                   key={i}
-                  className={`w-full py-2.5 rounded-xl text-xs font-bold text-center ${
-                    btn.style === "primary"
+                  className={`w-full py-2.5 rounded-xl text-xs font-bold text-center ${btn.style === "primary"
                       ? "bg-primary text-white"
                       : "bg-white/5 text-white/60 border border-white/10"
-                  }`}
+                    }`}
                 >
                   {btn.label || `Button ${i + 1}`}
                 </div>
@@ -1229,7 +1226,7 @@ function PricingTab() {
         if (data.video_call_rate !== undefined) setVideoRate(String(data.video_call_rate));
         if (data.message_cost !== undefined) setMessageCost(String(data.message_cost));
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const handleSave = async () => {
@@ -1369,7 +1366,7 @@ function MilesPricingTab() {
           if (data.data.packages?.length) setPackages(data.data.packages);
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -1532,7 +1529,7 @@ function WorldPricingTab() {
           setPrices(map);
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -1795,24 +1792,213 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
   );
 }
 
+type NotificationSoundSlotKey = "message" | "call" | "friend-request" | "admin" | "system";
+
+function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+  const [form, setForm] = useState<Record<NotificationSoundSlotKey, any>>({
+    message: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    call: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    "friend-request": { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    admin: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    system: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+
+  const slots: Array<{ key: NotificationSoundSlotKey; label: string; hint: string }> = [
+    { key: "call", label: "نغمة الرنين للمكالمات", hint: "تُستخدم عند المكالمة الواردة" },
+    { key: "message", label: "نغمة الرسائل", hint: "تُستخدم للرسائل الجديدة" },
+    { key: "friend-request", label: "نغمة طلب الصداقة", hint: "تُستخدم عند وصول طلب صداقة" },
+    { key: "admin", label: "نغمة تنبيهات الإدارة", hint: "تُستخدم لتنبيهات النظام/الإدارة" },
+    { key: "system", label: "نغمة النظام", hint: "تُستخدم للتنبيهات العامة" },
+  ];
+
+  useEffect(() => {
+    if (!data || typeof data !== "object") return;
+    setForm((prev) => {
+      const next = { ...prev };
+      for (const slot of ["message", "call", "friend-request", "admin", "system"] as const) {
+        const incoming = data[slot];
+        if (incoming && typeof incoming === "object") {
+          next[slot] = {
+            enabled: Boolean(incoming.enabled),
+            kind: incoming.kind === "file" ? "file" : "tone",
+            mediaType: incoming.mediaType === "video" || incoming.mediaType === "voice" ? incoming.mediaType : "audio",
+            url: typeof incoming.url === "string" ? incoming.url : "",
+            volume: typeof incoming.volume === "number" ? Math.max(0, Math.min(1, incoming.volume)) : 1,
+          };
+        }
+      }
+      return next;
+    });
+  }, [data]);
+
+  const updateSlot = (slot: NotificationSoundSlotKey, patch: Record<string, any>) => {
+    setForm((prev) => ({
+      ...prev,
+      [slot]: { ...prev[slot], ...patch },
+    }));
+  };
+
+  const uploadSlotFile = async (slot: NotificationSoundSlotKey, file?: File | null) => {
+    if (!file) return;
+    setUploading((prev) => ({ ...prev, [slot]: true }));
+    try {
+      const res = await adminSettings.uploadNotificationTone(file);
+      if (res.success && res.data) {
+        updateSlot(slot, {
+          kind: "file",
+          url: res.data.url,
+          mediaType: res.data.mediaType,
+          enabled: true,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUploading((prev) => ({ ...prev, [slot]: false }));
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(form);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <SectionCard title="إدارة نغمات الإشعارات والرنين" icon={Phone}>
+        <p className="text-xs text-white/40">
+          يمكنك هنا إضافة أو تغيير نغمة كل نوع إشعار. يدعم ملفات صوت وفيديو ورسائل صوتية.
+        </p>
+      </SectionCard>
+
+      {slots.map((slot) => {
+        const item = form[slot.key];
+        const isFile = item.kind === "file";
+        return (
+          <SectionCard key={slot.key} title={slot.label} icon={Bell} collapsible defaultOpen={slot.key === "call"}>
+            <ToggleField
+              label="تفعيل نغمة مخصصة"
+              description={slot.hint}
+              checked={Boolean(item.enabled)}
+              onChange={(v) => updateSlot(slot.key, { enabled: v })}
+            />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-white/50">نوع المصدر</label>
+                <select
+                  value={item.kind}
+                  onChange={(e) => updateSlot(slot.key, { kind: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white focus:outline-none focus:border-primary/50"
+                >
+                  <option value="tone" className="bg-[#1a1a2e] text-white">نغمة داخلية</option>
+                  <option value="file" className="bg-[#1a1a2e] text-white">ملف مخصص</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-white/50">نوع الملف</label>
+                <select
+                  value={item.mediaType}
+                  onChange={(e) => updateSlot(slot.key, { mediaType: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white focus:outline-none focus:border-primary/50"
+                  disabled={!isFile}
+                >
+                  <option value="audio" className="bg-[#1a1a2e] text-white">صوت</option>
+                  <option value="video" className="bg-[#1a1a2e] text-white">فيديو</option>
+                  <option value="voice" className="bg-[#1a1a2e] text-white">رسالة صوتية</option>
+                </select>
+              </div>
+
+              <InputField
+                label="رابط الملف"
+                value={item.url || ""}
+                onChange={(v) => updateSlot(slot.key, { url: v, kind: "file" })}
+                placeholder="/uploads/media/your-tone.mp3"
+                disabled={!isFile}
+              />
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-white/50">الصوت (0 إلى 1)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={item.volume ?? 1}
+                  onChange={(e) => updateSlot(slot.key, { volume: Number(e.target.value) })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white focus:outline-none focus:border-primary/50"
+                  disabled={!isFile}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-2 px-4 h-10 rounded-xl bg-white/5 border border-white/10 text-sm font-bold text-white/80 cursor-pointer hover:bg-white/10 transition-colors">
+                {uploading[slot.key] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                رفع ملف
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="audio/*,video/mp4,video/webm,video/quicktime"
+                  onChange={(e) => {
+                    void uploadSlotFile(slot.key, e.target.files?.[0]);
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
+
+              {isFile && item.url && (
+                <>
+                  {item.mediaType === "video" ? (
+                    <video controls className="w-full md:w-[360px] rounded-xl border border-white/10 bg-black" src={item.url} />
+                  ) : (
+                    <audio controls className="w-full md:w-[360px]" src={item.url} />
+                  )}
+                </>
+              )}
+            </div>
+          </SectionCard>
+        );
+      })}
+
+      <div className="flex justify-end">
+        <SaveButton saving={saving} saved={saved} onClick={handleSave} label="حفظ نغمات الإشعارات" />
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════
 // MAIN SETTINGS PAGE
 // ══════════════════════════════════════════════════════════
 
 const TABS: TabConfig[] = [
-  { id: "seo", icon: Search, labelKey: "admin.settings.tabs.seo" },
-  { id: "aso", icon: Store, labelKey: "admin.settings.tabs.aso" },
-  { id: "socialLogin", icon: Users, labelKey: "admin.settings.tabs.socialLogin" },
-  { id: "otp", icon: Shield, labelKey: "admin.settings.tabs.otp" },
-  { id: "branding", icon: Palette, labelKey: "admin.settings.tabs.branding" },
-  { id: "seoTexts", icon: FileText, labelKey: "admin.settings.tabs.seoTexts" },
-  { id: "policies", icon: ScrollText, labelKey: "admin.settings.tabs.policies" },
-  { id: "featured", icon: Radio, labelKey: "admin.settings.tabs.featured" },
-  { id: "popup", icon: Bell, labelKey: "admin.settings.tabs.popup" },
-  { id: "pricing", icon: Coins, labelKey: "admin.settings.tabs.pricing" },
-  { id: "milesPricing", icon: Navigation, labelKey: "admin.settings.tabs.milesPricing" },
-  { id: "worldPricing", icon: Globe, labelKey: "admin.settings.tabs.worldPricing" },
-  { id: "appDownload", icon: Download, labelKey: "admin.settings.tabs.appDownload" },
+  { id: "seo", icon: Search, labelKey: "admin.settings.tabs.seo", fallbackLabel: "SEO" },
+  { id: "aso", icon: Store, labelKey: "admin.settings.tabs.aso", fallbackLabel: "ASO" },
+  { id: "socialLogin", icon: Users, labelKey: "admin.settings.tabs.socialLogin", fallbackLabel: "Social Login" },
+  { id: "otp", icon: Shield, labelKey: "admin.settings.tabs.otp", fallbackLabel: "OTP" },
+  { id: "branding", icon: Palette, labelKey: "admin.settings.tabs.branding", fallbackLabel: "Branding" },
+  { id: "seoTexts", icon: FileText, labelKey: "admin.settings.tabs.seoTexts", fallbackLabel: "SEO Texts" },
+  { id: "policies", icon: ScrollText, labelKey: "admin.settings.tabs.policies", fallbackLabel: "Policies" },
+  { id: "featured", icon: Radio, labelKey: "admin.settings.tabs.featured", fallbackLabel: "Featured" },
+  { id: "popup", icon: Bell, labelKey: "admin.settings.tabs.popup", fallbackLabel: "Popup" },
+  { id: "pricing", icon: Coins, labelKey: "admin.settings.tabs.pricing", fallbackLabel: "Pricing" },
+  { id: "milesPricing", icon: Navigation, labelKey: "admin.settings.tabs.milesPricing", fallbackLabel: "Miles Pricing" },
+  { id: "worldPricing", icon: Globe, labelKey: "admin.settings.tabs.worldPricing", fallbackLabel: "World Pricing" },
+  { id: "appDownload", icon: Download, labelKey: "admin.settings.tabs.appDownload", fallbackLabel: "App Download" },
+  { id: "notificationSounds", icon: Phone, labelKey: "admin.settings.tabs.notificationSounds", fallbackLabel: "النغمات" },
 ];
 
 export function SettingsPage() {
@@ -1840,6 +2026,7 @@ export function SettingsPage() {
   const handleSaveSeoTexts = async (d: any) => { const res = await adminSettings.updateSeoTexts(d); if (res.success) setData((prev: any) => ({ ...prev, seoTexts: res.data })); };
   const handleSavePolicies = async (docKey: string, d: any) => { const res = await adminSettings.updatePolicies(docKey, d); if (res.success) setData((prev: any) => ({ ...prev, policies: res.data })); };
   const handleSaveAppDownload = async (d: any) => { const res = await adminSettings.updateAppDownload(d); if (res.success) setData((prev: any) => ({ ...prev, appDownload: res.data })); };
+  const handleSaveNotificationSounds = async (d: any) => { const res = await adminSettings.updateNotificationSounds(d); if (res.success) setData((prev: any) => ({ ...prev, notificationSounds: res.data })); };
 
   return (
     <div className="space-y-6">
@@ -1865,14 +2052,13 @@ export function SettingsPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 h-10 text-sm font-bold rounded-xl whitespace-nowrap transition-all shrink-0 ${
-                isActive
+              className={`flex items-center gap-2 px-4 h-10 text-sm font-bold rounded-xl whitespace-nowrap transition-all shrink-0 ${isActive
                   ? "bg-primary/20 text-primary border border-primary/20"
                   : "bg-white/5 text-white/40 border border-white/5 hover:bg-white/10 hover:text-white/60"
-              }`}
+                }`}
             >
               <tab.icon className="w-4 h-4" />
-              {t(tab.labelKey)}
+              {t(tab.labelKey, tab.fallbackLabel)}
             </button>
           );
         })}
@@ -1907,6 +2093,7 @@ export function SettingsPage() {
             {activeTab === "milesPricing" && <MilesPricingTab />}
             {activeTab === "worldPricing" && <WorldPricingTab />}
             {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} />}
+            {activeTab === "notificationSounds" && <NotificationSoundsTab data={data?.notificationSounds} onSave={handleSaveNotificationSounds} />}
           </motion.div>
         </AnimatePresence>
       )}

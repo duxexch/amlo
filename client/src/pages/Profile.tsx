@@ -10,12 +10,14 @@ import {
 import avatarImg from "@/assets/images/avatar-3d.png";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
-import { authApi, profileApi } from "@/lib/authApi";
-import { gamificationApi } from "@/lib/socialApi";
+import { authApi, profileApi, uploadAvatar } from "@/lib/authApi";
+import { gamificationApi, profileStatsApi } from "@/lib/socialApi";
 import { PinSetup } from "@/pages/PinSetup";
 import { useLocation } from "wouter";
 import { LANGUAGES } from "@/i18n";
 import { COUNTRIES } from "@/lib/countries";
+import { toast } from "sonner";
+import { queryClient } from "@/lib/queryClient";
 
 // Default user shape (used before API data loads)
 const defaultUser = {
@@ -32,6 +34,7 @@ const defaultUser = {
   level: 1,
   xp: 0,
   xpNext: 1000,
+  xpProgress: 0,
   isVerified: false,
   isVip: false,
   vipLevel: "",
@@ -133,6 +136,11 @@ export function Profile() {
   const [twoFaLoading, setTwoFaLoading] = useState(false);
   const [twoFaError, setTwoFaError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState(defaultUser.notifications);
+  const [securityTimeline, setSecurityTimeline] = useState<Array<{ id: string; type: string; createdAt: string; ip: string; userAgent: string; details?: Record<string, any> }>>([]);
+  const [trustedDevices, setTrustedDevices] = useState<Array<{ id: string; label: string; userAgent: string; ip: string; addedAt: string; lastSeenAt: string }>>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState("");
+  const [deviceLockEnabled, setDeviceLockEnabled] = useState(false);
+  const [securityLoading, setSecurityLoading] = useState(false);
   const [chatTranslationPrefs, setChatTranslationPrefs] = useState({
     chatAutoTranslate: true,
     chatShowOriginalText: true,
@@ -148,6 +156,25 @@ export function Profile() {
   const [dailyMissions, setDailyMissions] = useState<any | null>(null);
   const [loadingMissions, setLoadingMissions] = useState(true);
   const [claimingMission, setClaimingMission] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [showAvatarEditor, setShowAvatarEditor] = useState(false);
+  const [avatarSourceUrl, setAvatarSourceUrl] = useState<string>("");
+  const [avatarZoom, setAvatarZoom] = useState(1);
+  const [avatarOffsetX, setAvatarOffsetX] = useState(0);
+  const [avatarOffsetY, setAvatarOffsetY] = useState(0);
+  const [avatarQualityScore, setAvatarQualityScore] = useState<number | null>(null);
+  const [avatarQualityError, setAvatarQualityError] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarDragRef = useRef({
+    dragging: false,
+    pointerId: -1,
+    startX: 0,
+    startY: 0,
+    baseOffsetX: 0,
+    baseOffsetY: 0,
+  });
 
   // PIN management state
   const [profiles, setProfiles] = useState<any[]>([]);
@@ -164,7 +191,24 @@ export function Profile() {
     try {
       const res = await authApi.me();
       if (res.success && res.data) {
+        let statsData: any = null;
+        let xpData: any = null;
+        try {
+          const [statsRes, xpRes] = await Promise.all([
+            profileStatsApi.me(),
+            gamificationApi.xpMe(),
+          ]);
+          statsData = statsRes;
+          xpData = xpRes;
+        } catch {
+          // Fallback to auth data only when stats/xp endpoint is temporarily unavailable.
+        }
+
         const u = res.data.user || res.data;
+        const level = Number(xpData?.level ?? u.level ?? 1) || 1;
+        const xp = Number(xpData?.xp ?? u.xp ?? 0) || 0;
+        const xpForNextLevel = Number(xpData?.xpForNextLevel ?? 0) || ((level || 1) * 1000);
+        const xpProgress = Number(xpData?.progress ?? 0) || 0;
         setUser({
           id: u.id || "",
           name: u.displayName || u.username || "",
@@ -176,14 +220,22 @@ export function Profile() {
           country: u.country || "",
           birthday: u.birthDate || "",
           avatar: u.avatar || avatarImg,
-          level: u.level || 1,
-          xp: u.xp || 0,
-          xpNext: (u.level || 1) * 1000,
+          level,
+          xp,
+          xpNext: xpForNextLevel,
+          xpProgress,
           isVerified: u.isVerified || false,
           isVip: false,
           vipLevel: "",
           coins: u.coins || 0,
-          stats: { followers: 0, following: 0, giftsReceived: 0, giftsSent: 0, streamHours: 0, friends: 0 },
+          stats: {
+            followers: Number(statsData?.followers || 0),
+            following: Number(statsData?.following || 0),
+            giftsReceived: Number(statsData?.giftsReceived || 0),
+            giftsSent: Number(statsData?.giftsSent || 0),
+            streamHours: Number(statsData?.streamHours || 0),
+            friends: Number(statsData?.friends || 0),
+          },
           referral: {
             code: u.referralCode || "",
             link: u.referralCode ? `${window.location.origin}/ref/${u.referralCode}` : "",
@@ -240,6 +292,29 @@ export function Profile() {
     } catch { }
   }, [i18n.language]);
 
+  const loadSecurityData = useCallback(async () => {
+    setSecurityLoading(true);
+    try {
+      const [timelineRes, devicesRes] = await Promise.all([
+        authApi.getSecurityTimeline(),
+        authApi.getTrustedDevices(),
+      ]);
+
+      if (timelineRes.success) {
+        setSecurityTimeline(timelineRes.data || []);
+      }
+      if (devicesRes.success) {
+        setTrustedDevices(devicesRes.data?.devices || []);
+        setCurrentDeviceId(devicesRes.data?.currentDeviceId || "");
+        setDeviceLockEnabled(!!devicesRes.data?.lockEnabled);
+      }
+    } catch {
+      // Keep existing values on transient failures.
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, []);
+
   const loadDailyMissions = useCallback(async () => {
     setLoadingMissions(true);
     try {
@@ -257,7 +332,8 @@ export function Profile() {
     loadNotifications();
     loadChatTranslationPrefs();
     loadDailyMissions();
-  }, [loadUser, loadNotifications, loadChatTranslationPrefs, loadDailyMissions]);
+    loadSecurityData();
+  }, [loadUser, loadNotifications, loadChatTranslationPrefs, loadDailyMissions, loadSecurityData]);
 
   useEffect(() => {
     return () => {
@@ -281,6 +357,246 @@ export function Profile() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (avatarSourceUrl) {
+        URL.revokeObjectURL(avatarSourceUrl);
+      }
+    };
+  }, [avatarSourceUrl]);
+
+  const openAvatarEditor = (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("profile.avatarImageOnly", "الرجاء اختيار صورة فقط"));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error(t("profile.avatarTooLarge", "حجم الصورة كبير جداً. الحد الأقصى 10MB"));
+      return;
+    }
+
+    if (avatarSourceUrl) URL.revokeObjectURL(avatarSourceUrl);
+    const objectUrl = URL.createObjectURL(file);
+    setAvatarSourceUrl(objectUrl);
+    setAvatarZoom(1);
+    setAvatarOffsetX(0);
+    setAvatarOffsetY(0);
+    setAvatarQualityScore(null);
+    setAvatarQualityError(null);
+    setShowAvatarPicker(false);
+    setShowAvatarEditor(true);
+    toast.warning(t("profile.avatarRealPhotoWarning", "الرجاء رفع صورة حقيقية وواضحة حتى لا يتعرض الحساب للحظر."));
+  };
+
+  const canvasToBlob = async (canvas: HTMLCanvasElement, quality: number): Promise<Blob> => {
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob) throw new Error("NO_BLOB");
+    return blob;
+  };
+
+  const estimateSharpness = (canvas: HTMLCanvasElement): number => {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return 0;
+    const { width, height } = canvas;
+    if (width < 3 || height < 3) return 0;
+
+    const image = ctx.getImageData(0, 0, width, height).data;
+    const gray = new Float32Array(width * height);
+    for (let i = 0, p = 0; i < image.length; i += 4, p++) {
+      gray[p] = image[i] * 0.299 + image[i + 1] * 0.587 + image[i + 2] * 0.114;
+    }
+
+    let sum = 0;
+    let sumSq = 0;
+    let count = 0;
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        const lap =
+          4 * gray[idx]
+          - gray[idx - 1]
+          - gray[idx + 1]
+          - gray[idx - width]
+          - gray[idx + width];
+        sum += lap;
+        sumSq += lap * lap;
+        count++;
+      }
+    }
+    if (count === 0) return 0;
+    const mean = sum / count;
+    return Math.max(0, (sumSq / count) - mean * mean);
+  };
+
+  const detectFacePresence = async (canvas: HTMLCanvasElement): Promise<{ supported: boolean; hasFace: boolean }> => {
+    const detectorCtor = (window as any)?.FaceDetector;
+    if (!detectorCtor) return { supported: false, hasFace: true };
+    try {
+      const detector = new detectorCtor({ maxDetectedFaces: 1, fastMode: true });
+      const faces = await detector.detect(canvas);
+      return { supported: true, hasFace: Array.isArray(faces) && faces.length > 0 };
+    } catch {
+      return { supported: false, hasFace: true };
+    }
+  };
+
+  const createAvatarBlob = async (): Promise<{ blob: Blob; sharpness: number; faceSupported: boolean; hasFace: boolean }> => {
+    if (!avatarSourceUrl) throw new Error("NO_IMAGE");
+
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = avatarSourceUrl;
+    });
+
+    const size = 512;
+    const previewSize = 240;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("NO_CTX");
+
+    const baseScale = Math.max(size / img.width, size / img.height);
+    const drawWidth = img.width * baseScale * avatarZoom;
+    const drawHeight = img.height * baseScale * avatarZoom;
+    const mappedOffsetX = avatarOffsetX * (size / previewSize);
+    const mappedOffsetY = avatarOffsetY * (size / previewSize);
+    const dx = (size - drawWidth) / 2 + mappedOffsetX;
+    const dy = (size - drawHeight) / 2 + mappedOffsetY;
+
+    ctx.fillStyle = "#101020";
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(img, dx, dy, drawWidth, drawHeight);
+
+    // Quality check on a smaller analysis canvas.
+    const analysisCanvas = document.createElement("canvas");
+    analysisCanvas.width = 220;
+    analysisCanvas.height = 220;
+    const actx = analysisCanvas.getContext("2d");
+    if (actx) {
+      actx.fillStyle = "#101020";
+      actx.fillRect(0, 0, 220, 220);
+      const aScale = Math.max(220 / img.width, 220 / img.height);
+      const aDrawW = img.width * aScale * avatarZoom;
+      const aDrawH = img.height * aScale * avatarZoom;
+      const aOffsetX = avatarOffsetX * (220 / previewSize);
+      const aOffsetY = avatarOffsetY * (220 / previewSize);
+      const adx = (220 - aDrawW) / 2 + aOffsetX;
+      const ady = (220 - aDrawH) / 2 + aOffsetY;
+      actx.drawImage(img, adx, ady, aDrawW, aDrawH);
+    }
+    const sharpness = estimateSharpness(analysisCanvas);
+    const face = await detectFacePresence(analysisCanvas);
+
+    // Smart compression: keep good quality while controlling upload size.
+    const targetBytes = 350 * 1024;
+    let quality = 0.9;
+    let blob = await canvasToBlob(canvas, quality);
+    while (blob.size > targetBytes && quality > 0.58) {
+      quality -= 0.08;
+      blob = await canvasToBlob(canvas, quality);
+    }
+
+    return { blob, sharpness, faceSupported: face.supported, hasFace: face.hasFace };
+  };
+
+  const securityEventLabel = (type: string) => {
+    const map: Record<string, string> = {
+      login_success: t("profile.securityLogin", "تسجيل دخول ناجح"),
+      logout: t("profile.securityLogout", "تسجيل خروج"),
+      pin_verified: t("profile.securityPinVerified", "تم التحقق من PIN"),
+      profile_updated: t("profile.securityProfileUpdated", "تحديث بيانات الحساب"),
+      password_changed: t("profile.securityPasswordChanged", "تغيير كلمة المرور"),
+      trusted_device_added: t("profile.securityDeviceAdded", "إضافة جهاز موثوق"),
+      trusted_device_removed: t("profile.securityDeviceRemoved", "إزالة جهاز موثوق"),
+      device_lock_updated: t("profile.securityDeviceLock", "تعديل قفل الأجهزة"),
+    };
+    return map[type] || type;
+  };
+
+  const clampAvatarOffset = (value: number) => Math.max(-120, Math.min(120, value));
+
+  const onAvatarDragStart = (event: any) => {
+    const drag = avatarDragRef.current;
+    drag.dragging = true;
+    drag.pointerId = event.pointerId;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    drag.baseOffsetX = avatarOffsetX;
+    drag.baseOffsetY = avatarOffsetY;
+    if (event.currentTarget?.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const onAvatarDragMove = (event: any) => {
+    const drag = avatarDragRef.current;
+    if (!drag.dragging || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    setAvatarOffsetX(clampAvatarOffset(drag.baseOffsetX + dx));
+    setAvatarOffsetY(clampAvatarOffset(drag.baseOffsetY + dy));
+  };
+
+  const onAvatarDragEnd = (event: any) => {
+    const drag = avatarDragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+    drag.dragging = false;
+    drag.pointerId = -1;
+  };
+
+  const handleConfirmAvatar = async () => {
+    setAvatarUploading(true);
+    try {
+      const { blob, sharpness, faceSupported, hasFace } = await createAvatarBlob();
+      setAvatarQualityScore(sharpness);
+
+      const BLUR_THRESHOLD = 28;
+      if (sharpness < BLUR_THRESHOLD) {
+        const msg = t("profile.avatarTooBlurry", "الصورة ضبابية جدًا. التقط صورة أوضح قبل الحفظ.");
+        setAvatarQualityError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      if (faceSupported && !hasFace) {
+        const msg = t("profile.avatarFaceRequired", "لم يتم اكتشاف وجه واضح في الصورة. يرجى اختيار صورة شخصية حقيقية.");
+        setAvatarQualityError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      setAvatarQualityError(null);
+      const avatarUrl = await uploadAvatar(blob, `avatar-${Date.now()}.jpg`);
+      await profileApi.updateProfile(1, { avatar: avatarUrl });
+      setUser((prev) => ({ ...prev, avatar: avatarUrl }));
+
+      queryClient.setQueryData(["/api/auth/me"], (prev: any) => {
+        if (!prev) return prev;
+        const next = { ...prev };
+        if (next.data?.user) next.data.user = { ...next.data.user, avatar: avatarUrl };
+        if (next.data && !next.data.user) next.data = { ...next.data, avatar: avatarUrl };
+        return next;
+      });
+
+      setShowAvatarEditor(false);
+      toast.success(t("profile.avatarUpdated", "تم تحديث الصورة الشخصية بنجاح"));
+    } catch (err: any) {
+      toast.error(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const onAvatarFileChosen = (event: any) => {
+    const file = event.target.files?.[0];
+    openAvatarEditor(file);
+    event.currentTarget.value = "";
+  };
 
   const handleChangePin = async (profileIndex: number) => {
     if (!/^\d{4}$/.test(changePinForm.newPin)) {
@@ -363,15 +679,24 @@ export function Profile() {
     try {
       const result = await gamificationApi.claim();
       if (result?.user) {
+        let xpData: any = null;
+        try {
+          xpData = await gamificationApi.xpMe();
+        } catch {
+          xpData = null;
+        }
+
         setUser((prev) => ({
           ...prev,
-          xp: result.user.xp ?? prev.xp,
-          level: result.user.level ?? prev.level,
+          xp: Number(xpData?.xp ?? result.user.xp ?? prev.xp),
+          level: Number(xpData?.level ?? result.user.level ?? prev.level),
           coins: result.user.coins ?? prev.coins,
-          xpNext: ((result.user.level ?? prev.level) || 1) * 1000,
+          xpNext: Number(xpData?.xpForNextLevel ?? prev.xpNext),
+          xpProgress: Number(xpData?.progress ?? prev.xpProgress ?? 0),
         }));
       }
       await loadDailyMissions();
+      await loadUser();
     } catch (err: any) {
       alert(err?.message || t("common.error", "حدث خطأ"));
     } finally {
@@ -497,7 +822,7 @@ export function Profile() {
   };
 
   const vipBadge = vipBadges[user.vipLevel];
-  const levelProgress = (user.xp / user.xpNext) * 100;
+  const levelProgress = Math.max(0, Math.min(100, Number(user.xpProgress || ((user.xpNext > 0 ? (user.xp / user.xpNext) * 100 : 0)))));
   const formatNumber = (n: number) => {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
     if (n >= 1000) return (n / 1000).toFixed(1) + "K";
@@ -573,7 +898,11 @@ export function Profile() {
             <div className="w-28 h-28 md:w-36 md:h-36 rounded-full overflow-hidden border-4 border-primary/50 neon-border">
               <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
             </div>
-            <button className="absolute bottom-1 right-1 w-9 h-9 rounded-full bg-primary flex items-center justify-center border-3 border-[#0d0d1e] text-white shadow-lg hover:scale-110 transition-transform">
+            <button
+              onClick={() => setShowAvatarPicker(true)}
+              className="absolute bottom-1 right-1 w-9 h-9 rounded-full bg-primary flex items-center justify-center border-3 border-[#0d0d1e] text-white shadow-lg hover:scale-110 transition-transform"
+              title={t("profile.changePhoto", "تغيير الصورة")}
+            >
               <Camera className="w-4 h-4" />
             </button>
             {user.isVip && vipBadge && (
@@ -974,21 +1303,98 @@ export function Profile() {
               )}
             </div>
             <div className="border-t border-white/5 pt-4">
+              <p className="text-white font-bold text-sm mb-3 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-primary" />{t("profile.trustedDevices", "الأجهزة الموثوقة")}</p>
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-3 space-y-3">
+                <SectionToggle
+                  label={t("profile.deviceLock", "قفل الحساب بالأجهزة الموثوقة")}
+                  desc={t("profile.deviceLockDesc", "يتطلب OTP عند تسجيل الدخول من جهاز جديد")}
+                  enabled={deviceLockEnabled}
+                  onChange={async () => {
+                    const next = !deviceLockEnabled;
+                    setDeviceLockEnabled(next);
+                    try {
+                      await authApi.setTrustedDeviceLock(next);
+                      await loadSecurityData();
+                    } catch {
+                      setDeviceLockEnabled(!next);
+                      toast.error(t("common.error", "حدث خطأ"));
+                    }
+                  }}
+                />
+                <button
+                  onClick={async () => {
+                    try {
+                      await authApi.trustCurrentDevice();
+                      toast.success(t("profile.currentDeviceTrusted", "تم توثيق هذا الجهاز"));
+                      await loadSecurityData();
+                    } catch (err: any) {
+                      toast.error(err?.message || t("common.error", "حدث خطأ"));
+                    }
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-sm hover:bg-primary/20 transition-all"
+                >
+                  {t("profile.trustThisDevice", "توثيق هذا الجهاز")}
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t border-white/5 pt-4">
               <p className="text-white font-bold text-sm mb-3 flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" />{t("profile.activeSessions")}</p>
               <div className="space-y-2">
-                {user.sessions.map((session) => (
-                  <div key={session.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl p-3">
+                {trustedDevices.length === 0 && (
+                  <div className="text-xs text-white/40 bg-white/5 border border-white/10 rounded-xl p-3">
+                    {t("profile.noTrustedDevices", "لا توجد أجهزة موثوقة بعد")}
+                  </div>
+                )}
+                {trustedDevices.map((device) => (
+                  <div key={device.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl p-3">
                     <div className="flex items-center gap-3">
                       <Smartphone className="w-4 h-4 text-white/40" />
                       <div>
                         <p className="text-white text-sm font-medium flex items-center gap-2">
-                          {session.device}
-                          {session.current && <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-bold border border-green-500/20">{t("profile.currentSession")}</span>}
+                          {device.label}
+                          {device.id === currentDeviceId && <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-bold border border-green-500/20">{t("profile.currentSession")}</span>}
                         </p>
-                        <p className="text-white/30 text-[10px]">{session.location} · {session.lastActive}</p>
+                        <p className="text-white/30 text-[10px]" dir="ltr">{device.ip} · {new Date(device.lastSeenAt).toLocaleString()}</p>
                       </div>
                     </div>
-                    {!session.current && <button className="text-destructive text-xs font-bold hover:underline">{t("profile.endSession")}</button>}
+                    {device.id !== currentDeviceId && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await authApi.removeTrustedDevice(device.id);
+                            await loadSecurityData();
+                          } catch (err: any) {
+                            toast.error(err?.message || t("common.error", "حدث خطأ"));
+                          }
+                        }}
+                        className="text-destructive text-xs font-bold hover:underline"
+                      >
+                        {t("profile.removeDevice", "إزالة")}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-white/5 pt-4">
+              <p className="text-white font-bold text-sm mb-3 flex items-center gap-2"><Clock className="w-4 h-4 text-primary" />{t("profile.securityTimeline", "السجل الأمني")}</p>
+              <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                {securityLoading && (
+                  <div className="text-xs text-white/40 bg-white/5 border border-white/10 rounded-xl p-3">
+                    {t("common.loading", "جاري التحميل...")}
+                  </div>
+                )}
+                {!securityLoading && securityTimeline.length === 0 && (
+                  <div className="text-xs text-white/40 bg-white/5 border border-white/10 rounded-xl p-3">
+                    {t("profile.noSecurityEvents", "لا توجد أحداث بعد")}
+                  </div>
+                )}
+                {!securityLoading && securityTimeline.map((event) => (
+                  <div key={event.id} className="bg-white/5 border border-white/10 rounded-xl p-3">
+                    <p className="text-white text-sm font-medium">{securityEventLabel(event.type)}</p>
+                    <p className="text-white/30 text-[10px] mt-1" dir="ltr">{new Date(event.createdAt).toLocaleString()} · {event.ip}</p>
                   </div>
                 ))}
               </div>
@@ -1266,6 +1672,186 @@ export function Profile() {
           </div>
         </ExpandableSection>
       </div>
+
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={onAvatarFileChosen}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={onAvatarFileChosen}
+      />
+
+      <AnimatePresence>
+        {showAvatarPicker && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm p-4 flex items-end md:items-center justify-center"
+            onClick={() => setShowAvatarPicker(false)}
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md glass border border-white/10 rounded-3xl p-5 space-y-4"
+            >
+              <h3 className="text-white font-black text-lg">{t("profile.changePhoto", "تغيير الصورة الشخصية")}</h3>
+              <p className="text-amber-300/90 text-xs bg-amber-500/10 border border-amber-400/20 rounded-xl p-3">
+                {t("profile.avatarRealPhotoWarning", "الرجاء رفع صورة حقيقية وواضحة حتى لا يتعرض الحساب للحظر.")}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary/15 border border-primary/30 text-primary font-bold hover:bg-primary/25 transition-all"
+                >
+                  <Camera className="w-4 h-4" />
+                  {t("profile.takePhoto", "التقاط صورة")}
+                </button>
+                <button
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 border border-white/15 text-white font-bold hover:bg-white/15 transition-all"
+                >
+                  <Download className="w-4 h-4" />
+                  {t("profile.chooseFromDevice", "اختيار من الجهاز")}
+                </button>
+              </div>
+              <button
+                onClick={() => setShowAvatarPicker(false)}
+                className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-all"
+              >
+                {t("common.cancel", "إلغاء")}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showAvatarEditor && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[115] bg-black/80 backdrop-blur-sm p-4 overflow-y-auto"
+          >
+            <div className="min-h-full flex items-center justify-center">
+              <motion.div
+                initial={{ scale: 0.96, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.96, opacity: 0 }}
+                className="w-full max-w-lg glass border border-white/10 rounded-3xl p-5 space-y-4"
+              >
+                <h3 className="text-white font-black text-lg">{t("profile.previewPhoto", "معاينة وتعديل الصورة")}</h3>
+                <p className="text-white/55 text-xs">
+                  {t("profile.avatarAdjustHint", "عدّل التكبير والتموضع حتى تظهر الصورة بالشكل المناسب قبل التأكيد.")}
+                </p>
+
+                <div className="mx-auto w-[240px] h-[240px] rounded-full overflow-hidden border-4 border-primary/30 bg-[#090914] relative">
+                  {avatarSourceUrl && (
+                    <img
+                      src={avatarSourceUrl}
+                      alt={t("profile.previewPhoto", "معاينة الصورة")}
+                      draggable={false}
+                      className="w-full h-full object-cover cursor-grab active:cursor-grabbing select-none"
+                      onPointerDown={onAvatarDragStart}
+                      onPointerMove={onAvatarDragMove}
+                      onPointerUp={onAvatarDragEnd}
+                      onPointerCancel={onAvatarDragEnd}
+                      style={{
+                        transform: `translate(${avatarOffsetX}px, ${avatarOffsetY}px) scale(${avatarZoom})`,
+                      }}
+                    />
+                  )}
+                </div>
+                <p className="text-[11px] text-white/45 text-center">
+                  {t("profile.dragToAdjust", "اسحب الصورة داخل الدائرة بالماوس أو اللمس لضبط التمركز")}
+                </p>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-white/50 block mb-1">{t("profile.zoom", "التكبير")}</label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={2.4}
+                      step={0.01}
+                      value={avatarZoom}
+                      onChange={(e) => setAvatarZoom(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50 block mb-1">{t("profile.moveHorizontal", "تحريك أفقي")}</label>
+                    <input
+                      type="range"
+                      min={-120}
+                      max={120}
+                      step={1}
+                      value={avatarOffsetX}
+                      onChange={(e) => setAvatarOffsetX(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50 block mb-1">{t("profile.moveVertical", "تحريك عمودي")}</label>
+                    <input
+                      type="range"
+                      min={-120}
+                      max={120}
+                      step={1}
+                      value={avatarOffsetY}
+                      onChange={(e) => setAvatarOffsetY(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                {avatarQualityScore !== null && (
+                  <p className="text-[11px] text-white/45 text-center">
+                    {t("profile.qualityScore", "مؤشر الوضوح")}: {Math.round(avatarQualityScore)}
+                  </p>
+                )}
+
+                {avatarQualityError && (
+                  <p className="text-rose-300 text-xs bg-rose-500/10 border border-rose-400/20 rounded-xl p-2.5 text-center">
+                    {avatarQualityError}
+                  </p>
+                )}
+
+                <p className="text-amber-300/90 text-xs bg-amber-500/10 border border-amber-400/20 rounded-xl p-3">
+                  {t("profile.avatarRealPhotoWarning", "الرجاء رفع صورة حقيقية وواضحة حتى لا يتعرض الحساب للحظر.")}
+                </p>
+
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => setShowAvatarEditor(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-all"
+                  >
+                    {t("common.cancel", "إلغاء")}
+                  </button>
+                  <button
+                    onClick={handleConfirmAvatar}
+                    disabled={avatarUploading}
+                    className="flex-1 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary font-bold hover:bg-primary/30 transition-all disabled:opacity-50"
+                  >
+                    {avatarUploading ? t("common.saving", "جاري الحفظ...") : t("common.confirm", "تأكيد")}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

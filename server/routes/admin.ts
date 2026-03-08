@@ -6,6 +6,9 @@
  */
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
 import { storage } from "../storage";
 import { requireAdmin, requireAdminRole, rateLimitLogin } from "../middleware/adminAuth";
 import { hashPassword, verifyPassword, hashPasswordAsync, verifyPasswordAsync, generateReferralCode } from "../utils/crypto";
@@ -44,6 +47,38 @@ import { getUserSocketId } from "../onlineUsers";
 import { decryptMessage } from "../utils/encryption";
 
 const router = Router();
+
+const UPLOAD_DIR = path.resolve(process.cwd(), "uploads");
+const MEDIA_DIR = path.join(UPLOAD_DIR, "media");
+if (!fs.existsSync(MEDIA_DIR)) {
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+}
+
+const SOUND_UPLOAD_MIMES = [
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+];
+
+const uploadNotificationTone = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, MEDIA_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname) || ".bin";
+      cb(null, `notification-tone-${randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (SOUND_UPLOAD_MIMES.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("نوع الملف غير مدعوم. المسموح: صوت أو فيديو فقط"));
+  },
+});
 
 // Financial/admin responses should never be cached by browser or proxies.
 router.use((_req, res, next) => {
@@ -1961,6 +1996,13 @@ const defaultAdvancedSettings: Record<string, any> = {
       description: "ملف AAB — لرفعه على متجر جوجل بلاي",
     },
   },
+  notificationSounds: {
+    message: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    call: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    "friend-request": { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    admin: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    system: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+  },
 };
 
 /** Load a settings category from DB, falling back to defaults */
@@ -2176,6 +2218,79 @@ router.put("/settings/app-download", requireAdmin, async (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
+});
+
+router.put("/settings/notification-sounds", requireAdmin, async (req, res) => {
+  try {
+    const current = await getAdvancedSettingsCategory("notificationSounds");
+    const slots = ["message", "call", "friend-request", "admin", "system"] as const;
+
+    for (const slot of slots) {
+      const incoming = req.body?.[slot];
+      if (!incoming || typeof incoming !== "object") continue;
+
+      if (!current[slot] || typeof current[slot] !== "object") {
+        current[slot] = { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 };
+      }
+
+      if (typeof incoming.enabled === "boolean") current[slot].enabled = incoming.enabled;
+      if (incoming.kind === "tone" || incoming.kind === "file") current[slot].kind = incoming.kind;
+      if (incoming.mediaType === "audio" || incoming.mediaType === "video" || incoming.mediaType === "voice") {
+        current[slot].mediaType = incoming.mediaType;
+      }
+      if (typeof incoming.url === "string") current[slot].url = incoming.url;
+      if (typeof incoming.volume === "number") {
+        current[slot].volume = Math.max(0, Math.min(1, incoming.volume));
+      }
+    }
+
+    await storage.upsertSystemConfig("notificationSounds", current, req.session.adminId);
+    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "notification-sounds", "Notification sounds updated");
+    return res.json({ success: true, data: current });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في حفظ إعدادات النغمات" });
+  }
+});
+
+router.post("/settings/notification-sounds/upload", requireAdmin, uploadNotificationTone.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "لم يتم اختيار ملف" });
+    }
+
+    const mimetype = req.file.mimetype;
+    const mediaType = mimetype.startsWith("video/")
+      ? "video"
+      : (mimetype === "audio/webm" || mimetype === "audio/ogg" ? "voice" : "audio");
+    const url = `/uploads/media/${req.file.filename}`;
+
+    await storage.addAdminLog(req.session.adminId!, "upload_notification_sound", "setting", req.file.filename, `${mimetype} (${req.file.size} bytes)`);
+    return res.json({
+      success: true,
+      data: {
+        url,
+        filename: req.file.filename,
+        size: req.file.size,
+        mimetype,
+        mediaType,
+      },
+    });
+  } catch (_err: any) {
+    return res.status(500).json({ success: false, message: "خطأ أثناء رفع ملف النغمة" });
+  }
+});
+
+router.use((err: any, _req: any, res: any, next: any) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ success: false, message: "حجم الملف كبير جداً" });
+    }
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  if (err?.message?.includes("نوع الملف")) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  return next(err);
 });
 
 // ══════════════════════════════════════════════════════════

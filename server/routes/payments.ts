@@ -46,6 +46,30 @@ type GatewayConfig = {
   credentials: Record<string, string>;
 };
 
+type ProviderUnavailableReasonCode =
+  | "gateway_disabled"
+  | "country_restricted"
+  | "credentials_missing"
+  | "no_deposit_method"
+  | "amount_out_of_range";
+
+type ProviderAvailability = {
+  key: string;
+  displayName: string;
+  mode: string;
+  priority: number;
+  available: boolean;
+  reasonCode?: ProviderUnavailableReasonCode;
+  reasonText?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  countries: string[];
+  requiredCredentials: string[];
+  isReady: boolean;
+  hasCredentials: boolean;
+  credentialsMask: Record<string, string>;
+};
+
 const DEFAULT_GATEWAYS: Record<string, GatewayConfig> = {
   stripe: {
     enabled: true,
@@ -100,6 +124,108 @@ function maskSecret(value: string): string {
   if (!value) return "";
   if (value.length <= 6) return "***";
   return `${value.slice(0, 4)}***${value.slice(-2)}`;
+}
+
+function normalizeIdempotencyKey(input: unknown): string {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const compact = raw.replace(/[^a-zA-Z0-9._:-]/g, "");
+  return compact.slice(0, 120);
+}
+
+function providerReasonText(code: ProviderUnavailableReasonCode, lang: "ar" | "en"): string {
+  if (lang === "en") {
+    if (code === "gateway_disabled") return "Provider is disabled by admin";
+    if (code === "country_restricted") return "Not available in your country";
+    if (code === "credentials_missing") return "Provider setup is incomplete";
+    if (code === "no_deposit_method") return "No active deposit methods for this provider";
+    return "Package amount is outside provider limits";
+  }
+  if (code === "gateway_disabled") return "البوابة معطلة من الإدارة";
+  if (code === "country_restricted") return "غير متاحة في دولتك";
+  if (code === "credentials_missing") return "إعدادات البوابة غير مكتملة";
+  if (code === "no_deposit_method") return "لا توجد وسائل إيداع نشطة لهذه البوابة";
+  return "قيمة الباقة خارج حدود البوابة";
+}
+
+function providerAmountRangeReasonText(lang: "ar" | "en", minAmount: number, maxAmount: number): string {
+  const min = Number.isFinite(minAmount) ? minAmount : 0;
+  const max = Number.isFinite(maxAmount) ? maxAmount : 0;
+  if (lang === "en") {
+    return `Package amount must be between ${min} and ${max} USD`;
+  }
+  return `قيمة الباقة يجب أن تكون بين ${min} و${max} دولار`;
+}
+
+function preferEnglish(req: Request): boolean {
+  return String(req.headers["accept-language"] || "").toLowerCase().includes("en");
+}
+
+async function findExistingOrderByIdempotency(userId: string, idempotencyKey: string) {
+  const pool = getPool();
+  if (!pool || !idempotencyKey) return null;
+  const { rows } = await pool.query(
+    `SELECT id, status, provider, provider_reference, checkout_url, fail_reason, created_at
+     FROM payment_orders
+     WHERE user_id = $1 AND idempotency_key = $2
+     LIMIT 1`,
+    [userId, idempotencyKey],
+  );
+  return rows[0] || null;
+}
+
+async function createPaymentOrder(params: {
+  userId: string;
+  packageId: string;
+  provider: string;
+  amount: number;
+  currency: string;
+  idempotencyKey: string;
+  expiresAt?: Date;
+}) {
+  const pool = getPool();
+  if (!pool) throw new Error("DB_UNAVAILABLE");
+  const { userId, packageId, provider, amount, currency, idempotencyKey, expiresAt } = params;
+
+  const { rows } = await pool.query(
+    `INSERT INTO payment_orders (user_id, package_id, provider, amount, currency, status, idempotency_key, expires_at)
+     VALUES ($1, $2, $3, $4, $5, 'created', $6, $7)
+     ON CONFLICT (user_id, idempotency_key) DO NOTHING
+     RETURNING id`,
+    [userId, packageId, provider, amount, currency, idempotencyKey, expiresAt || null],
+  );
+
+  return rows[0]?.id ? String(rows[0].id) : null;
+}
+
+async function updatePaymentOrderStatus(orderId: string, patch: {
+  status?: string;
+  providerReference?: string;
+  checkoutUrl?: string;
+  failReason?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const pool = getPool();
+  if (!pool) return;
+
+  await pool.query(
+    `UPDATE payment_orders
+     SET status = COALESCE($2, status),
+         provider_reference = COALESCE($3, provider_reference),
+         checkout_url = COALESCE($4, checkout_url),
+         fail_reason = COALESCE($5, fail_reason),
+         metadata = COALESCE($6, metadata),
+         updated_at = now()
+     WHERE id = $1`,
+    [
+      orderId,
+      patch.status || null,
+      patch.providerReference || null,
+      patch.checkoutUrl || null,
+      patch.failReason || null,
+      patch.metadata ? JSON.stringify(patch.metadata) : null,
+    ],
+  );
 }
 
 async function loadGatewayConfig() {
@@ -217,11 +343,12 @@ async function fulfillPurchase(params: {
   referenceId: string;
   paymentMethod: string;
   description: string;
+  providerReference?: string;
 }) {
   const pool = getPool();
   if (!pool) throw new Error("DB_UNAVAILABLE");
 
-  const { userId, coinAmount, referenceId, paymentMethod, description } = params;
+  const { userId, coinAmount, referenceId, paymentMethod, description, providerReference } = params;
 
   const { rows: existing } = await pool.query(
     `SELECT id FROM wallet_transactions WHERE reference_id = $1 AND type = 'purchase' LIMIT 1`,
@@ -252,6 +379,17 @@ async function fulfillPurchase(params: {
     );
 
     await client.query("COMMIT");
+
+    try {
+      await pool.query(
+        `UPDATE payment_orders
+         SET status = 'paid', updated_at = now()
+         WHERE user_id = $1 AND provider_reference = $2 AND status <> 'paid'`,
+        [userId, String(providerReference || referenceId)],
+      );
+    } catch {
+      // Do not fail fulfillment when order sync fails.
+    }
 
     io.to(`user:${userId}`).emit("balance-update", { coins: rows[0].coins });
     io.emit("finance-updated", {
@@ -328,12 +466,37 @@ router.get("/providers", async (req: Request, res: Response) => {
     }).filter((m) => m.usageTarget === "both" || m.usageTarget === "deposit")
       .filter((m) => !country || m.countries.includes("*") || m.countries.includes(country));
 
-    const providers = Object.entries(gateways)
-      .filter(([, cfg]) => !!cfg.enabled)
-      .filter(([, cfg]) => !country || cfg.countries.includes("*") || cfg.countries.includes(country))
+    const packageId = String(req.query.packageId || "").trim();
+    let packageAmountUsd: number | null = null;
+    if (packageId) {
+      try {
+        const { rows: pkgRows } = await pool.query(
+          `SELECT price_usd FROM coin_packages WHERE id = $1 AND is_active = true LIMIT 1`,
+          [packageId],
+        );
+        const value = Number(pkgRows[0]?.price_usd || 0);
+        if (Number.isFinite(value) && value > 0) {
+          packageAmountUsd = value;
+        }
+      } catch {
+        packageAmountUsd = null;
+      }
+    }
+
+    const lang: "ar" | "en" = preferEnglish(req) ? "en" : "ar";
+
+    const allGatewayStatuses: ProviderAvailability[] = Object.entries(gateways)
       .map(([provider, cfg]) => {
         const requiredCredentials = getRequiredCredentialKeys(provider);
         const isReady = isGatewayReady(provider, cfg);
+        const countryAllowed = !country || cfg.countries.includes("*") || cfg.countries.includes(country);
+        const enabled = !!cfg.enabled;
+
+        let reasonCode: ProviderUnavailableReasonCode | undefined;
+        if (!enabled) reasonCode = "gateway_disabled";
+        else if (!countryAllowed) reasonCode = "country_restricted";
+        else if (!isReady) reasonCode = "credentials_missing";
+
         return {
           key: provider,
           displayName: cfg.displayName,
@@ -342,14 +505,19 @@ router.get("/providers", async (req: Request, res: Response) => {
           countries: cfg.countries,
           requiredCredentials,
           isReady,
+          available: !reasonCode,
+          ...(reasonCode ? { reasonCode, reasonText: providerReasonText(reasonCode, lang) } : {}),
           hasCredentials: Object.values(cfg.credentials || {}).some((v) => String(v || "").trim().length > 0),
           credentialsMask: Object.fromEntries(Object.entries(cfg.credentials || {}).map(([k, v]) => [k, maskSecret(String(v || ""))])),
         };
       })
-      .filter((provider) => provider.isReady)
       .sort((a, b) => a.priority - b.priority);
 
-    const readyProviderKeys = new Set(providers.map((p) => p.key));
+    const readyProviderKeys = new Set(
+      allGatewayStatuses
+        .filter((p) => p.available)
+        .map((p) => p.key),
+    );
     const localProviderKeys = Array.from(new Set(
       mappedMethods
         .map((m) => String(m.provider || "").trim().toLowerCase())
@@ -364,21 +532,106 @@ router.get("/providers", async (req: Request, res: Response) => {
       countries: ["*"],
       requiredCredentials: [],
       isReady: true,
+      available: true,
       hasCredentials: true,
       credentialsMask: {},
-    }));
+    })) as ProviderAvailability[];
 
-    const allProviders = [...providers, ...localProviders]
+    const allProviders = [...allGatewayStatuses, ...localProviders]
       .sort((a, b) => Number(a.priority || 99) - Number(b.priority || 99));
 
-    const enabledProviderKeys = new Set(allProviders.map((p) => p.key));
+    const methodsByProviderCount = mappedMethods.reduce((acc: Record<string, number>, m: any) => {
+      const key = String(m.provider || "").trim().toLowerCase();
+      if (!key) return acc;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    const providerMethodRange = mappedMethods.reduce((acc: Record<string, { min: number; max: number }>, m: any) => {
+      const key = String(m.provider || "").trim().toLowerCase();
+      if (!key) return acc;
+      const minAmount = Number(m.minAmount || 1);
+      const maxAmount = Number(m.maxAmount || 50000);
+      if (!Number.isFinite(minAmount) || !Number.isFinite(maxAmount) || minAmount > maxAmount) return acc;
+
+      const current = acc[key];
+      if (!current) {
+        acc[key] = { min: minAmount, max: maxAmount };
+      } else {
+        acc[key] = {
+          min: Math.min(current.min, minAmount),
+          max: Math.max(current.max, maxAmount),
+        };
+      }
+      return acc;
+    }, {});
+
+    const providersWithMethodCheck = allProviders.map((p) => {
+      if (!p.available) return p;
+      const key = String(p.key || "").trim().toLowerCase();
+      if (!key) return p;
+      if ((methodsByProviderCount[key] || 0) <= 0) {
+        return {
+          ...p,
+          available: false,
+          reasonCode: "no_deposit_method" as ProviderUnavailableReasonCode,
+          reasonText: providerReasonText("no_deposit_method", lang),
+        };
+      }
+
+      if (packageAmountUsd !== null) {
+        const range = providerMethodRange[key];
+        if (range && (packageAmountUsd < range.min || packageAmountUsd > range.max)) {
+          return {
+            ...p,
+            available: false,
+            reasonCode: "amount_out_of_range" as ProviderUnavailableReasonCode,
+            reasonText: providerAmountRangeReasonText(lang, range.min, range.max),
+            minAmount: range.min,
+            maxAmount: range.max,
+          };
+        }
+      }
+
+      return {
+        ...p,
+        available: true,
+      };
+    });
+
+    const availableProviders = providersWithMethodCheck.filter((p) => p.available);
+    const unavailableProviders = providersWithMethodCheck.filter((p) => !p.available);
+
+    const enabledProviderKeys = new Set(availableProviders.map((p) => p.key));
     const methodsForReadyProviders = mappedMethods.filter((m) => !m.provider || enabledProviderKeys.has(m.provider));
+
+    let recommendedProvider: string | null = null;
+    try {
+      const { rows: lastRows } = await pool.query(
+        `SELECT payment_method FROM wallet_transactions
+         WHERE user_id = $1 AND type = 'purchase' AND status = 'completed'
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId],
+      );
+      const lastProvider = String(lastRows[0]?.payment_method || "").trim().toLowerCase();
+      if (lastProvider && availableProviders.some((p) => p.key === lastProvider)) {
+        recommendedProvider = lastProvider;
+      }
+    } catch {
+      // Ignore recommendation source errors.
+    }
+    if (!recommendedProvider) {
+      recommendedProvider = availableProviders[0]?.key || null;
+    }
 
     return res.json({
       success: true,
       data: {
         country: country || null,
-        providers: allProviders,
+        ...(packageAmountUsd !== null ? { packageAmountUsd } : {}),
+        providers: availableProviders,
+        unavailableProviders,
+        recommendedProvider,
         paymentMethods: methodsForReadyProviders,
       },
     });
@@ -392,12 +645,48 @@ router.post("/checkout", async (req: Request, res: Response) => {
   const userId = (req.session as any)?.userId;
   if (!userId) return res.status(401).json({ success: false, message: "يجب تسجيل الدخول" });
 
-  const { packageId, provider } = req.body;
+  const { packageId, provider, idempotencyKey: bodyIdempotencyKey } = req.body;
   if (!packageId) return res.status(400).json({ success: false, message: "packageId مطلوب" });
 
   const providerKey = String(provider || "stripe").toLowerCase();
+  const idempotencyKey = normalizeIdempotencyKey(
+    req.headers["x-idempotency-key"] || bodyIdempotencyKey || `${userId}:${providerKey}:${packageId}`,
+  );
+  if (!idempotencyKey) {
+    return res.status(400).json({ success: false, message: "idempotency key غير صالح" });
+  }
 
   try {
+    const existingOrder = await findExistingOrderByIdempotency(userId, idempotencyKey);
+    if (existingOrder) {
+      const status = String(existingOrder.status || "");
+      if ((status === "created" || status === "pending_provider" || status === "processing") && existingOrder.checkout_url) {
+        return res.json({
+          success: true,
+          data: {
+            sessionId: existingOrder.provider_reference || existingOrder.id,
+            url: existingOrder.checkout_url,
+            reused: true,
+            orderId: existingOrder.id,
+          },
+        });
+      }
+      if (status === "paid") {
+        return res.json({
+          success: true,
+          data: {
+            reused: true,
+            paid: true,
+            orderId: existingOrder.id,
+            url: SUCCESS_URL,
+          },
+        });
+      }
+      if (status === "failed" || status === "expired" || status === "cancelled") {
+        return res.status(409).json({ success: false, message: existingOrder.fail_reason || "محاولة الدفع السابقة انتهت، ابدأ محاولة جديدة" });
+      }
+    }
+
     const gateways = await loadGatewayConfig();
     const selectedGateway = gateways[providerKey];
     const country = detectCountry(req);
@@ -425,6 +714,65 @@ router.post("/checkout", async (req: Request, res: Response) => {
 
     const totalCoins = (pkg.coins || 0) + (pkg.bonus_coins || 0);
     const priceUsd = parseFloat(String(pkg.price_usd || 0));
+
+    const createdOrderId = await createPaymentOrder({
+      userId,
+      packageId: String(pkg.id),
+      provider: providerKey,
+      amount: priceUsd,
+      currency: "USD",
+      idempotencyKey,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 30),
+    });
+    const orderId = createdOrderId || (await findExistingOrderByIdempotency(userId, idempotencyKey))?.id;
+    if (!orderId) {
+      return res.status(500).json({ success: false, message: "تعذر إنشاء طلب الدفع" });
+    }
+
+    // Enforce provider amount limits when deposit methods are configured for this provider.
+    const { rows: providerMethods } = await pool.query(
+      `SELECT account_details, min_amount, max_amount
+       FROM payment_methods
+       WHERE is_active = true`,
+    );
+
+    const matchingProviderMethods = providerMethods.filter((m: any) => {
+      let details: any = {};
+      try { details = m.account_details ? JSON.parse(m.account_details) : {}; } catch { details = {}; }
+      const methodProvider = String(details?.provider || "").trim().toLowerCase();
+      if (!methodProvider || methodProvider !== providerKey) return false;
+
+      const usage = String(details?.usageTarget || details?.usage || "both").toLowerCase();
+      const supportsDeposit = usage === "both" || usage === "deposit";
+      if (!supportsDeposit) return false;
+
+      const methodCountries = Array.isArray(details?.countries)
+        ? details.countries.map((c: unknown) => String(c || "").toUpperCase())
+        : ["*"];
+      if (country && !methodCountries.includes("*") && !methodCountries.includes(country)) return false;
+      return true;
+    });
+
+    if (matchingProviderMethods.length > 0) {
+      const inRange = matchingProviderMethods.some((m: any) => {
+        const minAmount = Number(m.min_amount || 1);
+        const maxAmount = Number(m.max_amount || 50000);
+        return Number.isFinite(minAmount) && Number.isFinite(maxAmount) && priceUsd >= minAmount && priceUsd <= maxAmount;
+      });
+
+      if (!inRange) {
+        await updatePaymentOrderStatus(orderId, {
+          status: "failed",
+          failReason: "AMOUNT_OUT_OF_RANGE",
+          metadata: { provider: providerKey, priceUsd },
+        });
+        return res.status(400).json({
+          success: false,
+          message: "قيمة الباقة خارج حدود وسيلة الدفع المختارة",
+          code: "AMOUNT_OUT_OF_RANGE",
+        });
+      }
+    }
 
     if (!isManagedGateway) {
       const { rows: localMethods } = await pool.query(
@@ -488,6 +836,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
       return res.json({
         success: true,
         data: {
+          orderId,
           manual: true,
           status: "pending",
           referenceId,
@@ -543,6 +892,11 @@ router.post("/checkout", async (req: Request, res: Response) => {
       }
 
       log.info(`PayPal order created: ${createJson.id} for user ${userId}, package ${pkg.id}`);
+      await updatePaymentOrderStatus(orderId, {
+        status: "pending_provider",
+        providerReference: String(createJson.id || ""),
+        checkoutUrl: approveUrl,
+      });
       return res.json({ success: true, data: { sessionId: createJson.id, url: approveUrl } });
     }
 
@@ -585,6 +939,11 @@ router.post("/checkout", async (req: Request, res: Response) => {
     });
 
     log.info(`Checkout session created: ${session.id} for user ${userId}, package ${pkg.id}, provider ${providerKey}`);
+    await updatePaymentOrderStatus(orderId, {
+      status: "pending_provider",
+      providerReference: String(session.id || ""),
+      checkoutUrl: String(session.url || ""),
+    });
     return res.json({ success: true, data: { sessionId: session.id, url: session.url } });
   } catch (err: any) {
     log.error(`Checkout error: ${err.message}`);
@@ -643,7 +1002,23 @@ router.post("/webhook", async (req: Request, res: Response) => {
         referenceId: String(session.id),
         paymentMethod: "stripe",
         description: `شراء ${coinAmount} كوينز عبر Stripe`,
+        providerReference: String(session.id),
       });
+
+      try {
+        const pool = getPool();
+        if (pool) {
+          await pool.query(
+            `UPDATE payment_orders
+             SET status = 'paid', updated_at = now()
+             WHERE provider_reference = $1 AND status <> 'paid'`,
+            [String(session.id)],
+          );
+        }
+      } catch {
+        // Do not fail webhook on order sync issues.
+      }
+
       if (result.duplicate) {
         log.info(`Webhook: duplicate fulfillment skipped for session ${session.id}`);
       } else {
@@ -696,6 +1071,16 @@ router.get("/paypal/return", async (req: Request, res: Response) => {
     const captureJson = await captureResp.json().catch(() => ({} as any));
     if (!captureResp.ok) {
       log.error(`PayPal capture failed for ${orderToken}: ${JSON.stringify(captureJson)}`);
+      try {
+        await pool.query(
+          `UPDATE payment_orders
+           SET status = 'failed', fail_reason = $2, updated_at = now()
+           WHERE provider_reference = $1 AND status <> 'paid'`,
+          [orderToken, "PAYPAL_CAPTURE_FAILED"],
+        );
+      } catch {
+        // Best effort sync.
+      }
       return res.redirect(CANCEL_URL);
     }
 
@@ -703,6 +1088,16 @@ router.get("/paypal/return", async (req: Request, res: Response) => {
     const meta = decodePayPalCustomMeta(customId);
     if (!meta) {
       log.error(`PayPal capture missing custom_id for order ${orderToken}`);
+      try {
+        await pool.query(
+          `UPDATE payment_orders
+           SET status = 'failed', fail_reason = $2, updated_at = now()
+           WHERE provider_reference = $1 AND status <> 'paid'`,
+          [orderToken, "PAYPAL_METADATA_MISSING"],
+        );
+      } catch {
+        // Best effort sync.
+      }
       return res.redirect(CANCEL_URL);
     }
 
@@ -713,6 +1108,16 @@ router.get("/paypal/return", async (req: Request, res: Response) => {
     const matchedPackage = packages[0];
     if (!matchedPackage) {
       log.error(`PayPal capture package mismatch for order ${orderToken}: package ${meta.packageId} not found`);
+      try {
+        await pool.query(
+          `UPDATE payment_orders
+           SET status = 'failed', fail_reason = $2, updated_at = now()
+           WHERE provider_reference = $1 AND status <> 'paid'`,
+          [orderToken, "PAYPAL_PACKAGE_MISMATCH"],
+        );
+      } catch {
+        // Best effort sync.
+      }
       return res.redirect(CANCEL_URL);
     }
 
@@ -724,6 +1129,16 @@ router.get("/paypal/return", async (req: Request, res: Response) => {
 
     if (captureStatus !== "COMPLETED" || capturedCurrency !== "USD" || !Number.isFinite(capturedAmount) || Math.abs(capturedAmount - expectedUsd) > 0.01) {
       log.error(`PayPal capture amount validation failed for order ${orderToken}: status=${captureStatus}, currency=${capturedCurrency}, captured=${capturedAmount}, expected=${expectedUsd}`);
+      try {
+        await pool.query(
+          `UPDATE payment_orders
+           SET status = 'failed', fail_reason = $2, updated_at = now()
+           WHERE provider_reference = $1 AND status <> 'paid'`,
+          [orderToken, "PAYPAL_VALIDATION_FAILED"],
+        );
+      } catch {
+        // Best effort sync.
+      }
       return res.redirect(CANCEL_URL);
     }
 
@@ -733,11 +1148,36 @@ router.get("/paypal/return", async (req: Request, res: Response) => {
       referenceId,
       paymentMethod: "paypal",
       description: `شراء ${meta.coins} كوينز عبر PayPal`,
+      providerReference: orderToken,
     });
+
+    try {
+      await pool.query(
+        `UPDATE payment_orders
+         SET status = 'paid', updated_at = now()
+         WHERE provider_reference = $1 AND status <> 'paid'`,
+        [orderToken],
+      );
+    } catch {
+      // Best effort sync.
+    }
 
     return res.redirect(SUCCESS_URL);
   } catch (err: any) {
     log.error(`PayPal return error: ${err.message}`);
+    try {
+      const pool = getPool();
+      if (pool && orderToken) {
+        await pool.query(
+          `UPDATE payment_orders
+           SET status = 'failed', fail_reason = $2, updated_at = now()
+           WHERE provider_reference = $1 AND status <> 'paid'`,
+          [orderToken, String(err?.message || "PAYPAL_RETURN_ERROR")],
+        );
+      }
+    } catch {
+      // Ignore sync failure.
+    }
     return res.redirect(CANCEL_URL);
   }
 });

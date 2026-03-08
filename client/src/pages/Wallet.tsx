@@ -68,7 +68,8 @@ export function Wallet() {
   } = useIncomeData(activeTab);
   const {
     packages, milesPackages, milesLoading,
-    depositProviders, depositMethods, selectedProvider, setSelectedProvider, detectedCountry,
+    depositProviders, unavailableProviders, recommendedProvider,
+    depositMethods, selectedProvider, setSelectedProvider, purchasePending, detectedCountry,
     handlePurchase, handleMilesPurchase,
     refreshMiles,
   } = useRechargeData(activeTab, loadBalance);
@@ -318,19 +319,67 @@ export function Wallet() {
               </div>
 
               {depositProviders.length > 0 ? (
-                <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                  {depositProviders.map((p) => (
-                    <button
-                      key={p.key}
-                      onClick={() => setSelectedProvider(p.key)}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${selectedProvider === p.key
-                        ? "bg-violet-500/20 border-violet-400/40 text-violet-200"
-                        : "bg-white/[0.04] border-white/[0.08] text-white/45 hover:text-white/70"
-                        }`}
-                    >
-                      {p.displayName}
-                    </button>
-                  ))}
+                <div className="space-y-3">
+                  {recommendedProvider && depositProviders.some((p) => p.key === recommendedProvider) && (
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                      <p className="text-[11px] font-bold text-emerald-300 mb-2">{t("wallet.recommendedProvider", "الموصى به")}</p>
+                      {depositProviders
+                        .filter((p) => p.key === recommendedProvider)
+                        .map((p) => (
+                          <button
+                            key={`recommended-${p.key}`}
+                            onClick={() => setSelectedProvider(p.key)}
+                            className={`w-full text-start px-3 py-2 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${selectedProvider === p.key
+                              ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-100"
+                              : "bg-white/[0.04] border-white/[0.08] text-white/60 hover:text-white/80"
+                              }`}
+                          >
+                            {p.displayName}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+                    <p className="text-[11px] font-bold text-white/55 mb-2">{t("wallet.availableProviders", "وسائل متاحة")}</p>
+                    <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                      {depositProviders
+                        .filter((p) => p.key !== recommendedProvider)
+                        .map((p) => (
+                          <button
+                            key={p.key}
+                            onClick={() => setSelectedProvider(p.key)}
+                            className={`px-3 py-2 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${selectedProvider === p.key
+                              ? "bg-violet-500/20 border-violet-400/40 text-violet-200"
+                              : "bg-white/[0.04] border-white/[0.08] text-white/45 hover:text-white/70"
+                              }`}
+                          >
+                            {p.displayName}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {unavailableProviders.length > 0 && (
+                    <details className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                      <summary className="cursor-pointer text-[11px] font-bold text-amber-300/90">
+                        {t("wallet.unavailableProviders", "وسائل غير متاحة حالياً")} ({unavailableProviders.length})
+                      </summary>
+                      <div className="mt-2 space-y-1.5">
+                        {unavailableProviders.map((p) => (
+                          <div key={`unavailable-${p.key}`} className="rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2">
+                            <p className="text-xs font-semibold text-white/75">{p.displayName}</p>
+                            <p className="text-[11px] text-amber-200/80">{p.reasonText || t("wallet.providerUnavailable", "غير متاح حالياً")}</p>
+                            {p.reasonCode === "amount_out_of_range" && typeof p.minAmount === "number" && typeof p.maxAmount === "number" && (
+                              <p className="text-[10px] text-white/50 mt-1">
+                                {t("wallet.amountRange", "النطاق المسموح")}: ${p.minAmount} - ${p.maxAmount}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-300/80">
@@ -355,7 +404,7 @@ export function Wallet() {
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 {packages.map((pkg, i) => (
                   <motion.div key={pkg.id || `${pkg.coins}-${i}`} initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: i * 0.04 }}>
-                    <GlassCard onClick={() => handlePurchase(pkg)} className="p-5 hover:bg-white/[0.06] transition-all cursor-pointer active:scale-95 border-violet-500/5 relative overflow-hidden">
+                    <GlassCard onClick={() => !purchasePending && handlePurchase(pkg)} className={`p-5 transition-all border-violet-500/5 relative overflow-hidden ${purchasePending ? "opacity-70 cursor-not-allowed" : "hover:bg-white/[0.06] cursor-pointer active:scale-95"}`}>
                       {pkg.popular && (
                         <span className="absolute top-2 end-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-300 font-bold">
                           {t("wallet.popular", "الأكثر طلباً")}
@@ -376,6 +425,9 @@ export function Wallet() {
                           <p className="text-emerald-400 text-xs font-bold">+{pkg.bonus.toLocaleString()} {t("wallet.bonus", "بونص")}</p>
                         )}
                       </div>
+                      {purchasePending && (
+                        <p className="mt-2 text-[11px] text-white/45">{t("wallet.processing", "جاري التنفيذ...")}</p>
+                      )}
                     </GlassCard>
                   </motion.div>
                 ))}

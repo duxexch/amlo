@@ -14,6 +14,7 @@ declare module "express-session" {
     userId?: string; // For regular user sessions (social/world)
     activeProfileIndex?: number; // 1 or 2 — which dual profile is active
     pinVerified?: boolean; // Whether PIN was verified after login
+    deviceTrustPending?: boolean; // Whether current device still needs trust verification
   }
 }
 

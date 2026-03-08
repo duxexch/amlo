@@ -250,6 +250,30 @@ export async function applyDatabaseConstraints(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS stream_auto_clips_stream_idx ON stream_auto_clips (stream_id);`,
     `CREATE INDEX IF NOT EXISTS stream_auto_clips_host_idx ON stream_auto_clips (host_id);`,
     `CREATE INDEX IF NOT EXISTS stream_auto_clips_created_idx ON stream_auto_clips (created_at);`,
+    // ── Payment orders (idempotent checkout state machine) ──
+    `CREATE TABLE IF NOT EXISTS payment_orders (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      package_id varchar NOT NULL REFERENCES coin_packages(id) ON DELETE RESTRICT,
+      provider text NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      currency text NOT NULL DEFAULT 'USD',
+      status text NOT NULL DEFAULT 'created',
+      idempotency_key text NOT NULL,
+      provider_reference text,
+      checkout_url text,
+      fail_reason text,
+      metadata text,
+      expires_at timestamp,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT payment_orders_amount_positive CHECK (amount > 0),
+      CONSTRAINT payment_orders_status_valid CHECK (status IN ('created', 'pending_provider', 'processing', 'paid', 'failed', 'expired', 'cancelled'))
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_user_idempotency_uq ON payment_orders (user_id, idempotency_key);`,
+    `CREATE INDEX IF NOT EXISTS payment_orders_user_created_idx ON payment_orders (user_id, created_at DESC);`,
+    `CREATE INDEX IF NOT EXISTS payment_orders_provider_ref_idx ON payment_orders (provider_reference);`,
+    `CREATE INDEX IF NOT EXISTS payment_orders_status_idx ON payment_orders (status, created_at DESC);`,
   ];
 
   try {

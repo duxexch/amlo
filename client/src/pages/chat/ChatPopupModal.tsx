@@ -19,7 +19,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 import { useActiveChat, useReportModal, useAutoMessageTranslations } from "./chatHooks";
-import type { ChatMessage, Conversation, ChatSettings } from "./chatTypes";
+import type { ChatMessage, Conversation, ChatSettings, MessageSendState } from "./chatTypes";
+import { resolveMessageSendState } from "./chatTypes";
 import { chatApi } from "@/lib/socialApi";
 import { authApi } from "@/lib/authApi";
 import { ensurePushSubscription } from "@/lib/pushNotifications";
@@ -67,7 +68,7 @@ function setChatNotifyMode(mode: ChatNotifyMode) {
 
 // ── Message Bubble with full context menu ──
 const MessageBubble = memo(function MessageBubble({
-  msg, isMe, showAvatar, otherUser, onReport, onReply, onDelete, onDeleteForMe, onRetry, onOpenImage, lang,
+  msg, isMe, showAvatar, otherUser, onReport, onReply, onDelete, onDeleteForMe, onRetry, onCancelPending, onOpenImage, lang,
   batchReactions, translationText, translationLoading, detectedLang, targetLang, showOriginalText, onTranslateNow,
 }: {
   msg: ChatMessage; isMe: boolean; showAvatar: boolean; otherUser: any;
@@ -75,6 +76,7 @@ const MessageBubble = memo(function MessageBubble({
   onDelete: (msgId: string) => void; onDeleteForMe: (msgId: string) => void;
   onOpenImage: (url: string) => void;
   onRetry?: (msg: ChatMessage) => void; lang: string;
+  onCancelPending?: (msg: ChatMessage) => void;
   batchReactions?: Array<{ emoji: string; userId: string; username?: string; isMine?: boolean }>;
   translationText?: string | null;
   translationLoading?: boolean;
@@ -100,6 +102,7 @@ const MessageBubble = memo(function MessageBubble({
     translationText.trim().length > 0 &&
     translationText.trim() !== msg.content.trim(),
   );
+  const sendState = resolveMessageSendState(msg);
 
   // Update reactions when batch data changes
   useEffect(() => {
@@ -135,7 +138,7 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   // Failed message: show retry button
-  if (msg._failed) {
+  if (sendState === "failed") {
     return (
       <div className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
         <div className="w-7 h-7 shrink-0 invisible" />
@@ -153,6 +156,16 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     );
   }
+
+  const sendStateLabel = (state: MessageSendState | null) => {
+    if (state === "queued") return t("chat.statusQueued", "في الانتظار");
+    if (state === "sending") return t("chat.statusSending", "جارٍ الإرسال");
+    if (state === "retrying") return t("chat.statusRetrying", "إعادة المحاولة");
+    if (state === "sent") return t("chat.statusSent", "تم الإرسال");
+    if (state === "delivered") return t("chat.statusDelivered", "تم التسليم");
+    if (state === "read") return t("chat.statusRead", "تمت القراءة");
+    return "";
+  };
 
   const handleCopy = async () => {
     if (!msg.content) return;
@@ -273,6 +286,29 @@ const MessageBubble = memo(function MessageBubble({
               {t("chat.translating", "جاري الترجمة...")}
             </div>
           )}
+          {(sendState === "queued" || sendState === "sending" || sendState === "retrying")
+            && msg.type !== "text"
+            && typeof msg._uploadProgress === "number" && (
+              <div className="mt-1.5 pt-1.5 border-t border-white/10">
+                <div className="w-full h-1.5 rounded-full bg-black/20 overflow-hidden">
+                  <div
+                    className="h-full bg-white/70 transition-all duration-200"
+                    style={{ width: `${Math.max(0, Math.min(100, msg._uploadProgress))}%` }}
+                  />
+                </div>
+                <p className="text-[10px] opacity-65 mt-1">
+                  {`${Math.max(0, Math.min(100, Math.round(msg._uploadProgress)))}%`}
+                </p>
+                {onCancelPending && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onCancelPending(msg); }}
+                    className="text-[10px] text-red-300/90 hover:text-red-200 mt-1"
+                  >
+                    {t("common.cancel", "إلغاء")}
+                  </button>
+                )}
+              </div>
+            )}
           <div className={`flex items-center gap-1 mt-1 ${isMe ? "justify-start" : "justify-end"}`}>
             {msg.content && (
               <button
@@ -286,13 +322,15 @@ const MessageBubble = memo(function MessageBubble({
             <span className="text-[10px] opacity-50">{formatTime(new Date(msg.createdAt), lang)}</span>
             {msg.isEncrypted && <Lock className="w-2.5 h-2.5 opacity-30" />}
             {isMe && (
-              msg._pending
-                ? <Clock className="w-3 h-3 opacity-40 animate-pulse" />
-                : msg.isRead
-                  ? <CheckCheck className="w-3 h-3 text-blue-400 opacity-90" />
-                  : msg._delivered
-                    ? <CheckCheck className="w-3 h-3 opacity-50" />
-                    : <Check className="w-3 h-3 opacity-40" />
+              <span title={sendStateLabel(sendState)}>
+                {sendState === "queued" || sendState === "sending" || sendState === "retrying"
+                  ? <Clock className="w-3 h-3 opacity-40 animate-pulse" />
+                  : sendState === "read"
+                    ? <CheckCheck className="w-3 h-3 text-blue-400 opacity-90" />
+                    : sendState === "delivered"
+                      ? <CheckCheck className="w-3 h-3 opacity-50" />
+                      : <Check className="w-3 h-3 opacity-40" />}
+              </span>
             )}
           </div>
         </div>
@@ -1161,6 +1199,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                         onDelete={id => chat.deleteMyMessage(id, "forEveryone")}
                         onDeleteForMe={id => chat.deleteMyMessage(id, "forMe")}
                         onRetry={m => chat.retryMessage(m, t)}
+                        onCancelPending={m => chat.cancelPendingMessage(m, t)}
                         onOpenImage={url => setLightboxUrl(url)}
                         lang={lang}
                         batchReactions={reactionsMap[msg.id]}

@@ -19,7 +19,7 @@ import { Router, type Request, type Response } from "express";
 import { eq, and, or } from "drizzle-orm";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { getDb } from "../db";
-import { cacheGet, cacheSet, cacheDel } from "../redis";
+import { cacheGet, cacheSet, cacheDel, getRedis } from "../redis";
 import { createLogger } from "../logger";
 import { storage } from "../storage";
 import {
@@ -38,7 +38,7 @@ import {
   updateProfileSchema,
   setFriendVisibilitySchema,
 } from "../../shared/schema";
-import { randomUUID, randomBytes, createHmac } from "crypto";
+import { randomUUID, randomBytes, createHmac, createHash } from "crypto";
 import { sendOtp, verifyOtp, sendPasswordResetEmail } from "../services/email";
 
 const router = Router();
@@ -58,6 +58,252 @@ function normalizeOtpCode(value: unknown): string {
     .slice(0, 6);
 }
 
+type SecurityEventType =
+  | "login_success"
+  | "logout"
+  | "pin_verified"
+  | "profile_updated"
+  | "password_changed"
+  | "trusted_device_added"
+  | "trusted_device_removed"
+  | "device_lock_updated";
+
+type SecurityEventItem = {
+  id: string;
+  type: SecurityEventType;
+  createdAt: string;
+  ip: string;
+  userAgent: string;
+  details?: Record<string, any>;
+};
+
+type TrustedDevice = {
+  id: string;
+  label: string;
+  userAgent: string;
+  ip: string;
+  addedAt: string;
+  lastSeenAt: string;
+};
+
+type TrustedDeviceState = {
+  lockEnabled: boolean;
+  devices: TrustedDevice[];
+};
+
+type NotificationInboxType = "message" | "call" | "friend-request" | "admin" | "system";
+
+type NotificationInboxItem = {
+  id: string;
+  type: NotificationInboxType;
+  title?: string;
+  body?: string;
+  titleKey?: string;
+  bodyKey?: string;
+  params?: Record<string, string | number>;
+  createdAt: number;
+  url?: string;
+  persistent?: boolean;
+  meta?: Record<string, string | number | boolean | null | undefined>;
+  isRead?: boolean;
+  readAt?: number;
+};
+
+const DEFAULT_TRUSTED_STATE: TrustedDeviceState = { lockEnabled: false, devices: [] };
+const NOTIFICATION_INBOX_MAX_ITEMS = 120;
+
+function getClientIp(req: Request): string {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function guessDeviceLabel(userAgent: string): string {
+  const ua = userAgent.toLowerCase();
+  if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ios")) return "iOS Device";
+  if (ua.includes("android")) return "Android Device";
+  if (ua.includes("windows")) return "Windows Browser";
+  if (ua.includes("mac os") || ua.includes("macintosh")) return "Mac Browser";
+  if (ua.includes("linux")) return "Linux Browser";
+  return "Unknown Device";
+}
+
+function getDeviceFingerprint(req: Request): string {
+  const ua = String(req.headers["user-agent"] || "unknown");
+  const lang = String(req.headers["accept-language"] || "");
+  const ip = getClientIp(req);
+  return createHash("sha256").update(`${ua}|${lang}|${ip}`).digest("hex").slice(0, 24);
+}
+
+function timelineKey(userId: string): string {
+  return `ablox:security:timeline:${userId}`;
+}
+
+function trustedDevicesKey(userId: string): string {
+  return `ablox:security:trusted-devices:${userId}`;
+}
+
+function notificationInboxKey(userId: string): string {
+  return `ablox:notifications:inbox:${userId}`;
+}
+
+async function addSecurityEvent(req: Request, userId: string, type: SecurityEventType, details?: Record<string, any>) {
+  const redis = getRedis();
+  if (!redis) return;
+  const item: SecurityEventItem = {
+    id: randomUUID(),
+    type,
+    createdAt: new Date().toISOString(),
+    ip: getClientIp(req),
+    userAgent: String(req.headers["user-agent"] || "unknown"),
+    ...(details ? { details } : {}),
+  };
+  try {
+    await redis.lpush(timelineKey(userId), JSON.stringify(item));
+    await redis.ltrim(timelineKey(userId), 0, 49);
+    await redis.expire(timelineKey(userId), 60 * 60 * 24 * 60);
+  } catch (err: any) {
+    authLog.warn({ err, userId }, "Could not append security event");
+  }
+}
+
+async function getTrustedDeviceState(userId: string): Promise<TrustedDeviceState> {
+  const redis = getRedis();
+  if (!redis) return DEFAULT_TRUSTED_STATE;
+  try {
+    const raw = await redis.get(trustedDevicesKey(userId));
+    if (!raw) return DEFAULT_TRUSTED_STATE;
+    const parsed = JSON.parse(raw);
+    return {
+      lockEnabled: !!parsed?.lockEnabled,
+      devices: Array.isArray(parsed?.devices) ? parsed.devices : [],
+    };
+  } catch {
+    return DEFAULT_TRUSTED_STATE;
+  }
+}
+
+async function saveTrustedDeviceState(userId: string, state: TrustedDeviceState): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.set(trustedDevicesKey(userId), JSON.stringify(state), "EX", 60 * 60 * 24 * 180);
+  } catch (err: any) {
+    authLog.warn({ err, userId }, "Could not save trusted device state");
+  }
+}
+
+async function touchOrAddTrustedDevice(userId: string, req: Request): Promise<{ trusted: boolean; lockEnabled: boolean }> {
+  const state = await getTrustedDeviceState(userId);
+  const now = new Date().toISOString();
+  const deviceId = getDeviceFingerprint(req);
+  const device = state.devices.find((d) => d.id === deviceId);
+  if (device) {
+    device.lastSeenAt = now;
+    await saveTrustedDeviceState(userId, state);
+    return { trusted: true, lockEnabled: state.lockEnabled };
+  }
+  return { trusted: false, lockEnabled: state.lockEnabled };
+}
+
+async function addCurrentDeviceAsTrusted(userId: string, req: Request): Promise<TrustedDevice> {
+  const state = await getTrustedDeviceState(userId);
+  const now = new Date().toISOString();
+  const id = getDeviceFingerprint(req);
+  const existing = state.devices.find((d) => d.id === id);
+  if (existing) {
+    existing.lastSeenAt = now;
+    await saveTrustedDeviceState(userId, state);
+    return existing;
+  }
+
+  const entry: TrustedDevice = {
+    id,
+    label: guessDeviceLabel(String(req.headers["user-agent"] || "unknown")),
+    userAgent: String(req.headers["user-agent"] || "unknown"),
+    ip: getClientIp(req),
+    addedAt: now,
+    lastSeenAt: now,
+  };
+  state.devices.unshift(entry);
+  state.devices = state.devices.slice(0, 20);
+  await saveTrustedDeviceState(userId, state);
+  return entry;
+}
+
+function normalizeNotificationType(value: unknown): NotificationInboxType {
+  if (value === "message" || value === "call" || value === "friend-request" || value === "admin" || value === "system") {
+    return value;
+  }
+  return "system";
+}
+
+function sanitizeNotificationInboxItem(input: any): NotificationInboxItem {
+  const createdAt = Number(input?.createdAt || Date.now()) || Date.now();
+  const id = typeof input?.id === "string" && input.id.trim()
+    ? input.id.trim().slice(0, 80)
+    : `n-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const sanitizeText = (value: unknown, maxLen: number) => {
+    const s = typeof value === "string" ? value.trim() : "";
+    return s ? s.slice(0, maxLen) : undefined;
+  };
+
+  const rawParams = input?.params && typeof input.params === "object" ? input.params : undefined;
+  const params = rawParams
+    ? Object.fromEntries(
+      Object.entries(rawParams)
+        .filter(([k]) => typeof k === "string" && k.length <= 40)
+        .slice(0, 12)
+        .map(([k, v]) => [k, typeof v === "number" ? v : String(v).slice(0, 80)]),
+    ) as Record<string, string | number>
+    : undefined;
+
+  return {
+    id,
+    type: normalizeNotificationType(input?.type),
+    title: sanitizeText(input?.title, 120),
+    body: sanitizeText(input?.body, 320),
+    titleKey: sanitizeText(input?.titleKey, 80),
+    bodyKey: sanitizeText(input?.bodyKey, 80),
+    ...(params ? { params } : {}),
+    createdAt,
+    url: sanitizeText(input?.url, 300),
+    persistent: !!input?.persistent,
+    isRead: !!input?.isRead,
+    readAt: input?.readAt ? Number(input.readAt) : undefined,
+  };
+}
+
+async function listNotificationInbox(userId: string, limit = 120): Promise<NotificationInboxItem[]> {
+  const redis = getRedis();
+  if (!redis) return [];
+  const capped = Math.min(Math.max(limit, 1), NOTIFICATION_INBOX_MAX_ITEMS);
+  const rows = await redis.lrange(notificationInboxKey(userId), 0, capped - 1);
+  return rows
+    .map((row) => {
+      try {
+        return sanitizeNotificationInboxItem(JSON.parse(row));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as NotificationInboxItem[];
+}
+
+async function saveNotificationInbox(userId: string, entries: NotificationInboxItem[]) {
+  const redis = getRedis();
+  if (!redis) return;
+  const key = notificationInboxKey(userId);
+  const trimmed = entries.slice(0, NOTIFICATION_INBOX_MAX_ITEMS);
+  const tx = redis.multi();
+  tx.del(key);
+  if (trimmed.length) {
+    tx.rpush(key, ...trimmed.map((item) => JSON.stringify(item)));
+  }
+  tx.expire(key, 60 * 60 * 24 * 45);
+  await tx.exec();
+}
+
 // ── Helper: require authenticated user ──
 function requireAuth(req: Request, res: Response): string | null {
   const userId = req.session?.userId;
@@ -72,6 +318,14 @@ function requireAuth(req: Request, res: Response): string | null {
 function requirePinVerified(req: Request, res: Response): string | null {
   const userId = requireAuth(req, res);
   if (!userId) return null;
+  if (req.session.deviceTrustPending) {
+    res.status(403).json({
+      success: false,
+      message: "هذا الجهاز غير موثوق. يرجى إكمال التحقق عبر رمز OTP أولاً.",
+      code: "DEVICE_TRUST_REQUIRED",
+    });
+    return null;
+  }
   if (!req.session.pinVerified) {
     res.status(403).json({ success: false, message: "يرجى إدخال رمز PIN أولاً", code: "PIN_REQUIRED" });
     return null;
@@ -243,8 +497,20 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
     req.session.pinVerified = false;
     req.session.activeProfileIndex = undefined;
 
+    const trustStatus = await touchOrAddTrustedDevice(user.id, req);
+    if (trustStatus.lockEnabled && !trustStatus.trusted) {
+      req.session.deviceTrustPending = true;
+    } else {
+      req.session.deviceTrustPending = false;
+    }
+
     // Update last login
     await storage.updateUser(user.id, { lastOnlineAt: new Date(), status: "online" });
+    await addSecurityEvent(req, user.id, "login_success", {
+      via: "password",
+      trustedDevice: trustStatus.trusted,
+      lockEnabled: trustStatus.lockEnabled,
+    });
 
     log(`User login: ${user.username}`);
 
@@ -260,6 +526,7 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
         needsPinVerify: true,
         hasPinProfiles: hasProfiles,
         profileCount: profiles.length,
+        deviceTrustRequired: trustStatus.lockEnabled && !trustStatus.trusted,
       },
     });
   } catch (err: any) {
@@ -273,6 +540,9 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
  */
 router.post("/logout", (req: Request, res: Response) => {
   const userId = req.session?.userId;
+  if (userId) {
+    void addSecurityEvent(req, userId, "logout");
+  }
   req.session.destroy((err: any) => {
     if (err) {
       authLog.error({ err }, "Logout error");
@@ -490,6 +760,7 @@ router.post("/pin/setup", async (req: Request, res: Response) => {
     if (isDefault) {
       req.session.pinVerified = true;
       req.session.activeProfileIndex = profileIndex;
+      await addSecurityEvent(req, userId, "pin_verified", { profileIndex });
     }
 
     log(`PIN setup for user ${userId}, profile ${profileIndex}`);
@@ -634,7 +905,52 @@ router.put("/profiles/:index", async (req: Request, res: Response) => {
     const updateData: Record<string, any> = { updatedAt: new Date() };
     const data = parsed.data;
     if (data.displayName !== undefined) updateData.displayName = data.displayName;
-    if (data.avatar !== undefined) updateData.avatar = data.avatar;
+    if (data.avatar !== undefined) {
+      const avatarValue = (data.avatar || "").trim();
+      if (avatarValue) {
+        const duplicateUserRows = await db
+          .select({ ownerId: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.avatar, avatarValue))
+          .limit(5);
+
+        const duplicateProfileRows = await db
+          .select({ ownerId: schema.userProfiles.userId })
+          .from(schema.userProfiles)
+          .where(eq(schema.userProfiles.avatar, avatarValue))
+          .limit(10);
+
+        const usedByOtherUser = duplicateUserRows.some((r) => r.ownerId !== userId)
+          || duplicateProfileRows.some((r) => r.ownerId !== userId);
+
+        if (usedByOtherUser) {
+          try {
+            await storage.createFraudAlert({
+              userId,
+              type: "multiple_accounts",
+              severity: "medium",
+              description: "Duplicate avatar update attempt detected via profile update",
+              details: JSON.stringify({
+                avatar: avatarValue,
+                duplicateInUsers: duplicateUserRows.filter((r) => r.ownerId !== userId).map((r) => r.ownerId),
+                duplicateInProfiles: duplicateProfileRows.filter((r) => r.ownerId !== userId).map((r) => r.ownerId),
+              }),
+              status: "pending",
+            } as any);
+          } catch (alertErr: any) {
+            authLog.warn({ err: alertErr, userId }, "Could not create fraud alert for duplicate avatar update");
+          }
+
+          return res.status(409).json({
+            success: false,
+            message: "هذه الصورة مستخدمة بالفعل بواسطة مستخدم آخر. الرجاء اختيار صورة مختلفة.",
+            code: "DUPLICATE_AVATAR",
+          });
+        }
+      }
+
+      updateData.avatar = avatarValue;
+    }
     if (data.bio !== undefined) updateData.bio = data.bio;
     if (data.gender !== undefined) updateData.gender = data.gender;
     if (data.country !== undefined) updateData.country = data.country;
@@ -645,6 +961,8 @@ router.put("/profiles/:index", async (req: Request, res: Response) => {
       .set(updateData)
       .where(eq(schema.userProfiles.id, existing.id))
       .returning();
+
+    await addSecurityEvent(req, userId, "profile_updated", { profileIndex });
 
     log(`Profile ${profileIndex} updated for user ${userId}`);
 
@@ -1049,6 +1367,15 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
       if (defaultProfile) {
         req.session.pinVerified = true;
         req.session.activeProfileIndex = defaultProfile.profileIndex;
+        if (req.session.deviceTrustPending) {
+          const trusted = await addCurrentDeviceAsTrusted(userId, req);
+          req.session.deviceTrustPending = false;
+          await addSecurityEvent(req, userId, "trusted_device_added", {
+            method: "otp",
+            deviceId: trusted.id,
+            label: trusted.label,
+          });
+        }
         return res.json({
           success: true,
           message: "تم التحقق بنجاح",
@@ -1058,6 +1385,15 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
     }
 
     req.session.pinVerified = true;
+    if (req.session.deviceTrustPending) {
+      const trusted = await addCurrentDeviceAsTrusted(userId, req);
+      req.session.deviceTrustPending = false;
+      await addSecurityEvent(req, userId, "trusted_device_added", {
+        method: "otp",
+        deviceId: trusted.id,
+        label: trusted.label,
+      });
+    }
     return res.json({ success: true, message: "تم التحقق بنجاح" });
   } catch (err: any) {
     authLog.error({ err }, "Login OTP verify error");
@@ -1093,6 +1429,7 @@ router.put("/change-password", async (req: Request, res: Response) => {
 
     const newHash = await hashPasswordAsync(newPassword);
     await storage.updateUser(userId, { passwordHash: newHash } as any);
+    await addSecurityEvent(req, userId, "password_changed");
 
     log(`User ${userId} changed password`);
     return res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
@@ -1136,6 +1473,190 @@ router.delete("/account", async (req: Request, res: Response) => {
   } catch (err: any) {
     authLog.error({ err }, "Delete account error");
     return res.status(500).json({ success: false, message: "حدث خطأ في حذف الحساب" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// SECURITY TIMELINE & TRUSTED DEVICES
+// ════════════════════════════════════════════════════════════
+
+router.get("/security/timeline", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const redis = getRedis();
+  if (!redis) {
+    return res.json({ success: true, data: [] });
+  }
+
+  try {
+    const rows = await redis.lrange(timelineKey(userId), 0, 49);
+    const events = rows
+      .map((row) => {
+        try {
+          return JSON.parse(row) as SecurityEventItem;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    return res.json({ success: true, data: events });
+  } catch (err: any) {
+    authLog.error({ err, userId }, "Read security timeline error");
+    return res.status(500).json({ success: false, message: "تعذر تحميل السجل الأمني" });
+  }
+});
+
+router.get("/security/devices", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const state = await getTrustedDeviceState(userId);
+  const currentDeviceId = getDeviceFingerprint(req);
+  return res.json({
+    success: true,
+    data: {
+      lockEnabled: state.lockEnabled,
+      currentDeviceId,
+      currentDeviceTrusted: state.devices.some((d) => d.id === currentDeviceId),
+      devices: state.devices,
+    },
+  });
+});
+
+router.post("/security/devices/trust-current", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const trusted = await addCurrentDeviceAsTrusted(userId, req);
+  req.session.deviceTrustPending = false;
+  await addSecurityEvent(req, userId, "trusted_device_added", {
+    method: "manual",
+    deviceId: trusted.id,
+    label: trusted.label,
+  });
+  return res.json({ success: true, data: trusted });
+});
+
+router.put("/security/device-lock", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const enabled = !!req.body?.enabled;
+  const state = await getTrustedDeviceState(userId);
+  state.lockEnabled = enabled;
+  await saveTrustedDeviceState(userId, state);
+  await addSecurityEvent(req, userId, "device_lock_updated", { enabled });
+
+  return res.json({ success: true, data: { lockEnabled: enabled } });
+});
+
+router.delete("/security/devices/:deviceId", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const deviceId = paramStr(req.params.deviceId);
+  if (!deviceId) {
+    return res.status(400).json({ success: false, message: "معرف الجهاز غير صالح" });
+  }
+
+  const state = await getTrustedDeviceState(userId);
+  const beforeCount = state.devices.length;
+  state.devices = state.devices.filter((d) => d.id !== deviceId);
+  if (state.devices.length === beforeCount) {
+    return res.status(404).json({ success: false, message: "الجهاز غير موجود" });
+  }
+
+  await saveTrustedDeviceState(userId, state);
+  if (getDeviceFingerprint(req) === deviceId) {
+    req.session.deviceTrustPending = state.lockEnabled;
+  }
+  await addSecurityEvent(req, userId, "trusted_device_removed", { deviceId });
+
+  return res.json({ success: true, message: "تمت إزالة الجهاز" });
+});
+
+// ════════════════════════════════════════════════════════════
+// NOTIFICATION INBOX (Redis-backed)
+// ════════════════════════════════════════════════════════════
+
+router.get("/notifications/inbox", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  try {
+    const limit = Number(req.query.limit || NOTIFICATION_INBOX_MAX_ITEMS) || NOTIFICATION_INBOX_MAX_ITEMS;
+    const items = await listNotificationInbox(userId, limit);
+    const unread = items.reduce((sum, item) => sum + (item.isRead ? 0 : 1), 0);
+    return res.json({ success: true, data: { items, unread } });
+  } catch (err: any) {
+    authLog.error({ err, userId }, "Read notification inbox error");
+    return res.status(500).json({ success: false, message: "تعذر تحميل الإشعارات" });
+  }
+});
+
+router.post("/notifications/inbox", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  try {
+    const item = sanitizeNotificationInboxItem(req.body || {});
+    item.isRead = false;
+    item.readAt = undefined;
+
+    const existing = await listNotificationInbox(userId, NOTIFICATION_INBOX_MAX_ITEMS);
+    const deduped = [item, ...existing.filter((it) => it.id !== item.id)].slice(0, NOTIFICATION_INBOX_MAX_ITEMS);
+    await saveNotificationInbox(userId, deduped);
+
+    const unread = deduped.reduce((sum, it) => sum + (it.isRead ? 0 : 1), 0);
+    return res.json({ success: true, data: { item, unread } });
+  } catch (err: any) {
+    authLog.error({ err, userId }, "Create notification inbox item error");
+    return res.status(500).json({ success: false, message: "تعذر حفظ الإشعار" });
+  }
+});
+
+router.post("/notifications/inbox/mark-read", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  try {
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.filter((v: any) => typeof v === "string" && v.trim()).map((v: string) => v.trim())
+      : [];
+
+    const set = new Set(ids);
+    const markAll = set.size === 0;
+    const now = Date.now();
+    const existing = await listNotificationInbox(userId, NOTIFICATION_INBOX_MAX_ITEMS);
+
+    const next = existing.map((it) => {
+      if (it.isRead) return it;
+      if (markAll || set.has(it.id)) {
+        return { ...it, isRead: true, readAt: now };
+      }
+      return it;
+    });
+
+    await saveNotificationInbox(userId, next);
+    const unread = next.reduce((sum, it) => sum + (it.isRead ? 0 : 1), 0);
+    return res.json({ success: true, data: { unread } });
+  } catch (err: any) {
+    authLog.error({ err, userId }, "Mark notification inbox read error");
+    return res.status(500).json({ success: false, message: "تعذر تحديث الإشعارات" });
+  }
+});
+
+router.delete("/notifications/inbox", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  try {
+    await saveNotificationInbox(userId, []);
+    return res.json({ success: true, data: { unread: 0 } });
+  } catch (err: any) {
+    authLog.error({ err, userId }, "Clear notification inbox error");
+    return res.status(500).json({ success: false, message: "تعذر مسح الإشعارات" });
   }
 });
 

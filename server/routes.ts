@@ -212,5 +212,49 @@ export async function registerRoutes(
     }
   });
 
+  // Public: Notification/ringtone media config (admin-managed)
+  const NOTIFICATION_SOUNDS_DEFAULT = {
+    message: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    call: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    "friend-request": { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    admin: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+    system: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
+  };
+
+  app.get("/api/notification-sounds", async (_req, res) => {
+    try {
+      const cfg = await storage.getSystemConfig("notificationSounds");
+      const raw = cfg?.configData
+        ? (typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData)
+        : {};
+
+      const mergeSlot = (slot: string) => {
+        const defaults = (NOTIFICATION_SOUNDS_DEFAULT as any)[slot] || NOTIFICATION_SOUNDS_DEFAULT.message;
+        const incoming = raw?.[slot] && typeof raw[slot] === "object" ? raw[slot] : {};
+        return {
+          enabled: typeof incoming.enabled === "boolean" ? incoming.enabled : defaults.enabled,
+          kind: incoming.kind === "file" ? "file" : "tone",
+          mediaType: incoming.mediaType === "video" || incoming.mediaType === "voice" ? incoming.mediaType : "audio",
+          url: typeof incoming.url === "string" ? incoming.url : "",
+          volume: typeof incoming.volume === "number" ? Math.max(0, Math.min(1, incoming.volume)) : defaults.volume,
+        };
+      };
+
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+      return res.json({
+        success: true,
+        data: {
+          message: mergeSlot("message"),
+          call: mergeSlot("call"),
+          "friend-request": mergeSlot("friend-request"),
+          admin: mergeSlot("admin"),
+          system: mergeSlot("system"),
+        },
+      });
+    } catch (_err: any) {
+      return res.json({ success: true, data: NOTIFICATION_SOUNDS_DEFAULT });
+    }
+  });
+
   return httpServer;
 }

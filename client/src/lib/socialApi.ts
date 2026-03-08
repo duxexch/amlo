@@ -5,19 +5,183 @@
 const API_BASE = "/api/social";
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
 
-/** Upload a media file (image/video/voice) for chat */
-export async function uploadMedia(file: File | Blob, filename?: string): Promise<string> {
+type UploadProgress = {
+  percent: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  stage: "uploading" | "finalizing" | "completed";
+};
+
+type UploadProgressHandler = (progress: UploadProgress) => void;
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException
+    ? err.name === "AbortError"
+    : String((err as any)?.name || "").toLowerCase() === "aborterror";
+}
+
+async function uploadMediaSimple(
+  file: File | Blob,
+  filename?: string,
+  onProgress?: UploadProgressHandler,
+  signal?: AbortSignal,
+): Promise<string> {
+  const total = Number((file as any)?.size || 0) || 0;
+  if (onProgress) {
+    onProgress({ percent: total > 0 ? 10 : 0, uploadedBytes: 0, totalBytes: total, stage: "uploading" });
+  }
   const formData = new FormData();
   formData.append("file", file, filename || (file instanceof File ? file.name : "recording.webm"));
   const res = await fetch("/api/v1/upload/media", {
     method: "POST",
     credentials: "include",
     body: formData,
+    signal,
   });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Upload failed");
+  if (onProgress) {
+    onProgress({ percent: 100, uploadedBytes: total || Number(json?.data?.size || 0), totalBytes: total || Number(json?.data?.size || 0), stage: "completed" });
+  }
   return json.data.url as string;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function abortResumableUpload(uploadId: string): Promise<void> {
+  try {
+    await fetch(`/api/v1/upload/media/chunk/${encodeURIComponent(uploadId)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+  } catch {
+    // Ignore abort failures.
+  }
+}
+
+async function uploadMediaResumable(file: File, onProgress?: UploadProgressHandler, signal?: AbortSignal): Promise<string> {
+  const initRes = await fetch("/api/v1/upload/media/chunk/init", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name || `upload-${Date.now()}.bin`,
+      mimetype: file.type || "application/octet-stream",
+      totalSize: file.size,
+    }),
+    signal,
+  });
+
+  const initJson = await initRes.json();
+  if (!initRes.ok || !initJson.success || !initJson.data?.uploadId || !initJson.data?.chunkSize || !initJson.data?.totalChunks) {
+    throw new Error(initJson?.message || "Resumable init failed");
+  }
+
+  const uploadId = String(initJson.data.uploadId);
+  const chunkSize = Number(initJson.data.chunkSize) || 1024 * 1024;
+  const totalChunks = Number(initJson.data.totalChunks) || Math.ceil(file.size / chunkSize);
+  const uploaded = new Set<number>((initJson.data.uploadedChunks || []).map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n >= 0));
+
+  try {
+    if (onProgress) {
+      const uploadedBytes = Math.min(file.size, uploaded.size * chunkSize);
+      const percent = Math.max(0, Math.min(95, Math.round((uploadedBytes / Math.max(file.size, 1)) * 100)));
+      onProgress({ percent, uploadedBytes, totalBytes: file.size, stage: "uploading" });
+    }
+
+    for (let index = 0; index < totalChunks; index++) {
+      if (uploaded.has(index)) continue;
+
+      const start = index * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const chunk = file.slice(start, end);
+
+      let sent = false;
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const fd = new FormData();
+          fd.append("index", String(index));
+          fd.append("chunk", chunk, `chunk-${index}.part`);
+
+          const chunkRes = await fetch(`/api/v1/upload/media/chunk/${encodeURIComponent(uploadId)}`, {
+            method: "POST",
+            credentials: "include",
+            body: fd,
+            signal,
+          });
+          const chunkJson = await chunkRes.json();
+          if (!chunkRes.ok || !chunkJson.success) {
+            throw new Error(chunkJson?.message || "Chunk upload failed");
+          }
+          sent = true;
+
+          const uploadedBytes = Math.min(file.size, (index + 1) * chunkSize);
+          if (onProgress) {
+            const percent = Math.max(0, Math.min(95, Math.round((uploadedBytes / Math.max(file.size, 1)) * 100)));
+            onProgress({ percent, uploadedBytes, totalBytes: file.size, stage: "uploading" });
+          }
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 3) await sleep(350 * attempt);
+        }
+      }
+
+      if (!sent) {
+        throw lastErr || new Error("Chunk upload failed");
+      }
+    }
+
+    if (onProgress) {
+      onProgress({ percent: 97, uploadedBytes: file.size, totalBytes: file.size, stage: "finalizing" });
+    }
+
+    const doneRes = await fetch(`/api/v1/upload/media/chunk/${encodeURIComponent(uploadId)}/complete`, {
+      method: "POST",
+      credentials: "include",
+      signal,
+    });
+    const doneJson = await doneRes.json();
+    if (!doneRes.ok || !doneJson.success) {
+      throw new Error(doneJson?.message || "Resumable complete failed");
+    }
+    if (onProgress) {
+      onProgress({ percent: 100, uploadedBytes: file.size, totalBytes: file.size, stage: "completed" });
+    }
+    return doneJson.data.url as string;
+  } catch (err) {
+    await abortResumableUpload(uploadId);
+    throw err;
+  }
+}
+
+/** Upload a media file (image/video/voice) for chat */
+export async function uploadMedia(
+  file: File | Blob,
+  filename?: string,
+  onProgress?: UploadProgressHandler,
+  signal?: AbortSignal,
+): Promise<string> {
+  const effectiveFile = file instanceof File
+    ? file
+    : (typeof File !== "undefined" ? new File([file], filename || "recording.webm", { type: file.type || "application/octet-stream" }) : null);
+
+  // Use resumable flow for large files; fallback keeps legacy behavior intact.
+  if (effectiveFile && effectiveFile.size >= RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
+    try {
+      return await uploadMediaResumable(effectiveFile, onProgress, signal);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      return uploadMediaSimple(file, filename, onProgress, signal);
+    }
+  }
+
+  return uploadMediaSimple(file, filename, onProgress, signal);
 }
 
 async function request<T = unknown>(path: string, init?: RequestInit): Promise<T> {
@@ -173,11 +337,12 @@ export const walletApi = {
   income: () => request<{ totalReceived: number; todayReceived: number; weekReceived: number; monthReceived: number }>("/wallet/income"),
   recharge: (data: { packageId?: string; amount: number; paymentMethod?: string }) =>
     request("/wallet/recharge", { method: "POST", body: JSON.stringify(data) }),
-  paymentProviders: async () => {
+  paymentProviders: async (packageId?: string) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const res = await fetch("/api/v1/payments/providers", {
+      const query = packageId ? `?packageId=${encodeURIComponent(packageId)}` : "";
+      const res = await fetch(`/api/v1/payments/providers${query}`, {
         credentials: "include",
         signal: controller.signal,
       });
@@ -194,7 +359,19 @@ export const walletApi = {
           hasCredentials: boolean;
           requiredCredentials: string[];
           isReady: boolean;
+          available?: boolean;
         }>;
+        unavailableProviders?: Array<{
+          key: string;
+          displayName: string;
+          mode: string;
+          priority: number;
+          reasonCode?: string;
+          reasonText?: string;
+          minAmount?: number;
+          maxAmount?: number;
+        }>;
+        recommendedProvider?: string | null;
         paymentMethods: Array<any>;
       };
     } catch (err: unknown) {
@@ -206,20 +383,34 @@ export const walletApi = {
       clearTimeout(timer);
     }
   },
-  createCheckoutSession: async (packageId: string, provider = "stripe") => {
+  createCheckoutSession: async (packageId: string, provider = "stripe", idempotencyKey?: string) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch("/api/v1/payments/checkout", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageId, provider }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {}),
+        },
+        body: JSON.stringify({ packageId, provider, ...(idempotencyKey ? { idempotencyKey } : {}) }),
         signal: controller.signal,
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw { status: res.status, ...json };
-      return json.data as { sessionId: string; url: string };
+      return json.data as {
+        sessionId?: string;
+        url: string;
+        orderId?: string;
+        manual?: boolean;
+        status?: string;
+        referenceId?: string;
+        message?: string;
+        provider?: string;
+        reused?: boolean;
+        paid?: boolean;
+      };
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         throw { status: 408, success: false, message: "انتهت مهلة الطلب" };
@@ -389,6 +580,25 @@ export const streamsApi = {
 export const gamificationApi = {
   daily: () => request<any>("/gamification/daily"),
   claim: () => request<any>("/gamification/claim", { method: "POST" }),
+  xpMe: () => request<{
+    level: number;
+    xp: number;
+    xpForCurrentLevel: number;
+    xpForNextLevel: number;
+    progress: number;
+    maxLevel: number;
+  }>("/xp/me"),
+};
+
+export const profileStatsApi = {
+  me: () => request<{
+    followers: number;
+    following: number;
+    friends: number;
+    giftsSent: number;
+    giftsReceived: number;
+    streamHours: number;
+  }>("/profile/me/stats"),
 };
 
 // ── Auto-Translation — الترجمة التلقائية ──

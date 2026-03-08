@@ -48,6 +48,7 @@ export function UserAuth() {
   const [otpPurpose, setOtpPurpose] = useState<"register" | "login">("register");
   const [loginOtpEmail, setLoginOtpEmail] = useState("");
   const [showLoginOtp, setShowLoginOtp] = useState(false);
+  const [loginOtpNeedsDeviceTrust, setLoginOtpNeedsDeviceTrust] = useState(false);
   const [loginOtpValues, setLoginOtpValues] = useState(["", "", "", "", "", ""]);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -75,9 +76,10 @@ export function UserAuth() {
     }
   }, [otpTimer]);
 
-  const startLoginOtpFlow = async () => {
+  const startLoginOtpFlow = async (options?: { deviceTrustRequired?: boolean }) => {
     const result = await loginOtpApi.sendOtp();
     setLoginOtpEmail(result.email || "");
+    setLoginOtpNeedsDeviceTrust(!!options?.deviceTrustRequired);
     setAuthSuccess(result.devCode ? `${t("auth.otpTitle", "رمز التحقق")}: ${result.devCode}` : null);
     setShowLoginOtp(true);
     setLoginOtpValues(["", "", "", "", "", ""]);
@@ -108,7 +110,7 @@ export function UserAuth() {
         }
         if (result.data.needsPinVerify) {
           // PIN login is deprecated; always continue with OTP as the second step.
-          await startLoginOtpFlow();
+          await startLoginOtpFlow({ deviceTrustRequired: !!result.data.deviceTrustRequired });
         } else {
           setLocation("/");
         }
@@ -379,6 +381,19 @@ export function UserAuth() {
               <p className="text-white/60 text-sm mb-4">{t("auth.loginOtpSubtitle", "تم إرسال رمز التحقق إلى بريدك")}</p>
               <p className="text-white/40 text-xs mb-6 font-mono" dir="ltr">{loginOtpEmail}</p>
 
+              {loginOtpNeedsDeviceTrust && (
+                <motion.div
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-start gap-2 bg-amber-500/10 border border-amber-400/25 rounded-xl px-4 py-2.5 mb-4 text-start"
+                >
+                  <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-200/90 font-medium">
+                    {t("auth.deviceTrustOtpNotice", "تم اكتشاف تسجيل دخول من جهاز غير موثوق. أدخل رمز OTP لتوثيق الجهاز والمتابعة بأمان.")}
+                  </p>
+                </motion.div>
+              )}
+
               {authError && (
                 <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5 mb-4">
                   <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
@@ -428,7 +443,7 @@ export function UserAuth() {
                 {t("auth.verifyOtp", "تحقق")}
               </button>
 
-              <button onClick={() => { setShowLoginOtp(false); setLoginOtpValues(["", "", "", "", "", ""]); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
+              <button onClick={() => { setShowLoginOtp(false); setLoginOtpNeedsDeviceTrust(false); setLoginOtpValues(["", "", "", "", "", ""]); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
                 <ChevronLeft className="w-4 h-4" />
                 {t("common.back", "رجوع")}
               </button>

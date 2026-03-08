@@ -2852,6 +2852,82 @@ router.get("/follow/count/:userId", async (req: Request, res: Response) => {
   }
 });
 
+// GET /social/profile/me/stats — consolidated profile stats for current user
+router.get("/profile/me/stats", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const db = getDb();
+    if (!db) {
+      return res.json({
+        success: true,
+        data: {
+          followers: 0,
+          following: 0,
+          friends: 0,
+          giftsSent: 0,
+          giftsReceived: 0,
+          streamHours: 0,
+        },
+      });
+    }
+
+    const [followersRow, followingRow, friendsRow, giftsSentRow, giftsReceivedRow, streamHoursRow] = await Promise.all([
+      db.select({ c: count() }).from(schema.userFollows).where(eq(schema.userFollows.followingId, userId)),
+      db.select({ c: count() }).from(schema.userFollows).where(eq(schema.userFollows.followerId, userId)),
+      db.select({ c: count() }).from(schema.friendships).where(
+        and(
+          eq(schema.friendships.status, "accepted"),
+          or(
+            eq(schema.friendships.senderId, userId),
+            eq(schema.friendships.receiverId, userId),
+          ),
+        ),
+      ),
+      db.select({ c: count() }).from(schema.walletTransactions).where(
+        and(
+          eq(schema.walletTransactions.userId, userId),
+          eq(schema.walletTransactions.type, "gift_sent"),
+          eq(schema.walletTransactions.status, "completed"),
+        ),
+      ),
+      db.select({ c: count() }).from(schema.walletTransactions).where(
+        and(
+          eq(schema.walletTransactions.userId, userId),
+          eq(schema.walletTransactions.type, "gift_received"),
+          eq(schema.walletTransactions.status, "completed"),
+        ),
+      ),
+      db.select({
+        hours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${schema.streams.endedAt}, NOW()) - ${schema.streams.startedAt}))) / 3600, 0)`,
+      }).from(schema.streams).where(
+        and(
+          eq(schema.streams.userId, userId),
+          sql`${schema.streams.startedAt} IS NOT NULL`,
+        ),
+      ),
+    ]);
+
+    const toInt = (v: unknown) => Number(v || 0) || 0;
+
+    return res.json({
+      success: true,
+      data: {
+        followers: toInt(followersRow?.[0]?.c),
+        following: toInt(followingRow?.[0]?.c),
+        friends: toInt(friendsRow?.[0]?.c),
+        giftsSent: toInt(giftsSentRow?.[0]?.c),
+        giftsReceived: toInt(giftsReceivedRow?.[0]?.c),
+        streamHours: Math.max(0, Math.floor(Number(streamHoursRow?.[0]?.hours || 0))),
+      },
+    });
+  } catch (err: any) {
+    socialLog.error({ err, userId }, "Profile stats error");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل إحصائيات الحساب" });
+  }
+});
+
 // GET /social/follow/status/:userId — check if I follow this user
 router.get("/follow/status/:userId", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);

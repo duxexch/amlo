@@ -1,8 +1,11 @@
 import { createLogger } from "../logger";
+import { getRedis } from "../redis";
 import { storage } from "../storage";
 import { sendPushToUser } from "./pushNotification";
 
 const notificationLog = createLogger("notifications");
+const INBOX_MAX_ITEMS = 120;
+const INBOX_TTL_SECONDS = 60 * 60 * 24 * 45;
 
 export type NotificationPreferenceKey =
     | "messages"
@@ -37,6 +40,44 @@ function isEnglishLang(value: unknown): boolean {
     return lang.startsWith("en");
 }
 
+function inboxKey(userId: string): string {
+    return `ablox:notifications:inbox:${userId}`;
+}
+
+async function appendToNotificationInbox(params: {
+    userId: string;
+    type: "message" | "call" | "friend-request" | "admin" | "system";
+    title: string;
+    body: string;
+    url: string;
+    persistent?: boolean;
+}) {
+    const redis = getRedis();
+    if (!redis) return;
+
+    const item = {
+        id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        type: params.type,
+        title: sanitizeNotificationText(params.title, 120),
+        body: sanitizeNotificationText(params.body, 320),
+        createdAt: Date.now(),
+        url: sanitizeNotificationText(params.url, 300),
+        persistent: !!params.persistent,
+        isRead: false,
+    };
+
+    try {
+        const key = inboxKey(params.userId);
+        const tx = redis.multi();
+        tx.lpush(key, JSON.stringify(item));
+        tx.ltrim(key, 0, INBOX_MAX_ITEMS - 1);
+        tx.expire(key, INBOX_TTL_SECONDS);
+        await tx.exec();
+    } catch (err: any) {
+        notificationLog.warn(`Inbox append failed for user ${params.userId}: ${err?.message || "unknown error"}`);
+    }
+}
+
 export async function sendLocalizedPush(job: LocalizedPushJob): Promise<void> {
     const { userId, preferenceKey, kind, actorName, bodyPreview, url, persistent } = job;
 
@@ -67,6 +108,15 @@ export async function sendLocalizedPush(job: LocalizedPushJob): Promise<void> {
             body = en ? `${actor} sent you a friend request` : `${actor} أرسل لك طلب صداقة`;
             tag = "ablox-friend";
         }
+
+        await appendToNotificationInbox({
+            userId,
+            type: kind === "friend" ? "friend-request" : kind,
+            title,
+            body,
+            url,
+            persistent: persistent || requireInteraction,
+        });
 
         await sendPushToUser(userId, {
             title,

@@ -5,6 +5,36 @@
 const API_BASE = "/api/auth";
 const REQUEST_TIMEOUT_MS = 15_000;
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function uploadAvatar(file: File | Blob, filename?: string): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file, filename || (file instanceof File ? file.name : "avatar.jpg"));
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch("/api/v1/upload/avatar", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Avatar upload failed");
+      }
+      return json.data.url as string;
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < 3) {
+        await sleep(350 * attempt);
+      }
+    }
+  }
+
+  throw lastErr || new Error("Avatar upload failed");
+}
+
 async function request<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -168,6 +198,24 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ code }),
     }),
+
+  getSecurityTimeline: () =>
+    request<{ success: boolean; data: Array<{ id: string; type: string; createdAt: string; ip: string; userAgent: string; details?: Record<string, any> }> }>("/security/timeline"),
+
+  getTrustedDevices: () =>
+    request<{ success: boolean; data: { lockEnabled: boolean; currentDeviceId: string; currentDeviceTrusted: boolean; devices: Array<{ id: string; label: string; userAgent: string; ip: string; addedAt: string; lastSeenAt: string }> } }>("/security/devices"),
+
+  trustCurrentDevice: () =>
+    request<{ success: boolean; data: any }>("/security/devices/trust-current", { method: "POST" }),
+
+  setTrustedDeviceLock: (enabled: boolean) =>
+    request<{ success: boolean; data: { lockEnabled: boolean } }>("/security/device-lock", {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  removeTrustedDevice: (deviceId: string) =>
+    request<{ success: boolean; message: string }>(`/security/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" }),
 };
 
 // ── PIN & Profiles ──

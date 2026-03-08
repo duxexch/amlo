@@ -40,10 +40,11 @@ async function request<T>(
 
   try {
     const hasBody = options.body != null;
+    const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
     const res = await fetch(`${BASE}${endpoint}`, {
       ...options,
       headers: {
-        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
         ...options.headers,
       },
       credentials: "include",
@@ -440,6 +441,21 @@ export const adminSettings = {
 
   updateAppDownload: (data: Record<string, any>) =>
     request("/settings/app-download", { method: "PUT", body: JSON.stringify(data) }),
+
+  updateNotificationSounds: (data: Record<string, any>) =>
+    request("/settings/notification-sounds", { method: "PUT", body: JSON.stringify(data) }),
+
+  uploadNotificationTone: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    return request<{ url: string; filename: string; size: number; mimetype: string; mediaType: "audio" | "video" | "voice" }>(
+      "/settings/notification-sounds/upload",
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+  },
 };
 
 // ── Payment Methods ──────────────────────────────────────

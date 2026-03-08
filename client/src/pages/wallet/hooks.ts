@@ -12,6 +12,7 @@ import {
 import type {
   WalletTab, WalletBalance, IncomeStats, ChartDataPoint, ChartPeriod,
   DateRange, RechargePackage, MilesPackage, WalletTransaction, WithdrawalRequest, WalletPaymentMethodOption,
+  WalletDepositProvider, WalletUnavailableProvider,
 } from "./types";
 
 /* ═══════════════════════════════════════════════════════
@@ -619,10 +620,70 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
   const [packagesLoaded, setPackagesLoaded] = useState(false);
   const [milesPackages, setMilesPackages] = useState<MilesPackage[]>([]);
   const [milesLoading, setMilesLoading] = useState(false);
-  const [depositProviders, setDepositProviders] = useState<Array<{ key: string; displayName: string; mode: string; priority: number }>>([]);
+  const [depositProviders, setDepositProviders] = useState<WalletDepositProvider[]>([]);
+  const [unavailableProviders, setUnavailableProviders] = useState<WalletUnavailableProvider[]>([]);
   const [depositMethods, setDepositMethods] = useState<Array<{ id: string; name?: string; nameAr?: string; provider?: string; icon?: string }>>([]);
   const [selectedProvider, setSelectedProvider] = useState("stripe");
+  const [recommendedProvider, setRecommendedProvider] = useState<string | null>(null);
+  const [purchasePending, setPurchasePending] = useState(false);
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
+
+  const applyProvidersPayload = useCallback((data: any) => {
+    const providers = Array.isArray(data?.providers) ? data.providers : [];
+    const unavailable = Array.isArray(data?.unavailableProviders) ? data.unavailableProviders : [];
+    const methods = Array.isArray(data?.paymentMethods) ? data.paymentMethods : [];
+
+    const validProviders = providers
+      .filter((p: any) => p?.key)
+      .sort((a: any, b: any) => Number(a.priority || 99) - Number(b.priority || 99));
+
+    setDepositProviders(validProviders.map((p: any) => ({
+      key: String(p.key),
+      displayName: String(p.displayName || p.key),
+      mode: String(p.mode || "live"),
+      priority: Number(p.priority || 99),
+      countries: Array.isArray(p.countries) ? p.countries : ["*"],
+      requiredCredentials: Array.isArray(p.requiredCredentials) ? p.requiredCredentials : [],
+      hasCredentials: Boolean(p.hasCredentials),
+      isReady: Boolean(p.isReady),
+      available: true,
+    })));
+    setUnavailableProviders(unavailable.map((p: any) => ({
+      key: String(p?.key || ""),
+      displayName: String(p?.displayName || p?.key || "-"),
+      mode: String(p?.mode || "live"),
+      priority: Number(p?.priority || 99),
+      reasonCode: p?.reasonCode,
+      reasonText: p?.reasonText,
+      minAmount: typeof p?.minAmount === "number" ? p.minAmount : undefined,
+      maxAmount: typeof p?.maxAmount === "number" ? p.maxAmount : undefined,
+      countries: Array.isArray(p?.countries) ? p.countries : ["*"],
+      requiredCredentials: Array.isArray(p?.requiredCredentials) ? p.requiredCredentials : [],
+      hasCredentials: Boolean(p?.hasCredentials),
+      isReady: Boolean(p?.isReady),
+      available: false,
+    })).filter((p) => !!p.key));
+    setDepositMethods(methods);
+    setRecommendedProvider(data?.recommendedProvider || null);
+    setDetectedCountry(data?.country || null);
+
+    if (validProviders.length > 0) {
+      const normalizedRecommended = String(data?.recommendedProvider || "").toLowerCase();
+      setSelectedProvider((prev) => {
+        if (validProviders.some((p: any) => p.key === prev)) return prev;
+        if (normalizedRecommended && validProviders.some((p: any) => p.key === normalizedRecommended)) {
+          return normalizedRecommended;
+        }
+        return String(validProviders[0].key);
+      });
+    }
+  }, []);
+
+  const loadDepositProviders = useCallback(async (packageId?: string) => {
+    const data = await walletApi.paymentProviders(packageId);
+    applyProvidersPayload(data);
+    return data;
+  }, [applyProvidersPayload]);
 
   // Fetch coin packages from API
   useEffect(() => {
@@ -648,33 +709,14 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
   useEffect(() => {
     if (activeTab !== "recharge") return;
 
-    walletApi.paymentProviders()
-      .then((data: any) => {
-        const providers = Array.isArray(data?.providers) ? data.providers : [];
-        const methods = Array.isArray(data?.paymentMethods) ? data.paymentMethods : [];
-
-        const validProviders = providers
-          .filter((p: any) => p?.key && p?.isReady === true)
-          .sort((a: any, b: any) => Number(a.priority || 99) - Number(b.priority || 99));
-
-        setDepositProviders(validProviders.map((p: any) => ({
-          key: String(p.key),
-          displayName: String(p.displayName || p.key),
-          mode: String(p.mode || "live"),
-          priority: Number(p.priority || 99),
-        })));
-        setDepositMethods(methods);
-        setDetectedCountry(data?.country || null);
-
-        if (validProviders.length > 0) {
-          setSelectedProvider((prev) => validProviders.some((p: any) => p.key === prev) ? prev : String(validProviders[0].key));
-        }
-      })
+    loadDepositProviders()
       .catch(() => {
         setDepositProviders([]);
+        setUnavailableProviders([]);
         setDepositMethods([]);
+        setRecommendedProvider(null);
       });
-  }, [activeTab]);
+  }, [activeTab, loadDepositProviders]);
 
   // Load miles packages when tab active
   useEffect(() => {
@@ -688,15 +730,47 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
   }, [activeTab, t]);
 
   const handlePurchase = async (pkg: RechargePackage) => {
+    if (purchasePending) return;
+
+    const keySeed = `${pkg.id || "pkg"}:${selectedProvider}:${Date.now()}`;
+    const idempotencyKey = `wallet-recharge:${keySeed}`;
+
     try {
+      setPurchasePending(true);
       if (!pkg.id) {
         throw new Error(t("wallet.packageUnavailable", "الباقة غير متاحة حالياً"));
       }
       if (!selectedProvider) {
         throw new Error(t("wallet.selectPaymentProvider", "اختر بوابة الدفع أولاً"));
       }
+
+      const providerSnapshot = await loadDepositProviders(pkg.id);
+      const selectedStillAvailable = Array.isArray(providerSnapshot?.providers)
+        && providerSnapshot.providers.some((p: any) => String(p?.key || "") === selectedProvider);
+      if (!selectedStillAvailable) {
+        const selectedUnavailable = Array.isArray(providerSnapshot?.unavailableProviders)
+          ? providerSnapshot.unavailableProviders.find((p: any) => String(p?.key || "") === selectedProvider)
+          : null;
+
+        const selectedReasonCode = String(selectedUnavailable?.reasonCode || "").toLowerCase();
+        const normalizedRecommended = String(providerSnapshot?.recommendedProvider || "").toLowerCase();
+        const recommendedAvailable = Array.isArray(providerSnapshot?.providers)
+          ? providerSnapshot.providers.find((p: any) => String(p?.key || "").toLowerCase() === normalizedRecommended)
+          : null;
+
+        if (selectedReasonCode === "amount_out_of_range" && normalizedRecommended && recommendedAvailable) {
+          setSelectedProvider(normalizedRecommended);
+          throw new Error(
+            t("wallet.switchedToRecommendedProvider", "تم تبديل مزود الدفع تلقائياً إلى الخيار الموصى به بسبب حدود المبلغ. أعد المحاولة للمتابعة"),
+          );
+        }
+
+        const unavailableReason = selectedUnavailable?.reasonText || null;
+        throw new Error(unavailableReason || t("wallet.providerUnavailable", "وسيلة الدفع غير متاحة حالياً"));
+      }
+
       toast.loading(t("wallet.processing"), { id: "recharge" });
-      const session = await walletApi.createCheckoutSession(pkg.id, selectedProvider);
+      const session = await walletApi.createCheckoutSession(pkg.id, selectedProvider, idempotencyKey);
       if ((session as any)?.manual) {
         toast.success((session as any)?.message || t("wallet.paymentPendingReview", "تم إنشاء طلب الشحن وهو الآن قيد المراجعة"), { id: "recharge" });
         if ((session as any)?.url) {
@@ -709,6 +783,8 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
       window.location.href = session.url;
     } catch (err: any) {
       toast.error(err?.message || t("common.error", "Error"), { id: "recharge" });
+    } finally {
+      setPurchasePending(false);
     }
   };
 
@@ -734,7 +810,8 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
 
   return {
     packages, milesPackages, milesLoading,
-    depositProviders, depositMethods, selectedProvider, setSelectedProvider, detectedCountry,
+    depositProviders, unavailableProviders, recommendedProvider,
+    depositMethods, selectedProvider, setSelectedProvider, purchasePending, detectedCountry,
     handlePurchase, handleMilesPurchase,
     refreshMiles,
   };

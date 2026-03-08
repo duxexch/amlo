@@ -19,17 +19,99 @@ export type AppNotificationEntry = {
   url?: string;
   persistent?: boolean;
   meta?: Record<string, string | number | boolean | null | undefined>;
+  isRead?: boolean;
+  readAt?: number;
 };
 
 type NotificationInput = Omit<AppNotificationEntry, "id" | "createdAt">;
 
 const STORAGE_KEY = "ablox_notification_history_v1";
 const MAX_ITEMS = 120;
+const SOUND_CONFIG_TTL_MS = 2 * 60 * 1000;
 
 let permissionRequested = false;
 let audioCtx: AudioContext | null = null;
 let history: AppNotificationEntry[] = [];
 const listeners = new Set<(entries: AppNotificationEntry[]) => void>();
+
+type SoundSlot = {
+  enabled: boolean;
+  kind: "tone" | "file";
+  mediaType: "audio" | "video" | "voice";
+  url: string;
+  volume: number;
+};
+
+type SoundConfigMap = Record<AppNotificationType, SoundSlot>;
+
+const DEFAULT_SOUND_SLOT: SoundSlot = {
+  enabled: false,
+  kind: "tone",
+  mediaType: "audio",
+  url: "",
+  volume: 1,
+};
+
+let soundConfig: SoundConfigMap = {
+  message: { ...DEFAULT_SOUND_SLOT },
+  call: { ...DEFAULT_SOUND_SLOT },
+  "friend-request": { ...DEFAULT_SOUND_SLOT },
+  admin: { ...DEFAULT_SOUND_SLOT },
+  system: { ...DEFAULT_SOUND_SLOT },
+};
+let soundConfigLoadedAt = 0;
+
+async function fetchInboxFromServer(limit = MAX_ITEMS): Promise<AppNotificationEntry[] | null> {
+  try {
+    const res = await fetch(`/api/auth/notifications/inbox?limit=${Math.max(1, Math.min(limit, MAX_ITEMS))}`, {
+      credentials: "include",
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.success || !json?.data?.items || !Array.isArray(json.data.items)) {
+      return null;
+    }
+    return json.data.items as AppNotificationEntry[];
+  } catch {
+    return null;
+  }
+}
+
+async function pushInboxItemToServer(entry: AppNotificationEntry): Promise<void> {
+  try {
+    await fetch("/api/auth/notifications/inbox", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    });
+  } catch {
+    // Ignore sync failures and keep local inbox functional.
+  }
+}
+
+async function markInboxReadOnServer(ids?: string[]): Promise<void> {
+  try {
+    await fetch("/api/auth/notifications/inbox/mark-read", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [] }),
+    });
+  } catch {
+    // Ignore sync failures and keep local inbox functional.
+  }
+}
+
+async function clearInboxOnServer(): Promise<void> {
+  try {
+    await fetch("/api/auth/notifications/inbox", {
+      method: "DELETE",
+      credentials: "include",
+    });
+  } catch {
+    // Ignore sync failures and keep local inbox functional.
+  }
+}
 
 function emit() {
   const snapshot = [...history];
@@ -96,8 +178,82 @@ function playTone(freq: number, duration: number, gain = 0.08, startDelay = 0) {
   osc.stop(now + duration + 0.03);
 }
 
+async function refreshNotificationSoundConfig(force = false) {
+  if (typeof window === "undefined") return;
+  const now = Date.now();
+  if (!force && soundConfigLoadedAt > 0 && now - soundConfigLoadedAt < SOUND_CONFIG_TTL_MS) return;
+
+  try {
+    const res = await fetch("/api/notification-sounds", { credentials: "include" });
+    const json = await res.json();
+    if (!res.ok || !json?.success || !json?.data) return;
+
+    const incoming = json.data as Record<string, Partial<SoundSlot>>;
+    const normalizeSlot = (slot?: Partial<SoundSlot>): SoundSlot => ({
+      enabled: Boolean(slot?.enabled),
+      kind: slot?.kind === "file" ? "file" : "tone",
+      mediaType: slot?.mediaType === "video" || slot?.mediaType === "voice" ? slot.mediaType : "audio",
+      url: typeof slot?.url === "string" ? slot.url : "",
+      volume: typeof slot?.volume === "number" ? Math.max(0, Math.min(1, slot.volume)) : 1,
+    });
+
+    soundConfig = {
+      message: normalizeSlot(incoming.message),
+      call: normalizeSlot(incoming.call),
+      "friend-request": normalizeSlot(incoming["friend-request"]),
+      admin: normalizeSlot(incoming.admin),
+      system: normalizeSlot(incoming.system),
+    };
+    soundConfigLoadedAt = Date.now();
+  } catch {
+    // Ignore config fetch errors.
+  }
+}
+
+function playMediaFile(url: string, mediaType: SoundSlot["mediaType"], volume: number) {
+  if (typeof window === "undefined") return;
+
+  const isVideo = mediaType === "video";
+  const media = document.createElement(isVideo ? "video" : "audio");
+  media.src = url;
+  media.preload = "auto";
+  media.volume = Math.max(0, Math.min(1, volume));
+
+  if (isVideo) {
+    (media as HTMLVideoElement).playsInline = true;
+    media.style.position = "fixed";
+    media.style.width = "1px";
+    media.style.height = "1px";
+    media.style.opacity = "0";
+    media.style.pointerEvents = "none";
+    media.style.left = "-9999px";
+    document.body.appendChild(media);
+  }
+
+  const cleanup = () => {
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+    if (isVideo && media.parentElement) {
+      media.parentElement.removeChild(media);
+    }
+  };
+
+  media.onended = cleanup;
+  media.onerror = cleanup;
+  void media.play().catch(() => {
+    cleanup();
+  });
+}
+
 function playNotificationSound(type: AppNotificationType) {
   try {
+    const slot = soundConfig[type];
+    if (slot?.enabled && slot.kind === "file" && slot.url) {
+      playMediaFile(slot.url, slot.mediaType, slot.volume);
+      return;
+    }
+
     if (type === "call") {
       playTone(740, 0.16, 0.09, 0);
       playTone(880, 0.16, 0.09, 0.19);
@@ -125,6 +281,7 @@ function playNotificationSound(type: AppNotificationType) {
 }
 
 export function playNotificationCue(type: AppNotificationType) {
+  void refreshNotificationSoundConfig();
   playNotificationSound(type);
 }
 
@@ -178,12 +335,14 @@ export function publishNotification(input: NotificationInput) {
     ...input,
     id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     createdAt: Date.now(),
+    isRead: false,
   };
 
   history = [entry, ...history].slice(0, MAX_ITEMS);
   saveHistory();
   emit();
 
+  void refreshNotificationSoundConfig();
   playNotificationSound(entry.type);
 
   const toastTitle = entry.title || "Ablox";
@@ -197,6 +356,8 @@ export function publishNotification(input: NotificationInput) {
   if (document.hidden || entry.persistent) {
     showBrowserNotification(entry);
   }
+
+  void pushInboxItemToServer(entry);
 
   return entry;
 }
@@ -213,14 +374,47 @@ export function clearNotificationHistory() {
   history = [];
   saveHistory();
   emit();
+  void clearInboxOnServer();
 }
 
 export function initNotificationCenter() {
   if (typeof window === "undefined") return;
   loadHistory();
   emit();
+  void refreshNotificationSoundConfig(true);
+  void syncNotificationInboxFromServer();
 }
 
 export function getNotificationHistory() {
   return [...history];
+}
+
+export async function syncNotificationInboxFromServer() {
+  const serverItems = await fetchInboxFromServer(MAX_ITEMS);
+  if (!serverItems) return;
+  history = [...serverItems].slice(0, MAX_ITEMS);
+  saveHistory();
+  emit();
+}
+
+export function markNotificationHistoryRead(ids?: string[]) {
+  const set = new Set((ids || []).filter(Boolean));
+  const markAll = set.size === 0;
+  const now = Date.now();
+  let changed = false;
+
+  history = history.map((item) => {
+    if (item.isRead) return item;
+    if (markAll || set.has(item.id)) {
+      changed = true;
+      return { ...item, isRead: true, readAt: now };
+    }
+    return item;
+  });
+
+  if (changed) {
+    saveHistory();
+    emit();
+  }
+  void markInboxReadOnServer(ids);
 }

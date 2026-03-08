@@ -17,6 +17,7 @@ export interface ChatUser {
 
 // ── Message types ──
 export type MessageType = "text" | "image" | "video" | "voice" | "gift" | "system";
+export type MessageSendState = "queued" | "sending" | "retrying" | "failed" | "sent" | "delivered" | "read";
 
 export interface ChatMessage {
   id: string;
@@ -46,6 +47,47 @@ export interface ChatMessage {
   _nextRetryAt?: string;
   /** Delivery confirmation */
   _delivered?: boolean;
+  /** Unified outgoing send state for UI */
+  _sendState?: MessageSendState;
+  /** Media upload progress (0..100) for optimistic messages */
+  _uploadProgress?: number;
+}
+
+export function resolveMessageSendState(msg: ChatMessage): MessageSendState | null {
+  const isMine = msg.senderId === "me";
+  if (!isMine) return null;
+
+  if (msg.isRead) return "read";
+  if (msg._sendState === "read") return "read";
+  if (msg._sendState === "delivered" || msg._delivered) return "delivered";
+  if (msg._sendState === "failed" || msg._failed) return "failed";
+
+  if (msg._sendState === "queued" || msg._sendState === "sending" || msg._sendState === "retrying") {
+    return msg._sendState;
+  }
+
+  if (msg._pending) {
+    if ((msg._retryCount || 0) > 0) return "retrying";
+    return "sending";
+  }
+
+  return "sent";
+}
+
+export function withSendState(msg: ChatMessage, state: MessageSendState): ChatMessage {
+  const base: ChatMessage = {
+    ...msg,
+    _sendState: state,
+  };
+
+  if (state === "queued") return { ...base, _pending: true, _failed: false, _delivered: false };
+  if (state === "sending") return { ...base, _pending: true, _failed: false };
+  if (state === "retrying") return { ...base, _pending: true, _failed: false };
+  if (state === "failed") return { ...base, _pending: false, _failed: true };
+  if (state === "delivered") return { ...base, _pending: false, _failed: false, _delivered: true, isRead: false };
+  if (state === "read") return { ...base, _pending: false, _failed: false, _delivered: true, isRead: true };
+
+  return { ...base, _pending: false, _failed: false };
 }
 
 // ── Conversation types ──
