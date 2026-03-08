@@ -10,6 +10,7 @@ import { MatchedUserCard } from "@/components/world/MatchedUserCard";
 import { MilesCounter } from "@/components/world/MilesCounter";
 import { WorldChat } from "@/components/world/WorldChat";
 import { getSocket } from "@/lib/socketManager";
+import { toast } from "sonner";
 
 // State Machine
 type WorldState = "idle" | "filters" | "searching" | "matched" | "chatting" | "ended";
@@ -38,6 +39,47 @@ const SEARCH_MAX_RETRIES = 8;       // max 32s waiting
 
 const FILTERS_STORAGE_KEY = "world_saved_filters";
 
+function inferUserCountryFromLocale(): string | undefined {
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale || "";
+    const region = locale.split("-")[1]?.toUpperCase();
+    if (!region) return undefined;
+    const map: Record<string, string> = {
+      EG: "Egypt",
+      SA: "Saudi Arabia",
+      AE: "United Arab Emirates",
+      JO: "Jordan",
+      IQ: "Iraq",
+      SY: "Syria",
+      LB: "Lebanon",
+      KW: "Kuwait",
+      QA: "Qatar",
+      BH: "Bahrain",
+      OM: "Oman",
+      YE: "Yemen",
+      MA: "Morocco",
+      DZ: "Algeria",
+      TN: "Tunisia",
+      LY: "Libya",
+      US: "United States",
+      GB: "United Kingdom",
+      DE: "Germany",
+      FR: "France",
+      TR: "Turkey",
+      PK: "Pakistan",
+      IN: "India",
+      ID: "Indonesia",
+      JP: "Japan",
+      BR: "Brazil",
+      CA: "Canada",
+      AU: "Australia",
+    };
+    return map[region];
+  } catch {
+    return undefined;
+  }
+}
+
 function getSavedFilters(): WorldSearchFilters {
   try {
     const saved = localStorage.getItem(FILTERS_STORAGE_KEY);
@@ -51,14 +93,14 @@ function getSavedFilters(): WorldSearchFilters {
         chatType: parsed.chatType || "text",
       };
     }
-  } catch {}
+  } catch { }
   return { genderFilter: "both", ageMin: 18, ageMax: 60, chatType: "text" };
 }
 
 function saveFilters(filters: WorldSearchFilters) {
   try {
     localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters));
-  } catch {}
+  } catch { }
 }
 
 export function WorldExplore() {
@@ -76,9 +118,13 @@ export function WorldExplore() {
   // Search
   const [searchFilters, setSearchFilters] = useState<WorldSearchFilters | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchProgress, setSearchProgress] = useState(0);
   const searchRetryRef = useRef<any>(null);
+  const searchProgressTimerRef = useRef<any>(null);
+  const searchStartTsRef = useRef<number>(0);
   const searchAttemptRef = useRef(0);
   const searchCancelledRef = useRef(false);
+  const searchSessionIdRef = useRef<string | null>(null);
 
   // Match
   const [matchedUser, setMatchedUser] = useState<MatchedUser | null>(null);
@@ -87,6 +133,7 @@ export function WorldExplore() {
   // Chat
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [duration, setDuration] = useState(0);
+  const [userCountry, setUserCountry] = useState<string | undefined>(inferUserCountryFromLocale());
   const [isFollowed, setIsFollowed] = useState(false);
   const [isFriendRequested, setIsFriendRequested] = useState(false);
   const [partnerDisconnected, setPartnerDisconnected] = useState(false);
@@ -99,13 +146,14 @@ export function WorldExplore() {
 
   // ── Load pricing + stats on mount ──
   useEffect(() => {
-    worldApi.getPricing().then(data => setPricing(data || [])).catch(() => {});
+    worldApi.getPricing().then(data => setPricing(data || [])).catch(() => { });
     worldApi.stats().then(data => {
       setMiles(data?.miles || 0);
       setTotalSessions(data?.totalSessions || 0);
       setUserCoins(data?.coins || 0);
+      setUserCountry(data?.country || inferUserCountryFromLocale());
       currentUserId.current = data?.userId || "";
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // ── Duration timer while chatting ──
@@ -125,7 +173,7 @@ export function WorldExplore() {
   useEffect(() => {
     if (!sessionId) return;
     const socket = getSocket();
-    
+
     // Join the session room for real-time messaging
     socket.emit("world-join-session", { sessionId });
 
@@ -169,16 +217,22 @@ export function WorldExplore() {
       }
     };
 
+    const handleWorldError = (data: { type?: string; message?: string }) => {
+      if (!data?.message) return;
+      toast.error(data.message);
+    };
+
     socket.on("world-chat-message", handleNewMessage);
     socket.on("world-partner-disconnected", handlePartnerDisconnected);
     socket.on("world-session-ended", handleSessionEnded);
     socket.on("world-chat-typing", handleTyping);
     socket.on("world-chat-stop-typing", handleStopTyping);
+    socket.on("world-error", handleWorldError);
 
     // Load initial messages from DB
     worldApi.messages(sessionId).then(data => {
       if (Array.isArray(data)) setMessages(data);
-    }).catch(() => {});
+    }).catch(() => { });
 
     return () => {
       socket.emit("world-leave-session", { sessionId });
@@ -187,6 +241,7 @@ export function WorldExplore() {
       socket.off("world-session-ended", handleSessionEnded);
       socket.off("world-chat-typing", handleTyping);
       socket.off("world-chat-stop-typing", handleStopTyping);
+      socket.off("world-error", handleWorldError);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [sessionId]);
@@ -210,40 +265,84 @@ export function WorldExplore() {
   };
 
   // Search with retry queue (waits up to ~32s for a match)
-  const doSearch = useCallback(async (filters: WorldSearchFilters, isRetry = false): Promise<boolean> => {
-    if (searchCancelledRef.current) return false;
+  const applyMatchedResult = useCallback((result: any) => {
+    if (!result?.session?.id || !result?.matchedUser) return false;
+    if (searchProgressTimerRef.current) {
+      clearInterval(searchProgressTimerRef.current);
+      searchProgressTimerRef.current = null;
+    }
+    if (searchRetryRef.current) {
+      clearInterval(searchRetryRef.current);
+      searchRetryRef.current = null;
+    }
+    setSearchProgress(1);
+    searchSessionIdRef.current = null;
+    setSessionId(result.session.id);
+    setMatchedUser(result.matchedUser);
+    setUserCoins((prev) => Math.max(0, prev - Number(result.session.coinsSpent || 0)));
+    setState("matched");
+    return true;
+  }, []);
+
+  const doSearch = useCallback(async (filters: WorldSearchFilters): Promise<{ found: boolean; searchSessionId?: string }> => {
+    if (searchCancelledRef.current) return { found: false };
     try {
       const result = await worldApi.search(filters);
-      if (searchCancelledRef.current) return false;
+      if (searchCancelledRef.current) return { found: false };
 
       // Backend returns { session, matched, matchedUser }
-      if (result.matched && result.session?.id && result.matchedUser) {
-        setSessionId(result.session.id);
-        setMatchedUser(result.matchedUser);
-        setUserCoins(prev => Math.max(0, prev - (result.session.coinsSpent || 0)));
-        setState("matched");
-        return true;
+      if (result?.matched) {
+        return { found: applyMatchedResult(result), searchSessionId: result?.session?.id };
       }
-      return false;
+      return { found: false, searchSessionId: result?.session?.id };
     } catch (err: any) {
-      if (!isRetry) {
-        const msg = err?.message || t("world.searchError");
-        setSearchError(msg);
+      if (err?.sessionId) {
+        searchSessionIdRef.current = String(err.sessionId);
+        return { found: false, searchSessionId: String(err.sessionId) };
       }
-      return false;
+      const msg = err?.message || t("world.searchError");
+      setSearchError(msg);
+      return { found: false };
     }
-  }, [t]);
+  }, [applyMatchedResult, t]);
 
   const handleStartSearch = useCallback(async (filters: WorldSearchFilters) => {
     setSearchFilters(filters);
     setState("searching");
     setSearchError(null);
+    setSearchProgress(0);
     searchCancelledRef.current = false;
     searchAttemptRef.current = 0;
+    searchStartTsRef.current = Date.now();
 
-    // First attempt
-    const found = await doSearch(filters);
-    if (found || searchCancelledRef.current) return;
+    if (searchProgressTimerRef.current) {
+      clearInterval(searchProgressTimerRef.current);
+      searchProgressTimerRef.current = null;
+    }
+    const totalMs = SEARCH_MAX_RETRIES * SEARCH_RETRY_INTERVAL;
+    searchProgressTimerRef.current = setInterval(() => {
+      if (searchCancelledRef.current) return;
+      const elapsed = Date.now() - searchStartTsRef.current;
+      const p = Math.max(0, Math.min(0.98, elapsed / totalMs));
+      setSearchProgress((prev) => (p > prev ? p : prev));
+    }, 120);
+
+    // First attempt creates one paid searching session.
+    const initial = await doSearch(filters);
+    if (initial.found || searchCancelledRef.current) return;
+    const searchSessionId = initial.searchSessionId;
+
+    if (!searchSessionId) {
+      if (searchProgressTimerRef.current) {
+        clearInterval(searchProgressTimerRef.current);
+        searchProgressTimerRef.current = null;
+      }
+      setState("idle");
+      setSearchProgress(0);
+      setSearchError(t("world.searchError"));
+      return;
+    }
+    searchSessionIdRef.current = searchSessionId;
 
     // Start retry queue
     searchRetryRef.current = setInterval(async () => {
@@ -251,49 +350,100 @@ export function WorldExplore() {
       if (searchAttemptRef.current >= SEARCH_MAX_RETRIES || searchCancelledRef.current) {
         clearInterval(searchRetryRef.current);
         searchRetryRef.current = null;
+        if (searchProgressTimerRef.current) {
+          clearInterval(searchProgressTimerRef.current);
+          searchProgressTimerRef.current = null;
+        }
         if (!searchCancelledRef.current) {
+          worldApi.cancelSession(searchSessionId).catch(() => { });
+          searchSessionIdRef.current = null;
+          setSearchProgress(1);
           setSearchError(t("world.noMatch"));
           setTimeout(() => {
             setState("idle");
             setSearchError(null);
+            setSearchProgress(0);
           }, 3000);
         }
         return;
       }
-      const found = await doSearch(filters, true);
-      if (found) {
+
+      try {
+        const retry = await worldApi.tryMatchSession(searchSessionId);
+        if (searchCancelledRef.current) return;
+
+        if (retry?.matched && applyMatchedResult(retry)) {
+          clearInterval(searchRetryRef.current);
+          searchRetryRef.current = null;
+          return;
+        }
+
+        const currentStatus = String(retry?.session?.status || "");
+        if (currentStatus && currentStatus !== "searching") {
+          clearInterval(searchRetryRef.current);
+          searchRetryRef.current = null;
+          setSearchProgress(1);
+          setSearchError(t("world.noMatch"));
+          setTimeout(() => {
+            setState("idle");
+            setSearchError(null);
+            setSearchProgress(0);
+          }, 2500);
+        }
+      } catch {
         clearInterval(searchRetryRef.current);
         searchRetryRef.current = null;
+        if (searchProgressTimerRef.current) {
+          clearInterval(searchProgressTimerRef.current);
+          searchProgressTimerRef.current = null;
+        }
+        worldApi.cancelSession(searchSessionId).catch(() => { });
+        searchSessionIdRef.current = null;
+        setSearchError(t("world.searchError"));
+        setState("idle");
+        setSearchProgress(0);
       }
     }, SEARCH_RETRY_INTERVAL);
-  }, [doSearch, t]);
+  }, [doSearch, applyMatchedResult, t]);
 
   const handleCancelSearch = useCallback(() => {
+    const activeSearchSessionId = searchSessionIdRef.current;
     searchCancelledRef.current = true;
     if (searchRetryRef.current) {
       clearInterval(searchRetryRef.current);
       searchRetryRef.current = null;
     }
+    if (searchProgressTimerRef.current) {
+      clearInterval(searchProgressTimerRef.current);
+      searchProgressTimerRef.current = null;
+    }
+    if (activeSearchSessionId) {
+      worldApi.cancelSession(activeSearchSessionId).catch(() => { });
+    }
+    searchSessionIdRef.current = null;
     setState("idle");
     setSearchError(null);
+    setSearchProgress(0);
   }, []);
 
-  const handleStartChat = () => {
+  const handleStartChat = useCallback(() => {
+    if (searchProgressTimerRef.current) {
+      clearInterval(searchProgressTimerRef.current);
+      searchProgressTimerRef.current = null;
+    }
     setState("chatting");
     setPartnerDisconnected(false);
-  };
+  }, []);
 
-  // Auto-open chat when match is found (skip matched state → go to chatting)
+  // Flight completion opens chat after reaching partner country.
   useEffect(() => {
     if (state === "matched" && matchedUser && sessionId) {
-      // Brief "match found" celebration for 1.5s then auto-open chat
       const timer = setTimeout(() => {
-        setState("chatting");
-        setPartnerDisconnected(false);
-      }, 1500);
+        handleStartChat();
+      }, 10000);
       return () => clearTimeout(timer);
     }
-  }, [state, matchedUser, sessionId]);
+  }, [state, matchedUser, sessionId, handleStartChat]);
 
   // Send message via Socket.io (persisted to DB by server)
   const handleSendMessage = useCallback((content: string) => {
@@ -320,7 +470,7 @@ export function WorldExplore() {
     try {
       await worldApi.follow(sessionId);
       setIsFollowed(true);
-    } catch {}
+    } catch { }
   };
 
   const handleFriendRequest = async () => {
@@ -328,7 +478,7 @@ export function WorldExplore() {
     try {
       await worldApi.friendRequest(sessionId);
       setIsFriendRequested(true);
-    } catch {}
+    } catch { }
   };
 
   const handleReport = async (type: string, reason?: string) => {
@@ -336,7 +486,7 @@ export function WorldExplore() {
     try {
       await worldApi.report(sessionId, { type, reason });
       setState("ended");
-    } catch {}
+    } catch { }
   };
 
   const handleEndSession = async () => {
@@ -344,7 +494,7 @@ export function WorldExplore() {
     try {
       const result = await worldApi.endSession(sessionId);
       setMiles(result?.miles || miles);
-    } catch {}
+    } catch { }
     setState("ended");
     if (durationInterval.current) clearInterval(durationInterval.current);
   };
@@ -352,8 +502,9 @@ export function WorldExplore() {
   // Skip → end current + start new search
   const handleSkip = useCallback(async () => {
     if (sessionId) {
-      try { await worldApi.endSession(sessionId); } catch {}
+      try { await worldApi.endSession(sessionId); } catch { }
     }
+    searchSessionIdRef.current = null;
     // Reset and search again with same filters
     setMatchedUser(null);
     setSessionId(null);
@@ -363,6 +514,7 @@ export function WorldExplore() {
     setIsFriendRequested(false);
     setPartnerDisconnected(false);
     setIsPartnerTyping(false);
+    setSearchProgress(0);
     if (searchFilters) {
       handleStartSearch(searchFilters);
     } else {
@@ -371,6 +523,7 @@ export function WorldExplore() {
   }, [sessionId, searchFilters, handleStartSearch]);
 
   const handleNewSearch = () => {
+    searchSessionIdRef.current = null;
     setMatchedUser(null);
     setSessionId(null);
     setMessages([]);
@@ -379,15 +532,21 @@ export function WorldExplore() {
     setIsFriendRequested(false);
     setPartnerDisconnected(false);
     setIsPartnerTyping(false);
+    setSearchProgress(0);
     setState("idle");
   };
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      const activeSearchSessionId = searchSessionIdRef.current;
       searchCancelledRef.current = true;
       if (searchRetryRef.current) clearInterval(searchRetryRef.current);
+      if (searchProgressTimerRef.current) clearInterval(searchProgressTimerRef.current);
       if (durationInterval.current) clearInterval(durationInterval.current);
+      if (activeSearchSessionId) {
+        worldApi.cancelSession(activeSearchSessionId).catch(() => { });
+      }
     };
   }, []);
 
@@ -438,7 +597,7 @@ export function WorldExplore() {
               </motion.button>
 
               {/* Globe */}
-              <Globe3D state="idle" onGlobeClick={handleQuickSearch} />
+              <Globe3D state="idle" onGlobeClick={handleQuickSearch} userCountry={userCountry} />
 
               {/* Filter Icon BELOW Globe */}
               <motion.button
@@ -474,7 +633,12 @@ export function WorldExplore() {
               exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center gap-6"
             >
-              <Globe3D state="spinning" onGlobeClick={() => {}} />
+              <Globe3D
+                state="spinning"
+                onGlobeClick={() => { }}
+                searchProgress={searchProgress}
+                userCountry={userCountry}
+              />
 
               <motion.div
                 className="flex flex-col items-center gap-2"
@@ -489,9 +653,8 @@ export function WorldExplore() {
               <div className="w-48 h-1 bg-white/10 rounded-full overflow-hidden">
                 <motion.div
                   className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-full"
-                  initial={{ width: "0%" }}
-                  animate={{ width: "100%" }}
-                  transition={{ duration: SEARCH_MAX_RETRIES * SEARCH_RETRY_INTERVAL / 1000, ease: "linear" }}
+                  animate={{ width: `${Math.max(0, Math.min(100, Math.round(searchProgress * 100)))}%` }}
+                  transition={{ duration: 0.2, ease: "linear" }}
                 />
               </div>
 
@@ -527,7 +690,13 @@ export function WorldExplore() {
               className="flex flex-col items-center gap-4 w-full max-w-sm"
             >
               <div className="mb-2">
-                <Globe3D state="matched" onGlobeClick={() => {}} small />
+                <Globe3D
+                  state="matched"
+                  onGlobeClick={() => { }}
+                  userCountry={userCountry}
+                  matchedCountry={matchedUser.country}
+                  onFlightComplete={handleStartChat}
+                />
               </div>
               <motion.div
                 className="text-center"

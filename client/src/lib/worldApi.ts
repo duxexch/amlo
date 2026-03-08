@@ -33,6 +33,8 @@ export const worldApi = {
 
   // Session
   getSession: (id: string) => request<any>(`/sessions/${id}`),
+  tryMatchSession: (id: string) =>
+    request<any>(`/sessions/${id}/try-match`, { method: "POST" }),
   cancelSession: (id: string) =>
     request(`/sessions/${id}/cancel`, { method: "POST" }),
   endSession: (id: string) =>

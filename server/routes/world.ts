@@ -20,6 +20,7 @@ const router = Router();
 const MAX_MATCH_CANDIDATES = 50;             // Max candidates to fetch for scoring
 const GOOD_CHAT_DURATION_SECONDS = 300;      // 5 min threshold for "good chat history"
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes — zombie session cleanup
+const STALE_SEARCH_MAX_MINUTES = 20;
 
 // Express 5: req.params values can be string | string[]
 function paramStr(v: string | string[] | undefined): string {
@@ -80,6 +81,36 @@ async function calculateSearchCost(filters: { genderFilter: string; ageMin: numb
   }
 
   return total;
+}
+
+async function getBusyWorldUserIds(db: ReturnType<typeof getDb>, excludeSessionId?: string): Promise<string[]> {
+  if (!db) return [];
+  const sessions = await db.select({
+    id: schema.worldSessions.id,
+    userId: schema.worldSessions.userId,
+    matchedUserId: schema.worldSessions.matchedUserId,
+  }).from(schema.worldSessions)
+    .where(and(
+      sql`${schema.worldSessions.status} IN ('searching', 'matched', 'chatting')`,
+      excludeSessionId ? ne(schema.worldSessions.id, excludeSessionId) : sql`1=1`,
+    ));
+
+  const ids = new Set<string>();
+  for (const s of sessions) {
+    if (s.userId) ids.add(String(s.userId));
+    if (s.matchedUserId) ids.add(String(s.matchedUserId));
+  }
+  return Array.from(ids);
+}
+
+function isWorldMessageTypeAllowed(chatType: string, messageType: string): boolean {
+  const ct = String(chatType || "text").toLowerCase();
+  const mt = String(messageType || "text").toLowerCase();
+
+  if (ct === "text") return mt === "text" || mt === "gift";
+  if (ct === "voice") return mt === "text" || mt === "voice" || mt === "gift";
+  if (ct === "video") return mt === "text" || mt === "voice" || mt === "video" || mt === "gift";
+  return mt === "text" || mt === "gift";
 }
 
 // ── Helper: charge coins atomically ──
@@ -212,6 +243,12 @@ router.post("/search", async (req, res) => {
 
     conditions.push(sql`${schema.users.id} IN (${sql.join(onlineIds.map(id => sql`${id}`), sql`, `)})`);
 
+    // Exclude users already busy in active world sessions.
+    const busyUserIds = (await getBusyWorldUserIds(db)).filter((id) => id !== userId);
+    if (busyUserIds.length > 0) {
+      conditions.push(sql`${schema.users.id} NOT IN (${sql.join(busyUserIds.map(id => sql`${id}`), sql`, `)})`);
+    }
+
     // Gender filter
     if (filters.genderFilter !== "both") {
       conditions.push(eq(schema.users.gender, filters.genderFilter));
@@ -276,7 +313,7 @@ router.post("/search", async (req, res) => {
         countryFilter: filters.countryFilter || null,
         chatType: filters.chatType || "text",
         coinsSpent: cost,
-        status: "cancelled",
+        status: "searching",
       }).returning();
 
       return res.json({
@@ -405,6 +442,230 @@ router.post("/search", async (req, res) => {
   } catch (err) {
     worldLog.error({ err }, "World search error");
     res.status(500).json({ success: false, message: "خطأ في البحث" });
+  }
+});
+
+// Try matching again for an existing searching session without charging again.
+router.post("/sessions/:id/try-match", async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const db = getDb();
+  if (!db) return res.status(500).json({ success: false, message: "خطأ في قاعدة البيانات" });
+
+  try {
+    const sessionId = paramStr(req.params.id);
+    const [session] = await db.select().from(schema.worldSessions)
+      .where(eq(schema.worldSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) return res.status(404).json({ success: false, message: "الجلسة غير موجودة" });
+    if (session.userId !== userId) return res.status(403).json({ success: false, message: "غير مصرح" });
+
+    if (session.status === "matched" || session.status === "chatting") {
+      let matchedUser: any = null;
+      if (session.matchedUserId) {
+        const [mu] = await db.select({
+          id: schema.users.id,
+          username: schema.users.username,
+          displayName: schema.users.displayName,
+          avatar: schema.users.avatar,
+          country: schema.users.country,
+          gender: schema.users.gender,
+          level: schema.users.level,
+          bio: schema.users.bio,
+          interests: schema.users.interests,
+          birthDate: schema.users.birthDate,
+        }).from(schema.users).where(eq(schema.users.id, session.matchedUserId)).limit(1);
+        matchedUser = mu || null;
+      }
+      return res.json({ success: true, data: { session, matched: !!session.matchedUserId, matchedUser } });
+    }
+
+    if (session.status !== "searching") {
+      return res.json({ success: true, data: { session, matched: false } });
+    }
+
+    const filters = {
+      genderFilter: (session.genderFilter as "male" | "female" | "both") || "both",
+      ageMin: Number(session.ageMin || 18),
+      ageMax: Number(session.ageMax || 60),
+      countryFilter: session.countryFilter || undefined,
+      chatType: (session.chatType as "text" | "voice" | "video") || "text",
+    };
+
+    const [currentUser] = await db.select({
+      id: schema.users.id,
+      country: schema.users.country,
+      gender: schema.users.gender,
+      bio: schema.users.bio,
+      interests: schema.users.interests,
+      level: schema.users.level,
+      birthDate: schema.users.birthDate,
+    }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    const onlineIds = await getOnlineUserIds();
+    if (onlineIds.length === 0) {
+      return res.json({ success: true, data: { session, matched: false } });
+    }
+
+    const conditions: any[] = [
+      ne(schema.users.id, userId),
+      eq(schema.users.isBanned, false),
+      sql`${schema.users.id} IN (${sql.join(onlineIds.map(id => sql`${id}`), sql`, `)})`,
+    ];
+
+    const busyUserIds = (await getBusyWorldUserIds(db, session.id)).filter((id) => id !== userId);
+    if (busyUserIds.length > 0) {
+      conditions.push(sql`${schema.users.id} NOT IN (${sql.join(busyUserIds.map(id => sql`${id}`), sql`, `)})`);
+    }
+
+    if (filters.genderFilter !== "both") {
+      conditions.push(eq(schema.users.gender, filters.genderFilter));
+    }
+
+    if (filters.ageMin || filters.ageMax) {
+      const now = new Date();
+      if (filters.ageMax && filters.ageMax < 100) {
+        const minBirthYear = now.getFullYear() - filters.ageMax - 1;
+        const minDate = `${minBirthYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        conditions.push(sql`${schema.users.birthDate} >= ${minDate}`);
+      }
+      if (filters.ageMin && filters.ageMin > 13) {
+        const maxBirthYear = now.getFullYear() - filters.ageMin;
+        const maxDate = `${maxBirthYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        conditions.push(sql`${schema.users.birthDate} <= ${maxDate}`);
+      }
+    }
+
+    if (filters.countryFilter) {
+      conditions.push(eq(schema.users.country, filters.countryFilter));
+    }
+
+    const recentSessions = await db.select({ matchedUserId: schema.worldSessions.matchedUserId })
+      .from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.userId, userId),
+        sql`${schema.worldSessions.matchedUserId} IS NOT NULL`,
+        gte(schema.worldSessions.startedAt, sql`NOW() - INTERVAL '24 hours'`)
+      ));
+    const recentIds = recentSessions.map(s => s.matchedUserId).filter(Boolean) as string[];
+    if (recentIds.length > 0) {
+      conditions.push(sql`${schema.users.id} NOT IN (${sql.join(recentIds.map(id => sql`${id}`), sql`, `)})`);
+    }
+
+    const candidates = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      country: schema.users.country,
+      gender: schema.users.gender,
+      level: schema.users.level,
+      bio: schema.users.bio,
+      interests: schema.users.interests,
+      birthDate: schema.users.birthDate,
+    }).from(schema.users).where(and(...conditions)).limit(MAX_MATCH_CANDIDATES);
+
+    if (candidates.length === 0) {
+      return res.json({ success: true, data: { session, matched: false } });
+    }
+
+    const userInterests = (currentUser?.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
+    const userAge = currentUser?.birthDate ? Math.floor((Date.now() - new Date(currentUser.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
+
+    const successfulSessions = await db.select({
+      matchedUserId: schema.worldSessions.matchedUserId,
+      avgDuration: sql<number>`COALESCE(AVG(EXTRACT(EPOCH FROM (${schema.worldSessions.endedAt} - ${schema.worldSessions.matchedAt}))), 0)`,
+    }).from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.userId, userId),
+        eq(schema.worldSessions.status, "ended"),
+        sql`${schema.worldSessions.matchedUserId} IS NOT NULL`,
+        sql`${schema.worldSessions.endedAt} IS NOT NULL`,
+        sql`${schema.worldSessions.matchedAt} IS NOT NULL`,
+      ))
+      .groupBy(schema.worldSessions.matchedUserId);
+
+    const sessionHistory = new Map(successfulSessions.map(s => [s.matchedUserId, s.avgDuration]));
+
+    const scored = candidates.map(candidate => {
+      let score = 0;
+
+      const candidateInterests = (candidate.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
+      const sharedInterests = userInterests.filter(i => candidateInterests.includes(i));
+      score += Math.min(sharedInterests.length * 8, 40);
+
+      if (currentUser?.country && candidate.country && currentUser.country === candidate.country) {
+        score += 15;
+      }
+
+      if (userAge && candidate.birthDate) {
+        const candAge = Math.floor((Date.now() - new Date(candidate.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        const ageDiff = Math.abs(userAge - candAge);
+        if (ageDiff <= 3) score += 20;
+        else if (ageDiff <= 7) score += 10;
+        else if (ageDiff <= 12) score += 5;
+      }
+
+      if (candidate.bio && candidate.bio.length > 10) score += 5;
+
+      if (currentUser?.level && candidate.level) {
+        const levelDiff = Math.abs(currentUser.level - candidate.level);
+        if (levelDiff <= 3) score += 10;
+        else if (levelDiff <= 8) score += 5;
+      }
+
+      const prevDuration = sessionHistory.get(candidate.id);
+      if (prevDuration && prevDuration > GOOD_CHAT_DURATION_SECONDS) score += 10;
+
+      score += Math.random() * 5;
+
+      return { ...candidate, compatibilityScore: score };
+    });
+
+    scored.sort((a, b) => b.compatibilityScore - a.compatibilityScore);
+    const match = scored[0];
+
+    const [updated] = await db.update(schema.worldSessions).set({
+      matchedUserId: match.id,
+      status: "matched",
+      matchedAt: new Date(),
+    }).where(and(
+      eq(schema.worldSessions.id, session.id),
+      eq(schema.worldSessions.status, "searching"),
+    )).returning();
+
+    if (!updated) {
+      const [fresh] = await db.select().from(schema.worldSessions).where(eq(schema.worldSessions.id, session.id)).limit(1);
+      return res.json({ success: true, data: { session: fresh || session, matched: false } });
+    }
+
+    await db.insert(schema.worldMessages).values({
+      sessionId: session.id,
+      senderId: "system",
+      content: "تم التطابق! ابدأ المحادثة 🎉",
+      type: "system",
+    });
+
+    const matchedSocketId = await getUserSocketId(match.id);
+    if (matchedSocketId) {
+      io.to(matchedSocketId).emit("world-match-found", {
+        sessionId: session.id,
+        matchedUser: { id: userId },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        session: updated,
+        matched: true,
+        matchedUser: match,
+      },
+    });
+  } catch (err) {
+    worldLog.error({ err }, "World try-match error");
+    return res.status(500).json({ success: false, message: "خطأ في البحث" });
   }
 });
 
@@ -645,6 +906,10 @@ router.post("/sessions/:id/messages", async (req, res) => {
       return res.status(400).json({ success: false, message: "بيانات غير صحيحة" });
     }
 
+    if (!isWorldMessageTypeAllowed(session.chatType || "text", parsed.data.type || "text")) {
+      return res.status(400).json({ success: false, message: "نوع الرسالة غير مسموح في هذا النوع من الجلسات" });
+    }
+
     // Update session to chatting if matched
     if (session.status === "matched") {
       await db.update(schema.worldSessions).set({ status: "chatting" }).where(eq(schema.worldSessions.id, session.id));
@@ -802,9 +1067,10 @@ router.get("/stats", async (req, res) => {
       miles: schema.users.miles,
       totalWorldSessions: schema.users.totalWorldSessions,
       coins: schema.users.coins,
+      country: schema.users.country,
     }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
 
-    res.json({ success: true, data: user || { miles: 0, totalWorldSessions: 0, coins: 0 } });
+    res.json({ success: true, data: user || { miles: 0, totalWorldSessions: 0, coins: 0, country: null } });
   } catch (err) {
     log(`World stats error: ${err}`, "world");
     res.status(500).json({ success: false, message: "خطأ" });
@@ -972,3 +1238,22 @@ router.get("/admin/stats", async (req, res) => {
 });
 
 export default router;
+
+// Periodic cleanup for stale searching sessions.
+setInterval(async () => {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.update(schema.worldSessions)
+      .set({
+        status: "cancelled",
+        endedAt: new Date(),
+      })
+      .where(and(
+        eq(schema.worldSessions.status, "searching"),
+        sql`${schema.worldSessions.startedAt} < NOW() - INTERVAL '${STALE_SEARCH_MAX_MINUTES} minutes'`,
+      ));
+  } catch (err) {
+    worldLog.warn({ err }, "World stale-session cleanup failed");
+  }
+}, CLEANUP_INTERVAL_MS).unref();

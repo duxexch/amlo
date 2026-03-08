@@ -816,11 +816,54 @@ io.on("connection", (socket) => {
 
   // ── World (حول العالم) ──
 
+  const getAuthorizedWorldSession = async (sessionId: string, userId: string, requireActive = false) => {
+    const pool = getPool();
+    if (!pool) return null;
+    const { rows } = await pool.query(
+      `SELECT id, user_id, matched_user_id, status, chat_type
+       FROM world_sessions
+       WHERE id = $1
+         AND ($2 = user_id OR $2 = matched_user_id)
+       LIMIT 1`,
+      [sessionId, userId],
+    );
+    const session = rows[0] || null;
+    if (!session) return null;
+    if (requireActive && !["searching", "matched", "chatting"].includes(String(session.status || ""))) {
+      return null;
+    }
+    return session as {
+      id: string;
+      user_id: string;
+      matched_user_id: string | null;
+      status: string;
+      chat_type: string;
+    };
+  };
+
+  const isWorldSocketMessageAllowed = (chatType: string, msgType: string) => {
+    const ct = String(chatType || "text").toLowerCase();
+    const mt = String(msgType || "text").toLowerCase();
+    if (ct === "text") return mt === "text" || mt === "gift";
+    if (ct === "voice") return mt === "text" || mt === "voice" || mt === "gift";
+    if (ct === "video") return mt === "text" || mt === "voice" || mt === "video" || mt === "gift";
+    return mt === "text" || mt === "gift";
+  };
+
   // Join world session room (for real-time messaging)
-  socket.on("world-join-session", (data: unknown) => {
+  socket.on("world-join-session", async (data: unknown) => {
     if (!data || typeof data !== "object") return;
     const { sessionId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100)) return;
+    const userId = socket.data.userId;
+    if (!isStr(userId, 100)) return;
+
+    const session = await getAuthorizedWorldSession(sessionId, userId, false);
+    if (!session) {
+      socket.emit("world-error", { type: "unauthorized_session", message: "جلسة غير صالحة" });
+      return;
+    }
+
     socket.join(`world:${sessionId}`);
   });
 
@@ -838,6 +881,13 @@ io.on("connection", (socket) => {
     if (!isStr(sessionId, 100) || !isStr(content as string, 5000)) return;
     const userId = socket.data.userId;
     if (!userId) return;
+
+    const session = await getAuthorizedWorldSession(sessionId, userId, true);
+    if (!session) {
+      socket.emit("world-error", { type: "unauthorized_session", message: "لا يمكنك الإرسال في هذه الجلسة" });
+      return;
+    }
+
     // Rate limiting
     if (isChatRateLimited(userId)) {
       socket.emit("world-error", { type: "rate_limited", message: "أنت ترسل بسرعة كبيرة" });
@@ -848,6 +898,10 @@ io.on("connection", (socket) => {
       const pool = getPool();
       if (pool) {
         const msgType = isStr(type as string, 20) ? type : "text";
+        if (!isWorldSocketMessageAllowed(session.chat_type, String(msgType))) {
+          socket.emit("world-error", { type: "invalid_message_type", message: "نوع الرسالة غير مسموح في هذه الجلسة" });
+          return;
+        }
         const msgContent = (content as string).slice(0, 2000);
         const result = await pool.query(
           `INSERT INTO world_messages (session_id, sender_id, content, type) VALUES ($1, $2, $3, $4) RETURNING id, session_id as "sessionId", sender_id as "senderId", content, type, created_at as "createdAt"`,
@@ -866,6 +920,14 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { sessionId, receiverId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100) || !isStr(receiverId, 100)) return;
+    const userId = socket.data.userId;
+    if (!isStr(userId, 100)) return;
+
+    const session = await getAuthorizedWorldSession(sessionId, userId, true);
+    if (!session) return;
+    const expectedReceiverId = session.user_id === userId ? session.matched_user_id : session.user_id;
+    if (!expectedReceiverId || String(expectedReceiverId) !== String(receiverId)) return;
+
     const uid = socket.data.userId || socket.id;
     const lastTyping = typingThrottle.get(`world:${uid}`) || 0;
     if (Date.now() - lastTyping < TYPING_THROTTLE_MS) return;
@@ -883,6 +945,14 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { sessionId, receiverId } = data as Record<string, unknown>;
     if (!isStr(sessionId, 100) || !isStr(receiverId, 100)) return;
+    const userId = socket.data.userId;
+    if (!isStr(userId, 100)) return;
+
+    const session = await getAuthorizedWorldSession(sessionId, userId, true);
+    if (!session) return;
+    const expectedReceiverId = session.user_id === userId ? session.matched_user_id : session.user_id;
+    if (!expectedReceiverId || String(expectedReceiverId) !== String(receiverId)) return;
+
     const receiverSocketId = await getUserSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("world-chat-stop-typing", {
