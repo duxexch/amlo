@@ -45,9 +45,128 @@ const router = Router();
 const authLog = createLogger("userAuth");
 const log = (msg: string) => authLog.info(msg);
 
+const AUTH_METRICS_TTL_SECONDS = 60 * 60 * 24 * 14;
+const LOGIN_FAIL_WINDOW_SECONDS = 10 * 60;
+const LOGIN_FAIL_MAX_ATTEMPTS = 5;
+const LOGIN_FAIL_LOCK_SECONDS = 5 * 60;
+
+type AuthErrorPayload = {
+  status: number;
+  message: string;
+  code: string;
+  retryAfterSeconds?: number;
+  fieldErrors?: Record<string, string>;
+  attemptsRemaining?: number;
+  attemptsMax?: number;
+};
+
 // ── Helper: Express 5 param extraction ──
 function paramStr(val: string | string[] | undefined): string {
   return Array.isArray(val) ? val[0] : val || "";
+}
+
+function clampRetrySeconds(value: number | undefined): number | undefined {
+  if (!value || !Number.isFinite(value)) return undefined;
+  const safe = Math.max(1, Math.min(Math.floor(value), 24 * 60 * 60));
+  return safe;
+}
+
+function mapZodIssuesToFieldErrors(issues: Array<{ path?: Array<string | number>; message?: string }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = String(issue?.path?.[0] || "").trim();
+    if (!key || out[key]) continue;
+    out[key] = String(issue?.message || "قيمة غير صحيحة");
+  }
+  return out;
+}
+
+async function trackAuthFailureMetric(endpoint: string, status: number, code: string) {
+  const redis = getRedis();
+  const minuteBucket = new Date().toISOString().slice(0, 16);
+  const key = `ablox:metrics:auth-fail:${minuteBucket}`;
+  try {
+    authLog.warn({ endpoint, status, code }, "Auth failure tracked");
+    if (!redis) return;
+    const field = `${endpoint}|${status}|${code}`;
+    await redis.hincrby(key, field, 1);
+    await redis.expire(key, AUTH_METRICS_TTL_SECONDS);
+  } catch (err: any) {
+    authLog.warn({ err, endpoint, status, code }, "Auth failure metric tracking failed");
+  }
+}
+
+async function respondAuthError(res: Response, endpoint: string, payload: AuthErrorPayload) {
+  await trackAuthFailureMetric(endpoint, payload.status, payload.code);
+  const retryAfterSeconds = clampRetrySeconds(payload.retryAfterSeconds);
+  if (payload.status === 429 && retryAfterSeconds) {
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+  }
+
+  return res.status(payload.status).json({
+    success: false,
+    message: payload.message,
+    code: payload.code,
+    ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+    ...(payload.fieldErrors ? { fieldErrors: payload.fieldErrors } : {}),
+    ...(typeof payload.attemptsRemaining === "number" ? { attemptsRemaining: payload.attemptsRemaining } : {}),
+    ...(typeof payload.attemptsMax === "number" ? { attemptsMax: payload.attemptsMax } : {}),
+  });
+}
+
+function getLoginFailKey(login: string, req: Request): string {
+  const ip = getClientIp(req);
+  const normalizedLogin = String(login || "").trim().toLowerCase();
+  const fp = createHash("sha256").update(`${normalizedLogin}|${ip}`).digest("hex").slice(0, 32);
+  return `ablox:auth:login-fail:${fp}`;
+}
+
+async function readLoginFailState(login: string, req: Request): Promise<{ count: number; lockUntil: number }> {
+  const key = getLoginFailKey(login, req);
+  const raw = await cacheGet(key);
+  if (!raw) return { count: 0, lockUntil: 0 };
+  try {
+    const parsed = JSON.parse(raw) as { count?: number; lockUntil?: number };
+    return {
+      count: Math.max(0, Number(parsed?.count || 0)),
+      lockUntil: Math.max(0, Number(parsed?.lockUntil || 0)),
+    };
+  } catch {
+    return { count: 0, lockUntil: 0 };
+  }
+}
+
+async function clearLoginFailState(login: string, req: Request) {
+  await cacheDel(getLoginFailKey(login, req));
+}
+
+async function registerLoginFailure(login: string, req: Request): Promise<{ attemptsRemaining: number; retryAfterSeconds?: number }> {
+  const now = Date.now();
+  const key = getLoginFailKey(login, req);
+  const state = await readLoginFailState(login, req);
+
+  if (state.lockUntil > now) {
+    const retryAfterSeconds = Math.ceil((state.lockUntil - now) / 1000);
+    return { attemptsRemaining: 0, retryAfterSeconds };
+  }
+
+  const nextCount = state.count + 1;
+  let lockUntil = 0;
+  if (nextCount >= LOGIN_FAIL_MAX_ATTEMPTS) {
+    lockUntil = now + LOGIN_FAIL_LOCK_SECONDS * 1000;
+  }
+
+  await cacheSet(
+    key,
+    JSON.stringify({ count: nextCount, lockUntil }),
+    Math.max(LOGIN_FAIL_WINDOW_SECONDS, LOGIN_FAIL_LOCK_SECONDS),
+  );
+
+  if (lockUntil > now) {
+    return { attemptsRemaining: 0, retryAfterSeconds: Math.ceil((lockUntil - now) / 1000) };
+  }
+
+  return { attemptsRemaining: Math.max(0, LOGIN_FAIL_MAX_ATTEMPTS - nextCount) };
 }
 
 function normalizeOtpCode(value: unknown): string {
@@ -344,7 +463,16 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip || "127.0.0.1"),
-  message: { success: false, message: "عدد كبير من المحاولات — حاول بعد 15 دقيقة" },
+  handler: async (req, res) => {
+    const resetMs = (req as any).rateLimit?.resetTime?.getTime?.() || Date.now() + 15 * 60 * 1000;
+    const retryAfterSeconds = Math.max(1, Math.ceil((resetMs - Date.now()) / 1000));
+    await respondAuthError(res, req.originalUrl || "auth", {
+      status: 429,
+      message: "عدد كبير من المحاولات — حاول بعد قليل",
+      code: "AUTH_RATE_LIMITED",
+      retryAfterSeconds,
+    });
+  },
 });
 
 const strictAuthLimiter = rateLimit({
@@ -353,7 +481,16 @@ const strictAuthLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip || "127.0.0.1"),
-  message: { success: false, message: "عدد كبير من المحاولات — حاول لاحقاً" },
+  handler: async (req, res) => {
+    const resetMs = (req as any).rateLimit?.resetTime?.getTime?.() || Date.now() + 60 * 60 * 1000;
+    const retryAfterSeconds = Math.max(1, Math.ceil((resetMs - Date.now()) / 1000));
+    await respondAuthError(res, req.originalUrl || "auth", {
+      status: 429,
+      message: "عدد كبير من المحاولات — حاول لاحقاً",
+      code: "AUTH_STRICT_RATE_LIMITED",
+      retryAfterSeconds,
+    });
+  },
 });
 
 // ════════════════════════════════════════════════════════════
@@ -367,7 +504,12 @@ router.post("/register", authLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = userRegisterSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.issues });
+      return respondAuthError(res, "/auth/register", {
+        status: 400,
+        message: "بيانات غير صالحة",
+        code: "AUTH_VALIDATION_ERROR",
+        fieldErrors: mapZodIssuesToFieldErrors(parsed.error.issues as any),
+      });
     }
 
     const { username, email, password, displayName, referralCode } = parsed.data;
@@ -379,17 +521,31 @@ router.post("/register", authLimiter, async (req: Request, res: Response) => {
     // Verify OTP was completed for this email
     const otpVerifiedFlag = await cacheGet(`otp:verified:${email.toLowerCase()}`);
     if (!otpVerifiedFlag) {
-      return res.status(403).json({ success: false, message: "يرجى تأكيد بريدك الإلكتروني أولاً عبر رمز التحقق", code: "OTP_REQUIRED" });
+      return respondAuthError(res, "/auth/register", {
+        status: 403,
+        message: "يرجى تأكيد بريدك الإلكتروني أولاً عبر رمز التحقق",
+        code: "OTP_REQUIRED",
+      });
     }
 
     // Check if username or email already exists
     const existingUser = await storage.getUserByUsername(username);
     if (existingUser) {
-      return res.status(409).json({ success: false, message: "اسم المستخدم مستخدم بالفعل" });
+      return respondAuthError(res, "/auth/register", {
+        status: 409,
+        message: "اسم المستخدم مستخدم بالفعل",
+        code: "USERNAME_ALREADY_EXISTS",
+        fieldErrors: { username: "اسم المستخدم مستخدم بالفعل" },
+      });
     }
     const existingEmail = await storage.getUserByEmail(email);
     if (existingEmail) {
-      return res.status(409).json({ success: false, message: "البريد الإلكتروني مستخدم بالفعل" });
+      return respondAuthError(res, "/auth/register", {
+        status: 409,
+        message: "البريد الإلكتروني مستخدم بالفعل",
+        code: "EMAIL_ALREADY_EXISTS",
+        fieldErrors: { email: "البريد الإلكتروني مستخدم بالفعل" },
+      });
     }
 
     // Hash password
@@ -449,13 +605,32 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = userLoginSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.issues });
+      return respondAuthError(res, "/auth/login", {
+        status: 400,
+        message: "بيانات غير صالحة",
+        code: "AUTH_VALIDATION_ERROR",
+        fieldErrors: mapZodIssuesToFieldErrors(parsed.error.issues as any),
+      });
     }
 
     const { login, password } = parsed.data;
     const db = getDb();
     if (!db) {
       return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة حالياً" });
+    }
+
+    const failState = await readLoginFailState(login, req);
+    const now = Date.now();
+    if (failState.lockUntil > now) {
+      const retryAfterSeconds = Math.ceil((failState.lockUntil - now) / 1000);
+      return respondAuthError(res, "/auth/login", {
+        status: 429,
+        message: "تم تجاوز عدد المحاولات. حاول بعد انتهاء المهلة.",
+        code: "LOGIN_TEMP_LOCKED",
+        retryAfterSeconds,
+        attemptsRemaining: 0,
+        attemptsMax: LOGIN_FAIL_MAX_ATTEMPTS,
+      });
     }
 
     // Find user by username or email
@@ -465,19 +640,45 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
       : await storage.getUserByUsername(login);
 
     if (!user) {
-      return res.status(401).json({ success: false, message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+      const attempt = await registerLoginFailure(login, req);
+      return respondAuthError(res, "/auth/login", {
+        status: attempt.retryAfterSeconds ? 429 : 401,
+        message: attempt.retryAfterSeconds
+          ? "تم تجاوز عدد المحاولات. حاول بعد انتهاء المهلة."
+          : "اسم المستخدم أو كلمة المرور غير صحيحة",
+        code: attempt.retryAfterSeconds ? "LOGIN_TEMP_LOCKED" : "INVALID_CREDENTIALS",
+        retryAfterSeconds: attempt.retryAfterSeconds,
+        attemptsRemaining: attempt.attemptsRemaining,
+        attemptsMax: LOGIN_FAIL_MAX_ATTEMPTS,
+      });
     }
 
     // Check if banned
     if (user.isBanned) {
-      return res.status(403).json({ success: false, message: "تم حظر حسابك", reason: user.banReason });
+      return respondAuthError(res, "/auth/login", {
+        status: 403,
+        message: "تم حظر حسابك",
+        code: "ACCOUNT_BANNED",
+      });
     }
 
     // Verify password
     const valid = await verifyPasswordAsync(password, user.passwordHash);
     if (!valid) {
-      return res.status(401).json({ success: false, message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+      const attempt = await registerLoginFailure(login, req);
+      return respondAuthError(res, "/auth/login", {
+        status: attempt.retryAfterSeconds ? 429 : 401,
+        message: attempt.retryAfterSeconds
+          ? "تم تجاوز عدد المحاولات. حاول بعد انتهاء المهلة."
+          : "اسم المستخدم أو كلمة المرور غير صحيحة",
+        code: attempt.retryAfterSeconds ? "LOGIN_TEMP_LOCKED" : "INVALID_CREDENTIALS",
+        retryAfterSeconds: attempt.retryAfterSeconds,
+        attemptsRemaining: attempt.attemptsRemaining,
+        attemptsMax: LOGIN_FAIL_MAX_ATTEMPTS,
+      });
     }
+
+    await clearLoginFailState(login, req);
 
     // Check 2FA — if enabled, require TOTP before setting session
     if (user.twoFactorEnabled) {
@@ -1105,13 +1306,23 @@ router.post("/otp/send", async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     if (!email || typeof email !== "string" || !email.includes("@")) {
-      return res.status(400).json({ success: false, message: "يرجى إدخال بريد إلكتروني صالح" });
+      return respondAuthError(res, "/auth/otp/send", {
+        status: 400,
+        message: "يرجى إدخال بريد إلكتروني صالح",
+        code: "INVALID_EMAIL",
+        fieldErrors: { email: "يرجى إدخال بريد إلكتروني صالح" },
+      });
     }
 
     const result = await sendOtp(email.trim());
     if (!result.success) {
       const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
-      return res.status(status).json(result);
+      return respondAuthError(res, "/auth/otp/send", {
+        status,
+        message: result.message,
+        code: status === 503 ? "OTP_SERVICE_UNAVAILABLE" : "OTP_RATE_LIMITED",
+        retryAfterSeconds: result.cooldownSeconds,
+      });
     }
 
     return res.json(result);
@@ -1168,19 +1379,34 @@ router.post("/otp/send-register", async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     if (!email || typeof email !== "string" || !email.includes("@")) {
-      return res.status(400).json({ success: false, message: "يرجى إدخال بريد إلكتروني صالح" });
+      return respondAuthError(res, "/auth/otp/send-register", {
+        status: 400,
+        message: "يرجى إدخال بريد إلكتروني صالح",
+        code: "INVALID_EMAIL",
+        fieldErrors: { email: "يرجى إدخال بريد إلكتروني صالح" },
+      });
     }
 
     // Check if email already registered
     const existing = await storage.getUserByEmail(email.trim());
     if (existing) {
-      return res.status(409).json({ success: false, message: "البريد الإلكتروني مستخدم بالفعل" });
+      return respondAuthError(res, "/auth/otp/send-register", {
+        status: 409,
+        message: "البريد الإلكتروني مستخدم بالفعل",
+        code: "EMAIL_ALREADY_EXISTS",
+        fieldErrors: { email: "البريد الإلكتروني مستخدم بالفعل" },
+      });
     }
 
     const result = await sendOtp(email.trim());
     if (!result.success) {
       const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
-      return res.status(status).json(result);
+      return respondAuthError(res, "/auth/otp/send-register", {
+        status,
+        message: result.message,
+        code: status === 503 ? "OTP_SERVICE_UNAVAILABLE" : "OTP_RATE_LIMITED",
+        retryAfterSeconds: result.cooldownSeconds,
+      });
     }
 
     return res.json(result);
@@ -1310,13 +1536,22 @@ router.post("/login/otp", async (req: Request, res: Response) => {
 
     const user = await storage.getUser(userId);
     if (!user || !user.email) {
-      return res.status(400).json({ success: false, message: "لا يوجد بريد إلكتروني مرتبط بالحساب" });
+      return respondAuthError(res, "/auth/login/otp", {
+        status: 400,
+        message: "لا يوجد بريد إلكتروني مرتبط بالحساب",
+        code: "EMAIL_REQUIRED",
+      });
     }
 
     const result = await sendOtp(user.email);
     if (!result.success) {
       const status = result.message.includes("خدمة البريد غير متاحة") ? 503 : 429;
-      return res.status(status).json(result);
+      return respondAuthError(res, "/auth/login/otp", {
+        status,
+        message: result.message,
+        code: status === 503 ? "OTP_SERVICE_UNAVAILABLE" : "OTP_RATE_LIMITED",
+        retryAfterSeconds: result.cooldownSeconds,
+      });
     }
 
     return res.json({

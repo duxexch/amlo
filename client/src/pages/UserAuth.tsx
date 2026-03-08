@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, Mail, Lock, ArrowRight, AlertCircle, Gift, Phone, Eye, EyeOff, Check, ChevronLeft, X, Loader2 } from "lucide-react";
+import { User, Mail, Lock, AlertCircle, Gift, Phone, Eye, EyeOff, Check, ChevronLeft, X, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { authApi, loginOtpApi } from "../lib/authApi";
+import { mapAuthFieldErrorsForForm, normalizeAuthUiError } from "../lib/authErrorUtils";
 
 function normalizeOtpDigits(value: string): string {
   return value
@@ -55,7 +56,12 @@ export function UserAuth() {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authErrorHint, setAuthErrorHint] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
+  const [authCooldownSeconds, setAuthCooldownSeconds] = useState(0);
+  const [authFieldErrors, setAuthFieldErrors] = useState<Record<string, string>>({});
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
+  const [attemptsMax, setAttemptsMax] = useState<number | null>(null);
   const [, setLocation] = useLocation();
 
   // 2FA state
@@ -76,6 +82,42 @@ export function UserAuth() {
     }
   }, [otpTimer]);
 
+  useEffect(() => {
+    if (authCooldownSeconds <= 0) return;
+    const timer = setTimeout(() => setAuthCooldownSeconds((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [authCooldownSeconds]);
+
+  useEffect(() => {
+    setAuthError(null);
+    setAuthErrorHint(null);
+    setAuthSuccess(null);
+    setAuthFieldErrors({});
+    setAttemptsRemaining(null);
+    setAttemptsMax(null);
+  }, [isLogin]);
+
+  const applyAuthUiError = (err: any) => {
+    const normalized = normalizeAuthUiError(err, (key, fallback) => String(t(key as any, fallback as any)));
+    setAuthError(normalized.message);
+    setAuthErrorHint(normalized.hint);
+    setAuthFieldErrors(mapAuthFieldErrorsForForm(normalized.fieldErrors, isLogin));
+    setAttemptsRemaining(typeof normalized.attemptsRemaining === "number" ? normalized.attemptsRemaining : null);
+    setAttemptsMax(typeof normalized.attemptsMax === "number" ? normalized.attemptsMax : null);
+    if (normalized.retryAfterSeconds > 0) {
+      setAuthCooldownSeconds((prev) => Math.max(prev, normalized.retryAfterSeconds));
+    }
+  };
+
+  const clearFieldError = (field: string) => {
+    if (!authFieldErrors[field]) return;
+    setAuthFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const startLoginOtpFlow = async (options?: { deviceTrustRequired?: boolean }) => {
     const result = await loginOtpApi.sendOtp();
     setLoginOtpEmail(result.email || "");
@@ -89,11 +131,23 @@ export function UserAuth() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthErrorHint(null);
     setAuthSuccess(null);
+    setAuthFieldErrors({});
+    setAttemptsRemaining(null);
+    setAttemptsMax(null);
+
+    if (authCooldownSeconds > 0) {
+      setAuthError(String(t("auth.retryAfter" as any, { seconds: authCooldownSeconds } as any)));
+      setAuthErrorHint(t("auth.retryHint", "هذا إجراء حماية مؤقت. يمكنك المحاولة مرة أخرى تلقائياً بعد انتهاء العداد."));
+      return;
+    }
 
     if (authMethod === "phone") {
       // Phone OTP not yet implemented
       setAuthError(t("auth.phoneComingSoon", "تسجيل الدخول عبر الهاتف قريباً"));
+      setAuthErrorHint(t("auth.useEmailForNow", "حالياً يمكنك استخدام البريد الإلكتروني وكلمة المرور."));
+      setAuthFieldErrors({ phone: t("auth.phoneComingSoon", "تسجيل الدخول عبر الهاتف قريباً") });
       return;
     }
 
@@ -102,6 +156,9 @@ export function UserAuth() {
       if (isLogin) {
         // Login
         const result = await authApi.login({ login: email, password });
+        setAuthCooldownSeconds(0);
+        setAttemptsRemaining(null);
+        setAttemptsMax(null);
         if (result.data.requires2FA) {
           setTwoFAUserId(result.data.userId);
           setShow2FA(true);
@@ -118,27 +175,28 @@ export function UserAuth() {
         // Register — send OTP first
         if (!username.trim()) {
           setAuthError(t("auth.usernameRequired", "يرجى إدخال اسم المستخدم"));
+          setAuthErrorHint(t("auth.hintUsername", "استخدم اسم مستخدم واضحًا بطول مناسب."));
+          setAuthFieldErrors({ username: t("auth.usernameRequired", "يرجى إدخال اسم المستخدم") });
           return;
         }
         if (!email.trim()) {
           setAuthError(t("auth.emailRequired", "يرجى إدخال البريد الإلكتروني"));
+          setAuthErrorHint(t("auth.hintEmail", "أدخل بريد إلكتروني صحيح مثل name@example.com."));
+          setAuthFieldErrors({ email: t("auth.emailRequired", "يرجى إدخال البريد الإلكتروني") });
           return;
         }
         // Send OTP to email for verification
         const otpResult = await authApi.sendRegisterOtp(email.trim());
-        if (otpResult.success) {
-          setOtpEmail(email.trim());
-          setOtpPurpose("register");
-          setShowOtp(true);
-          setOtpTimer(60);
-          setOtpValues(["", "", "", "", "", ""]);
-          setAuthSuccess(otpResult.devCode ? `${otpResult.message} - OTP: ${otpResult.devCode}` : otpResult.message);
-        } else {
-          setAuthError(otpResult.message);
-        }
+        setAuthCooldownSeconds(0);
+        setOtpEmail(email.trim());
+        setOtpPurpose("register");
+        setShowOtp(true);
+        setOtpTimer(Math.max(1, Number(otpResult.cooldownSeconds || 60)));
+        setOtpValues(["", "", "", "", "", ""]);
+        setAuthSuccess(otpResult.devCode ? `${otpResult.message} - OTP: ${otpResult.devCode}` : otpResult.message);
       }
     } catch (err: any) {
-      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+      applyAuthUiError(err);
     } finally {
       setAuthLoading(false);
     }
@@ -147,13 +205,14 @@ export function UserAuth() {
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthErrorHint(null);
     setAuthSuccess(null);
     setAuthLoading(true);
     try {
       const result = await authApi.forgotPassword(forgotEmail.trim());
       setAuthSuccess(result.message);
     } catch (err: any) {
-      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+      applyAuthUiError(err);
     } finally {
       setAuthLoading(false);
     }
@@ -178,7 +237,7 @@ export function UserAuth() {
                 setLocation("/");
               }
             } catch (err: any) {
-              setAuthError(err?.message || "خطأ في تسجيل الدخول");
+              applyAuthUiError(err);
             }
           },
         });
@@ -199,7 +258,7 @@ export function UserAuth() {
                   setLocation("/");
                 }
               })
-              .catch((err: any) => setAuthError(err?.message || "خطأ في تسجيل الدخول"));
+              .catch((err: any) => applyAuthUiError(err));
           }
         }, { scope: "email,public_profile" });
         return;
@@ -208,7 +267,7 @@ export function UserAuth() {
       // Fallback for providers without SDK
       setAuthError(t("auth.socialComingSoon", `تسجيل الدخول عبر ${provider} قريباً`));
     } catch (err: any) {
-      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+      applyAuthUiError(err);
     } finally {
       setAuthLoading(false);
     }
@@ -223,7 +282,7 @@ export function UserAuth() {
       await authApi.verify2FA(twoFAUserId, normalizedCode);
       setLocation("/");
     } catch (err: any) {
-      setAuthError(err?.message || "رمز التحقق غير صحيح");
+      applyAuthUiError(err);
     } finally {
       setAuthLoading(false);
     }
@@ -259,7 +318,7 @@ export function UserAuth() {
         setLocation("/");
       }
     } catch (err: any) {
-      setAuthError(err?.message || t("auth.error", "حدث خطأ، حاول مرة أخرى"));
+      applyAuthUiError(err);
     } finally {
       setAuthLoading(false);
     }
@@ -433,7 +492,7 @@ export function UserAuth() {
                     await loginOtpApi.verifyOtp(code);
                     setLocation("/");
                   } catch (err: any) {
-                    setAuthError(err?.message || "رمز غير صحيح");
+                    applyAuthUiError(err);
                   } finally { setAuthLoading(false); }
                 }}
                 disabled={loginOtpValues.some(v => !v) || authLoading}
@@ -506,12 +565,10 @@ export function UserAuth() {
                       const result = otpPurpose === "register"
                         ? await authApi.sendRegisterOtp(otpEmail)
                         : await authApi.sendOtp(otpEmail);
-                      if (result.success) {
-                        setOtpTimer(60);
-                        setOtpValues(["", "", "", "", "", ""]);
-                      }
+                      setOtpTimer(Math.max(1, Number(result.cooldownSeconds || 60)));
+                      setOtpValues(["", "", "", "", "", ""]);
                     } catch (err: any) {
-                      setAuthError(err?.message || "فشل إعادة الإرسال");
+                      applyAuthUiError(err);
                     }
                   }}>{t("auth.resendOtp")}</button>
                 )}
@@ -573,6 +630,22 @@ export function UserAuth() {
                 <h2 className="text-2xl font-black text-white">{isLogin ? t("auth.loginTitle") : t("auth.registerTitle")}</h2>
               </div>
 
+              <div className="mb-5 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLogin(!isLogin);
+                    setAgreeTerms(false);
+                    setAuthError(null);
+                    setAuthErrorHint(null);
+                    setAuthSuccess(null);
+                  }}
+                  className="text-sm font-bold text-primary hover:underline"
+                >
+                  {isLogin ? t("auth.registerTitle", "إنشاء حساب جديد") : t("auth.loginNow", "سجل دخولك")}
+                </button>
+              </div>
+
               {/* Auth Method Tabs */}
               <div className="flex p-1 bg-white/5 rounded-xl mb-6 border border-white/10">
                 <button
@@ -609,24 +682,51 @@ export function UserAuth() {
                 {!isLogin && (
                   <div className="relative group">
                     <User className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                    <input type="text" required value={username} onChange={e => setUsername(e.target.value)} aria-label={t("auth.username")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.username")} />
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={e => { setUsername(e.target.value); clearFieldError("username"); }}
+                      aria-label={t("auth.username")}
+                      className={`w-full bg-white/5 border rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all ${authFieldErrors.username ? "border-destructive" : "border-white/10"}`}
+                      placeholder={t("auth.username")}
+                    />
                   </div>
                 )}
+                {!isLogin && authFieldErrors.username && <p className="text-xs text-destructive px-1">{authFieldErrors.username}</p>}
 
                 <AnimatePresence mode="wait">
                   {authMethod === "email" ? (
                     <motion.div key="email-fields" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                       <div className="relative group">
                         <Mail className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} aria-label={t("auth.email")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.email")} />
+                        <input
+                          type="email"
+                          required
+                          value={email}
+                          onChange={e => { setEmail(e.target.value); clearFieldError("email"); clearFieldError("login"); }}
+                          aria-label={t("auth.email")}
+                          className={`w-full bg-white/5 border rounded-2xl py-4 ps-12 pe-4 text-white focus:outline-none focus:border-primary transition-all ${authFieldErrors.email ? "border-destructive" : "border-white/10"}`}
+                          placeholder={t("auth.email")}
+                        />
                       </div>
+                      {authFieldErrors.email && <p className="text-xs text-destructive px-1">{authFieldErrors.email}</p>}
                       <div className="relative group">
                         <Lock className="absolute start-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-primary transition-colors" />
-                        <input type={showPassword ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)} aria-label={t("auth.password")} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 ps-12 pe-12 text-white focus:outline-none focus:border-primary transition-all" placeholder={t("auth.password")} />
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          required
+                          value={password}
+                          onChange={e => { setPassword(e.target.value); clearFieldError("password"); }}
+                          aria-label={t("auth.password")}
+                          className={`w-full bg-white/5 border rounded-2xl py-4 ps-12 pe-12 text-white focus:outline-none focus:border-primary transition-all ${authFieldErrors.password ? "border-destructive" : "border-white/10"}`}
+                          placeholder={t("auth.password")}
+                        />
                         <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute end-4 top-1/2 -translate-y-1/2">
                           {showPassword ? <EyeOff className="w-5 h-5 text-white/30" /> : <Eye className="w-5 h-5 text-white/30" />}
                         </button>
                       </div>
+                      {authFieldErrors.password && <p className="text-xs text-destructive px-1">{authFieldErrors.password}</p>}
                     </motion.div>
                   ) : (
                     <motion.div key="phone-fields" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
@@ -674,22 +774,56 @@ export function UserAuth() {
                   </label>
                 )}
 
+                {attemptsRemaining !== null && attemptsMax !== null && attemptsMax > 0 && authCooldownSeconds <= 0 && (
+                  <div className="bg-amber-500/10 border border-amber-400/20 rounded-xl px-4 py-2.5">
+                    <p className="text-[11px] text-amber-200 mb-1.5">
+                      {String(t("auth.attemptsRemaining" as any, { remaining: attemptsRemaining, max: attemptsMax } as any))}
+                    </p>
+                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-400 to-emerald-400"
+                        style={{ width: `${Math.max(0, Math.min(100, (attemptsRemaining / attemptsMax) * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {authError && (
-                  <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
+                  <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+                      <p className="text-xs text-destructive font-semibold">{t("auth.errorTitle", "تعذر إكمال العملية")}</p>
+                    </div>
+                    <p className="text-xs text-destructive font-medium mt-1">{authError}</p>
+                    {authErrorHint && <p className="text-[11px] text-white/70 mt-1.5">{authErrorHint}</p>}
+                    {authCooldownSeconds > 0 && (
+                      <p className="text-[11px] text-amber-300 mt-1.5">
+                        {String(t("auth.retryAfter" as any, { seconds: authCooldownSeconds } as any))}
+                      </p>
+                    )}
+                  </motion.div>
+                )}
+
+                {authCooldownSeconds > 0 && !authError && (
+                  <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-amber-500/10 border border-amber-400/20 rounded-xl px-4 py-2.5">
                     <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
-                    <p className="text-xs text-destructive font-medium">{authError}</p>
+                    <p className="text-xs text-amber-200 font-medium">
+                      {String(t("auth.retryAfter" as any, { seconds: authCooldownSeconds } as any))}
+                    </p>
                   </motion.div>
                 )}
 
                 <button
                   type="submit"
-                  disabled={authLoading || (!isLogin && !agreeTerms)}
+                  disabled={authLoading || authCooldownSeconds > 0 || (!isLogin && !agreeTerms)}
                   className="w-full bg-primary text-white font-bold py-4 rounded-2xl shadow-lg mt-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-all flex items-center justify-center gap-2"
                 >
                   {authLoading && <Loader2 className="w-5 h-5 animate-spin" />}
-                  {authMethod === "phone"
-                    ? t("auth.sendOtp")
-                    : isLogin ? t("auth.loginBtn") : t("auth.registerBtn")}
+                  {authCooldownSeconds > 0
+                    ? String(t("auth.retryAfter" as any, { seconds: authCooldownSeconds } as any))
+                    : authMethod === "phone"
+                      ? t("auth.sendOtp")
+                      : isLogin ? t("auth.loginBtn") : t("auth.registerBtn")}
                 </button>
               </form>
 
@@ -718,12 +852,6 @@ export function UserAuth() {
                 ))}
               </div>
 
-              <p className="mt-6 text-center text-white/60 text-sm">
-                {isLogin ? t("auth.noAccount") : t("auth.hasAccount")}
-                <button onClick={() => { setIsLogin(!isLogin); setAgreeTerms(false); }} className="text-primary font-bold me-2 hover:underline">
-                  {isLogin ? t("auth.registerNow") : t("auth.loginNow")}
-                </button>
-              </p>
             </motion.div>
           )}
         </AnimatePresence>

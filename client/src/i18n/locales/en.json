@@ -358,7 +358,20 @@
     "rememberMe": "Remember me",
     "agreeText": "I agree to the",
     "and": "and",
-    "termsAndPrivacy": "Terms and Privacy Policy"
+    "termsAndPrivacy": "Terms and Privacy Policy",
+    "errorTitle": "Could not complete the request",
+    "retryAfter": "Please retry after {{seconds}} seconds",
+    "retryHint": "This is a temporary protection step. You can try again once the timer ends.",
+    "attemptsRemaining": "Attempts remaining: {{remaining}} of {{max}}",
+    "hintValidation": "Check the highlighted fields, fix them, then try again.",
+    "hintInvalidCredentials": "Verify your username/email and password, then try again.",
+    "hintAlreadyExists": "Use different details or switch to login if you already have an account.",
+    "hintRateLimited": "Too many attempts. Wait until cooldown ends, then try again.",
+    "hintServiceUnavailable": "Service is temporarily unavailable. Please try again shortly.",
+    "hintGeneric": "Review your input and try again.",
+    "hintUsername": "Use a clear username with a valid length.",
+    "hintEmail": "Enter a valid email like name@example.com.",
+    "useEmailForNow": "For now, use email and password to continue."
   },
   "policy": {
     "privacyTitle": "Privacy Policy",

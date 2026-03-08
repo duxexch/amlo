@@ -662,7 +662,7 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
       hasCredentials: Boolean(p?.hasCredentials),
       isReady: Boolean(p?.isReady),
       available: false,
-    })).filter((p) => !!p.key));
+    })).filter((p: any) => !!p.key));
     setDepositMethods(methods);
     setRecommendedProvider(data?.recommendedProvider || null);
     setDetectedCountry(data?.country || null);
