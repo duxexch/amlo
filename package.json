@@ -9,6 +9,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "start:cluster": "NODE_ENV=production node dist/cluster.cjs",
+    "start:notification-worker": "NODE_ENV=production node dist/notification-worker.cjs",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx server/seed.ts",

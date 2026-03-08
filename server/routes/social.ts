@@ -19,6 +19,8 @@ import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../.
 import { storage } from "../storage";
 import { encryptMessage, decryptMessage, decryptMessages } from "../utils/encryption";
 import { getAllPricing } from "../pricingService";
+import { sendLocalizedPush, type LocalizedPushJob } from "../services/notificationDispatch";
+import { enqueueNotificationJob } from "../services/notificationQueue";
 import {
   generateLiveKitToken,
   getLiveKitPublicUrl,
@@ -79,6 +81,15 @@ function detectCountry(req: Request, userCountry?: string | null): string {
     ""
   ).trim().toUpperCase();
   return headerCountry.length === 2 ? headerCountry : "";
+}
+
+function queueLocalizedPush(job: LocalizedPushJob) {
+  void enqueueNotificationJob(job).then((queued) => {
+    // Fallback to direct send when queue is unavailable.
+    if (!queued) {
+      void sendLocalizedPush(job);
+    }
+  });
 }
 
 const WITHDRAW_ACCESS_USERS_SETTING_KEY = "wallet_withdraw_access_user_ids";
@@ -296,6 +307,19 @@ router.post("/friends/request", async (req, res) => {
       }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
       io.to(`user:${receiverId}`).emit("friend-request", { friendship, sender });
     }
+
+    const [senderForPush] = await db.select({
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+    }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    queueLocalizedPush({
+      userId: receiverId,
+      preferenceKey: "friendRequests",
+      kind: "friend",
+      actorName: senderForPush?.displayName || senderForPush?.username || "User",
+      url: "/friends",
+    });
 
     return res.status(201).json({ success: true, data: friendship });
   } catch (err: any) {
@@ -902,6 +926,15 @@ router.post("/conversations/:id/messages", async (req, res) => {
       sender,
     });
 
+    queueLocalizedPush({
+      userId: otherId,
+      preferenceKey: "messages",
+      kind: "message",
+      actorName: sender?.displayName || sender?.username || "User",
+      bodyPreview: content || (type === "image" ? "[image]" : type === "video" ? "[video]" : type === "voice" ? "[voice]" : ""),
+      url: "/friends",
+    });
+
     // Also notify sender socket for multi-tab sync
     io.to(`user:${userId}`).emit("message-sent", {
       message: decryptedMsg,
@@ -1375,6 +1408,15 @@ router.post("/calls", async (req, res) => {
           caller: callerInfo,
         });
       }
+
+      queueLocalizedPush({
+        userId: receiverId,
+        preferenceKey: "calls",
+        kind: "call",
+        actorName: caller.displayName || caller.username || "User",
+        url: "/friends",
+        persistent: true,
+      });
     } else {
       socialLog.info({ callId: call.id, callerId: userId, receiverId, type: "missed" }, "Call missed — receiver offline");
     }

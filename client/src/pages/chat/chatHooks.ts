@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { chatApi, callsApi, chatBlocksApi, messageReportsApi, translateApi, uploadMedia } from "@/lib/socialApi";
 import { ensurePushSubscription } from "@/lib/pushNotifications";
+import { playNotificationCue } from "@/lib/notificationCenter";
 import { toast } from "sonner";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import type {
@@ -19,18 +20,10 @@ const TYPING_THROTTLE_MS = 2500;
 const lastTypingEmitMap = new Map<string, number>();
 
 // ── Notification sound ──
-let notifAudio: HTMLAudioElement | null = null;
 let notifPermissionRequested = false;
 
 function playNotificationSound() {
-  try {
-    if (!notifAudio) {
-      notifAudio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LkZWTi4F3cXV7f4WIioqHhH95dHB0eYCFiImIhYJ+eXZ0d3t/g4aHh4WDgH15dnd5fICDhYaFg4GAfoB8fH5/gIGBgQA=");
-    }
-    notifAudio.currentTime = 0;
-    notifAudio.volume = 0.65;
-    notifAudio.play().catch(() => { });
-  } catch { }
+  playNotificationCue("message");
 }
 
 function getNotificationMode(): "all" | "sound" | "push" | "off" {

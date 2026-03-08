@@ -113,6 +113,7 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
     icon: payload.icon || "/icons/icon-192x192.png",
     badge: payload.badge || "/icons/icon-72x72.png",
     tag: payload.tag || "ablox-notification",
+    ...(payload.data || {}),
     data: {
       url: payload.url || "/",
       ...payload.data,

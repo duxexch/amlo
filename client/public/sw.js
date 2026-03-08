@@ -142,13 +142,16 @@ self.addEventListener("push", function (event) {
       icon: data.icon || "/icons/icon-192x192.png",
       badge: data.badge || "/icons/icon-96x96.png",
       tag: data.tag || "ablox-notification",
-      dir: "rtl",
-      lang: "ar",
-      vibrate: [100, 50, 100],
-      data: { url: data.url || "/" },
+      dir: data.dir || "auto",
+      lang: data.lang || "en",
+      renotify: true,
+      requireInteraction: Boolean(data.requireInteraction),
+      silent: false,
+      vibrate: data.vibrate || [120, 80, 120, 80, 200],
+      data: { url: data.url || "/", type: data.type || "system" },
       actions: [
-        { action: "open", title: "فتح" },
-        { action: "dismiss", title: "تجاهل" },
+        { action: "open", title: data.openActionTitle || "Open" },
+        { action: "dismiss", title: data.dismissActionTitle || "Dismiss" },
       ],
     })
   );

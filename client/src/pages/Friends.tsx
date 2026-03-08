@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { friendsApi, chatApi } from "@/lib/socialApi";
 import { ensurePushSubscription } from "@/lib/pushNotifications";
+import { playNotificationCue } from "@/lib/notificationCenter";
 import { friendVisibilityApi, profileApi } from "@/lib/authApi";
 import { useLocation } from "wouter";
 import { useConversations } from "./chat/chatHooks";
@@ -26,8 +27,6 @@ import { socketManager } from "@/lib/socketManager";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
 import { toast } from "sonner";
-
-let friendsNotifAudio: HTMLAudioElement | null = null;
 
 type ChatNotifyMode = "all" | "sound" | "push" | "off";
 
@@ -80,14 +79,7 @@ async function showFriendsDesktopNotification(title: string, body: string, mode:
 }
 
 function playFriendsNotificationSound() {
-  try {
-    if (!friendsNotifAudio) {
-      friendsNotifAudio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LkZWTi4F3cXV7f4WIioqHhH95dHB0eYCFiImIhYJ+eXZ0d3t/g4aHh4WDgH15dnd5fICDhYaFg4GAfoB8fH5/gIGBgQA=");
-    }
-    friendsNotifAudio.currentTime = 0;
-    friendsNotifAudio.volume = 0.7;
-    friendsNotifAudio.play().catch(() => { });
-  } catch { }
+  playNotificationCue("friend-request");
 }
 
 // ── Types ──

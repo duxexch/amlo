@@ -13,8 +13,15 @@ import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { callsApi } from "@/lib/socialApi";
+import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { NotificationCenterPanel } from "@/components/NotificationCenterPanel";
+import {
+  ensureForegroundNotificationPermission,
+  initNotificationCenter,
+  publishNotification,
+} from "@/lib/notificationCenter";
 
 // ── Lazy-loaded pages (code splitting) ──
 const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })));
@@ -174,6 +181,13 @@ function App() {
 
   // ── Listen for incoming calls via Socket.io ──
   useEffect(() => {
+    initNotificationCenter();
+    void ensureForegroundNotificationPermission().then((permission) => {
+      if (permission === "granted") {
+        void ensurePushSubscription();
+      }
+    });
+
     let socket: any;
     import("@/lib/socketManager").then(({ getSocket }) => {
       socket = getSocket();
@@ -188,18 +202,89 @@ function App() {
             callId: call.id || data.callId,
           });
           setIncomingCall(true);
+
+          const callerName = caller.displayName || caller.username || data.callerName || data.senderName || "Unknown";
+          publishNotification({
+            type: "call",
+            titleKey: "notify.call.title",
+            bodyKey: "notify.call.body",
+            params: { name: callerName },
+            title: t("social.incomingCall", "مكالمة واردة"),
+            body: `${callerName}`,
+            url: "/friends",
+            persistent: true,
+            meta: { kind: "incoming-call" },
+          });
         }
       };
+
+      const handleNewMessageGlobal = (data: any) => {
+        const onFriendsPage = window.location.pathname.startsWith("/friends") || window.location.pathname.startsWith("/chat");
+        if (onFriendsPage && !document.hidden) return;
+
+        const senderName = data?.sender?.displayName || data?.sender?.username || "User";
+        const preview = data?.message?.content || t("social.newMessage", "رسالة جديدة");
+        publishNotification({
+          type: "message",
+          titleKey: "notify.message.title",
+          bodyKey: "notify.message.body",
+          params: { name: senderName },
+          title: t("social.newMessage", "رسالة جديدة"),
+          body: preview,
+          url: "/friends",
+          persistent: false,
+          meta: { kind: "chat-message" },
+        });
+      };
+
+      const handleFriendRequestGlobal = (data: any) => {
+        const onFriendsPage = window.location.pathname.startsWith("/friends") || window.location.pathname.startsWith("/chat");
+        if (onFriendsPage && !document.hidden) return;
+
+        const senderName = data?.sender?.displayName || data?.sender?.username || "User";
+        publishNotification({
+          type: "friend-request",
+          titleKey: "notify.friend.title",
+          bodyKey: "notify.friend.body",
+          params: { name: senderName },
+          title: t("social.newFriendRequest", "طلب صداقة جديد"),
+          body: senderName,
+          url: "/friends",
+          persistent: false,
+          meta: { kind: "friend-request" },
+        });
+      };
+
+      const handleFinanceUpdatedGlobal = () => {
+        if (!window.location.pathname.startsWith("/admin")) return;
+        publishNotification({
+          type: "admin",
+          titleKey: "notify.admin.title",
+          bodyKey: "notify.admin.body",
+          title: t("admin.finances.title", "التحديثات المالية"),
+          body: t("admin.finances.tabTransactions", "تم تحديث البيانات"),
+          url: "/admin/finances",
+          persistent: false,
+          meta: { kind: "admin-finance" },
+        });
+      };
+
       socket.on("incoming-call", handleIncomingCall);
+      socket.on("new-message", handleNewMessageGlobal);
+      socket.on("friend-request", handleFriendRequestGlobal);
+      socket.on("finance-updated", handleFinanceUpdatedGlobal);
       // Store cleanup ref
       (window as any).__cleanupIncomingCall = () => {
         socket.off("incoming-call", handleIncomingCall);
+        socket.off("new-message", handleNewMessageGlobal);
+        socket.off("friend-request", handleFriendRequestGlobal);
+        socket.off("finance-updated", handleFinanceUpdatedGlobal);
       };
     });
     return () => {
       (window as any).__cleanupIncomingCall?.();
     };
-  }, []);
+  }, [t]);
 
   return (
     <ErrorBoundary>
@@ -240,6 +325,7 @@ function App() {
           />
           {isAppPage && <AnnouncementPopup />}
           {isAppPage && <PWAInstallBanner />}
+          <NotificationCenterPanel />
         </TooltipProvider>
       </QueryClientProvider>
     </ErrorBoundary>
