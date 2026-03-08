@@ -10,6 +10,12 @@ const { Pool } = pg;
 let pool: pg.Pool | null = null;
 let db: ReturnType<typeof drizzle> | null = null;
 
+function parseBool(value: string | undefined, fallback = false): boolean {
+  if (!value) return fallback;
+  const v = value.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 /**
  * Initialize database connection pool.
  * Returns null if DATABASE_URL is not set or connection fails.
@@ -19,13 +25,20 @@ export function getPool(): pg.Pool | null {
   if (pool) return pool;
 
   const url = process.env.DATABASE_URL;
+  const isProd = process.env.NODE_ENV === "production";
   if (!url) {
+    if (isProd) {
+      throw new Error("DATABASE_URL is required in production");
+    }
     log("DATABASE_URL not set — running without database", "db");
     return null;
   }
 
   try {
-    pool = new Pool({
+    const sslEnabled = parseBool(process.env.DB_SSL, false);
+    const rejectUnauthorized = parseBool(process.env.DB_SSL_REJECT_UNAUTHORIZED, true);
+
+    const poolConfig: pg.PoolConfig = {
       connectionString: url,
       max: parseInt(process.env.DB_POOL_MAX || "15", 10),  // 15 per worker — safe for cluster mode
       min: parseInt(process.env.DB_POOL_MIN || "2", 10),
@@ -34,7 +47,16 @@ export function getPool(): pg.Pool | null {
       allowExitOnIdle: false,
       statement_timeout: 10000, // 10s query timeout — prevents DB locks
       query_timeout: 15000,
-    });
+      keepAlive: true,
+      maxUses: parseInt(process.env.DB_POOL_MAX_USES || "7500", 10),
+      application_name: process.env.DB_APP_NAME || `ablox-${process.pid}`,
+    };
+
+    if (sslEnabled) {
+      poolConfig.ssl = { rejectUnauthorized };
+    }
+
+    pool = new Pool(poolConfig);
 
     pool.on("error", (err) => {
       log(`Database pool error: ${err.message}`, "db");
@@ -44,6 +66,9 @@ export function getPool(): pg.Pool | null {
     log("Database pool initialized", "db");
     return pool;
   } catch (err: any) {
+    if (isProd) {
+      throw err;
+    }
     log(`Failed to create database pool: ${err.message}`, "db");
     return null;
   }

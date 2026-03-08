@@ -1593,4 +1593,7 @@ app.use((req, res, next) => {
     // Exit — process is in undefined state
     process.exit(1);
   });
-})();
+})().catch((err) => {
+  serverLog.fatal({ err }, "Startup failed");
+  process.exit(1);
+});

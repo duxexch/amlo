@@ -28,7 +28,11 @@ export async function initRedis(): Promise<Redis | null> {
   if (redisClient) return redisClient;
 
   const url = process.env.REDIS_URL;
+  const isProd = process.env.NODE_ENV === "production";
   if (!url) {
+    if (isProd) {
+      throw new Error("REDIS_URL is required in production");
+    }
     redisLog.info("REDIS_URL not set — running without Redis");
     return null;
   }
@@ -61,6 +65,9 @@ export async function initRedis(): Promise<Redis | null> {
     redisLog.info("Redis connection verified (PING OK)");
     return redisClient;
   } catch (err: any) {
+    if (isProd) {
+      throw err;
+    }
     redisLog.warn(`Redis unavailable: ${err.message} — running without Redis`);
     return null;
   }
@@ -117,6 +124,7 @@ function wrapIoredisForConnectRedis(redis: Redis) {
  */
 export function createRedisSessionStore(session: any) {
   const redis = getRedis();
+  const isProd = process.env.NODE_ENV === "production";
 
   if (redis) {
     redisLog.info("Using Redis session store");
@@ -126,6 +134,10 @@ export function createRedisSessionStore(session: any) {
       prefix: "ablox:sess:",
       ttl: 86400, // 24 hours
     });
+  }
+
+  if (isProd) {
+    throw new Error("Redis session store is required in production");
   }
 
   // Fallback to MemoryStore
