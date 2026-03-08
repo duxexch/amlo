@@ -4,9 +4,9 @@ import {
   Search, Filter, ChevronRight, ChevronLeft, Ban, ShieldCheck,
   Eye, UserX, Users, Globe, Coins, Star, ArrowUpCircle,
   CheckCircle2, XCircle, Clock, Trophy, Sparkles, Crown,
-  Zap, Gift, Phone, Palette, Shield, ChevronDown, ChevronUp,
+  Zap, Gift, Phone, Palette, Shield, ChevronDown, ChevronUp, DollarSign, Loader2,
 } from "lucide-react";
-import { adminUsers, adminUpgradeRequests } from "@/lib/adminApi";
+import { adminUsers, adminUpgradeRequests, adminWallets } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import {
   getLevelConfig, getTierForLevel, getAllUnlockedFeatures,
@@ -85,7 +85,7 @@ export function UsersManagementPage() {
   useEffect(() => {
     adminUpgradeRequests.pendingCount().then((r: any) => {
       if (r.success) setPendingCount(r.count || 0);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [activeTab]);
 
   return (
@@ -94,22 +94,20 @@ export function UsersManagementPage() {
       <div className="flex gap-2 bg-white/[0.02] border border-white/5 rounded-xl p-1">
         <button
           onClick={() => setActiveTab("users")}
-          className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all ${
-            activeTab === "users"
+          className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all ${activeTab === "users"
               ? "bg-primary text-white shadow-lg shadow-primary/20"
               : "text-white/40 hover:text-white/60"
-          }`}
+            }`}
         >
           <Users className="w-4 h-4" />
           {t("admin.users.title")}
         </button>
         <button
           onClick={() => setActiveTab("upgrades")}
-          className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all relative ${
-            activeTab === "upgrades"
+          className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all relative ${activeTab === "upgrades"
               ? "bg-primary text-white shadow-lg shadow-primary/20"
               : "text-white/40 hover:text-white/60"
-          }`}
+            }`}
         >
           <ArrowUpCircle className="w-4 h-4" />
           {t("admin.users.upgradeRequests")}
@@ -140,6 +138,7 @@ function UsersTab() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -193,6 +192,27 @@ function UsersTab() {
       }
     } catch (e) { console.error(e); }
     finally { setActionLoading(null); }
+  };
+
+  const handleAdjustBalance = async (userId: string, payload: { amount: number; currency: "coins" | "diamonds" | "miles"; reason: string }) => {
+    setAdjusting(true);
+    try {
+      await adminWallets.adjust(userId, payload);
+      setUsers((prev) => prev.map((u) => {
+        if (u.id !== userId) return u;
+        if (payload.currency === "coins") return { ...u, coins: Math.max(0, u.coins + payload.amount) };
+        if (payload.currency === "diamonds") return { ...u, diamonds: Math.max(0, u.diamonds + payload.amount) };
+        return u;
+      }));
+      setSelectedUser((prev) => {
+        if (!prev || prev.id !== userId) return prev;
+        if (payload.currency === "coins") return { ...prev, coins: Math.max(0, prev.coins + payload.amount) };
+        if (payload.currency === "diamonds") return { ...prev, diamonds: Math.max(0, prev.diamonds + payload.amount) };
+        return prev;
+      });
+    } finally {
+      setAdjusting(false);
+    }
   };
 
   const getStatusBadge = (status: string, isBanned: boolean) => {
@@ -395,7 +415,9 @@ function UsersTab() {
             onBan={handleBan}
             onUnban={handleUnban}
             onLevelChange={handleLevelChange}
+            onAdjustBalance={handleAdjustBalance}
             actionLoading={actionLoading}
+            adjusting={adjusting}
           />
         )}
       </AnimatePresence>
@@ -412,20 +434,25 @@ function UserDetailModal({
   onBan,
   onUnban,
   onLevelChange,
+  onAdjustBalance,
   actionLoading,
+  adjusting,
 }: {
   user: User;
   onClose: () => void;
   onBan: (id: string) => Promise<void>;
   onUnban: (id: string) => Promise<void>;
   onLevelChange: (id: string, level: number) => Promise<void>;
+  onAdjustBalance: (id: string, payload: { amount: number; currency: "coins" | "diamonds" | "miles"; reason: string }) => Promise<void>;
   actionLoading: string | null;
+  adjusting: boolean;
 }) {
   const { t } = useTranslation();
   const [modalTab, setModalTab] = useState<"info" | "level" | "requests">("info");
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [showLevelPicker, setShowLevelPicker] = useState(false);
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [reviewLoading, setReviewLoading] = useState<string | null>(null);
 
   const tier = getTierForLevel(user.level);
@@ -441,7 +468,7 @@ function UserDetailModal({
       setLoadingRequests(true);
       adminUsers.getUpgradeRequests(user.id).then((r: any) => {
         if (r.success) setUpgradeRequests(r.data || []);
-      }).catch(() => {}).finally(() => setLoadingRequests(false));
+      }).catch(() => { }).finally(() => setLoadingRequests(false));
     }
   }, [modalTab, user.id]);
 
@@ -518,11 +545,10 @@ function UserDetailModal({
             <button
               key={tab}
               onClick={() => setModalTab(tab)}
-              className={`flex-1 py-3 text-xs font-bold transition-colors border-b-2 ${
-                modalTab === tab
+              className={`flex-1 py-3 text-xs font-bold transition-colors border-b-2 ${modalTab === tab
                   ? "border-primary text-primary"
                   : "border-transparent text-white/30 hover:text-white/50"
-              }`}
+                }`}
             >
               {tab === "info" && t("admin.users.userInfo")}
               {tab === "level" && t("admin.users.levelDetails")}
@@ -658,11 +684,10 @@ function UserDetailModal({
                                     key={lvl}
                                     disabled={isActive || actionLoading === user.id}
                                     onClick={() => onLevelChange(user.id, lvl)}
-                                    className={`h-8 rounded-lg text-xs font-bold transition-all ${
-                                      isActive
+                                    className={`h-8 rounded-lg text-xs font-bold transition-all ${isActive
                                         ? "ring-2 ring-primary text-white"
                                         : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
-                                    }`}
+                                      }`}
                                     style={isActive ? { background: tierItem.color, color: "#fff" } : {}}
                                   >
                                     {lvl}
@@ -741,6 +766,13 @@ function UserDetailModal({
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-white/5 flex gap-2">
+          <button
+            className="px-4 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm font-bold hover:bg-amber-500/20 transition-colors flex items-center justify-center gap-2"
+            onClick={() => setShowAdjustModal(true)}
+            disabled={adjusting}
+          >
+            {adjusting ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />} {t("admin.finances.adjustBalance", "تحويل رصيد")}
+          </button>
           {user.isBanned ? (
             <button
               className="flex-1 h-10 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-sm font-bold hover:bg-green-500/20 transition-colors flex items-center justify-center gap-2"
@@ -763,6 +795,128 @@ function UserDetailModal({
             {t("common.close")}
           </button>
         </div>
+
+        <AnimatePresence>
+          {showAdjustModal && (
+            <UserAdjustBalanceModal
+              username={user.username}
+              userId={user.id}
+              onClose={() => setShowAdjustModal(false)}
+              onSubmit={async (payload) => {
+                await onAdjustBalance(user.id, payload);
+                setShowAdjustModal(false);
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function UserAdjustBalanceModal({
+  userId,
+  username,
+  onClose,
+  onSubmit,
+}: {
+  userId: string;
+  username: string;
+  onClose: () => void;
+  onSubmit: (payload: { amount: number; currency: "coins" | "diamonds" | "miles"; reason: string }) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [currency, setCurrency] = useState<"coins" | "diamonds" | "miles">("coins");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async () => {
+    const parsed = Number(amount);
+    if (!Number.isFinite(parsed) || parsed === 0) {
+      setError(t("admin.finances.invalidAmount", "قيمة غير صالحة"));
+      return;
+    }
+    if (!reason.trim()) {
+      setError(t("admin.finances.reasonRequired", "سبب العملية مطلوب"));
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    try {
+      await onSubmit({ amount: Math.trunc(parsed), currency, reason: reason.trim() });
+    } catch (err: any) {
+      setError(err?.message || t("admin.finances.adjustFailed", "فشل تعديل الرصيد"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-[#101025] border border-white/10 rounded-2xl w-full max-w-sm p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-white text-sm">{t("admin.finances.adjustBalance", "تحويل رصيد")} — @{username}</h3>
+          <button onClick={onClose} className="text-white/30 hover:text-white"><XCircle className="w-4 h-4" /></button>
+        </div>
+
+        {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2">{error}</p>}
+
+        <div className="flex gap-2">
+          {(["coins", "diamonds", "miles"] as const).map((c) => (
+            <button
+              key={c}
+              onClick={() => setCurrency(c)}
+              className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-colors ${currency === c ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50"}`}
+            >
+              {c === "coins" ? "🪙" : c === "diamonds" ? "💎" : "🧭"} {t(`admin.finances.${c}`, c)}
+            </button>
+          ))}
+        </div>
+
+        <div>
+          <label className="text-xs text-white/40 mb-1 block">{t("admin.finances.adjustAmount", "القيمة")}</label>
+          <input
+            type="number"
+            className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50"
+            placeholder="+100 أو -50"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-white/40 mb-1 block">{t("admin.finances.adjustReason", "السبب")}</label>
+          <textarea
+            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 resize-none h-20"
+            placeholder={t("admin.finances.adjustReasonHint", "اكتب سبب التحويل")}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </div>
+
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="w-full py-2.5 bg-primary hover:bg-primary/90 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+          {t("admin.finances.adjustSubmit", "تنفيذ")}
+        </button>
       </motion.div>
     </motion.div>
   );
@@ -827,16 +981,15 @@ function UpgradeRequestsTab({ onCountChange }: { onCountChange: (n: number) => v
           <button
             key={s}
             onClick={() => { setStatusFilter(s); setPagination((p) => ({ ...p, page: 1 })); }}
-            className={`px-4 h-9 text-xs font-bold rounded-lg border transition-colors ${
-              statusFilter === s
+            className={`px-4 h-9 text-xs font-bold rounded-lg border transition-colors ${statusFilter === s
                 ? "bg-primary/10 border-primary/30 text-primary"
                 : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
-            }`}
+              }`}
           >
             {s === "pending" ? t("admin.users.statusPending") :
-             s === "approved" ? t("admin.users.statusApproved") :
-             s === "rejected" ? t("admin.users.statusRejected") :
-             t("admin.users.filterAll")}
+              s === "approved" ? t("admin.users.statusApproved") :
+                s === "rejected" ? t("admin.users.statusRejected") :
+                  t("admin.users.filterAll")}
           </button>
         ))}
       </div>

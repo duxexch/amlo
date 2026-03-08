@@ -130,6 +130,8 @@ export function Wallet() {
     if (status === "success") {
       void loadBalance();
       toast.success(t("wallet.rechargeSuccess", "تم الشحن بنجاح"));
+    } else if (status === "pending-local") {
+      toast.info(t("wallet.paymentPendingReview", "تم استلام طلب الدفع المحلي وسيتم مراجعته من الإدارة"));
     } else if (status === "cancelled") {
       toast.info(t("wallet.paymentCancelled", "تم إلغاء عملية الدفع"));
     }

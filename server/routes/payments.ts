@@ -350,13 +350,35 @@ router.get("/providers", async (req: Request, res: Response) => {
       .sort((a, b) => a.priority - b.priority);
 
     const readyProviderKeys = new Set(providers.map((p) => p.key));
-    const methodsForReadyProviders = mappedMethods.filter((m) => !m.provider || readyProviderKeys.has(m.provider));
+    const localProviderKeys = Array.from(new Set(
+      mappedMethods
+        .map((m) => String(m.provider || "").trim().toLowerCase())
+        .filter((provider) => !!provider && !readyProviderKeys.has(provider))
+    ));
+
+    const localProviders = localProviderKeys.map((key, idx) => ({
+      key,
+      displayName: key,
+      mode: "manual",
+      priority: 200 + idx,
+      countries: ["*"],
+      requiredCredentials: [],
+      isReady: true,
+      hasCredentials: true,
+      credentialsMask: {},
+    }));
+
+    const allProviders = [...providers, ...localProviders]
+      .sort((a, b) => Number(a.priority || 99) - Number(b.priority || 99));
+
+    const enabledProviderKeys = new Set(allProviders.map((p) => p.key));
+    const methodsForReadyProviders = mappedMethods.filter((m) => !m.provider || enabledProviderKeys.has(m.provider));
 
     return res.json({
       success: true,
       data: {
         country: country || null,
-        providers,
+        providers: allProviders,
         paymentMethods: methodsForReadyProviders,
       },
     });
@@ -378,16 +400,17 @@ router.post("/checkout", async (req: Request, res: Response) => {
   try {
     const gateways = await loadGatewayConfig();
     const selectedGateway = gateways[providerKey];
-    if (!selectedGateway || !selectedGateway.enabled) {
-      return res.status(400).json({ success: false, message: "بوابة الدفع غير مفعلة" });
-    }
-    if (!isGatewayReady(providerKey, selectedGateway)) {
-      return res.status(400).json({ success: false, message: "بوابة الدفع غير مكتملة الإعداد" });
-    }
-
     const country = detectCountry(req);
-    if (country && !selectedGateway.countries.includes("*") && !selectedGateway.countries.includes(country)) {
-      return res.status(403).json({ success: false, message: "بوابة الدفع غير متاحة لدولتك" });
+    const isManagedGateway = !!(selectedGateway && selectedGateway.enabled);
+
+    if (isManagedGateway) {
+      if (!isGatewayReady(providerKey, selectedGateway!)) {
+        return res.status(400).json({ success: false, message: "بوابة الدفع غير مكتملة الإعداد" });
+      }
+
+      if (country && !selectedGateway!.countries.includes("*") && !selectedGateway!.countries.includes(country)) {
+        return res.status(403).json({ success: false, message: "بوابة الدفع غير متاحة لدولتك" });
+      }
     }
 
     const pool = getPool();
@@ -403,9 +426,83 @@ router.post("/checkout", async (req: Request, res: Response) => {
     const totalCoins = (pkg.coins || 0) + (pkg.bonus_coins || 0);
     const priceUsd = parseFloat(String(pkg.price_usd || 0));
 
+    if (!isManagedGateway) {
+      const { rows: localMethods } = await pool.query(
+        `SELECT id, name, name_ar, account_details, min_amount, max_amount
+         FROM payment_methods
+         WHERE is_active = true
+         ORDER BY sort_order`,
+      );
+
+      const matchedMethod = localMethods.find((m: any) => {
+        let details: any = {};
+        try { details = m.account_details ? JSON.parse(m.account_details) : {}; } catch { details = {}; }
+
+        const methodProvider = String(details?.provider || "").trim().toLowerCase();
+        if (!methodProvider || methodProvider !== providerKey) return false;
+
+        const methodCountries = Array.isArray(details?.countries)
+          ? details.countries.map((c: unknown) => String(c || "").toUpperCase())
+          : ["*"];
+        const usage = String(details?.usageTarget || details?.usage || "both").toLowerCase();
+        const supportsDeposit = usage === "both" || usage === "deposit";
+        if (!supportsDeposit) return false;
+        if (country && !methodCountries.includes("*") && !methodCountries.includes(country)) return false;
+
+        const minAmount = Number(m.min_amount || 1);
+        const maxAmount = Number(m.max_amount || 50000);
+        return priceUsd >= minAmount && priceUsd <= maxAmount;
+      });
+
+      if (!matchedMethod) {
+        return res.status(400).json({ success: false, message: "وسيلة الدفع المحلية غير متاحة أو خارج الحدود المسموحة" });
+      }
+
+      const { rows: users } = await pool.query(`SELECT coins FROM users WHERE id = $1 LIMIT 1`, [userId]);
+      if (!users[0]) {
+        return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+      }
+
+      const balanceBefore = Number(users[0].coins || 0);
+      const referenceId = `local:${providerKey}:${Date.now()}:${pkg.id}`;
+      await pool.query(
+        `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, currency, description, reference_id, payment_method, status)
+         VALUES ($1, 'purchase', $2, $3, 'coins', $4, $5, $6, 'pending')`,
+        [
+          userId,
+          totalCoins,
+          balanceBefore,
+          `طلب شحن ${totalCoins} كوينز عبر ${providerKey} — قيد المراجعة`,
+          referenceId,
+          providerKey,
+        ]
+      );
+
+      io.emit("finance-updated", {
+        type: "local-purchase-pending",
+        ts: Date.now(),
+        userId,
+        provider: providerKey,
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          manual: true,
+          status: "pending",
+          referenceId,
+          provider: providerKey,
+          message: `تم إنشاء طلب الدفع المحلي عبر ${providerKey}. ستتم المراجعة من الإدارة ثم إضافة الرصيد.`,
+          url: `${SUCCESS_URL.replace("status=success", "status=pending-local")}`,
+        },
+      });
+    }
+
+    const gateway = selectedGateway as GatewayConfig;
+
     if (providerKey === "paypal") {
-      const accessToken = await getPayPalAccessToken(selectedGateway);
-      const baseUrl = getPayPalBaseUrl(selectedGateway.mode || "live");
+      const accessToken = await getPayPalAccessToken(gateway);
+      const baseUrl = getPayPalBaseUrl(gateway.mode || "live");
 
       const createResp = await fetch(`${baseUrl}/v2/checkout/orders`, {
         method: "POST",
@@ -453,7 +550,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
       return res.status(501).json({ success: false, message: `بوابة ${selectedGateway.displayName || providerKey} غير مدعومة بعد في الشراء المباشر حالياً` });
     }
 
-    const stripeSecret = String(selectedGateway.credentials?.secretKey || "").trim();
+    const stripeSecret = String(gateway.credentials?.secretKey || "").trim();
     const s = getStripe(stripeSecret);
     const priceInCents = Math.round(parseFloat(String(pkg.price_usd)) * 100);
 

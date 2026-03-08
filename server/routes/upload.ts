@@ -35,6 +35,7 @@ router.use(requireAuth);
 // ── Magic bytes validation (prevents MIME spoofing) ──
 const MAGIC_BYTES: Record<string, Buffer[]> = {
   "image/jpeg": [Buffer.from([0xFF, 0xD8, 0xFF])],
+  "image/jpg": [Buffer.from([0xFF, 0xD8, 0xFF])],
   "image/png": [Buffer.from([0x89, 0x50, 0x4E, 0x47])],
   "image/gif": [Buffer.from("GIF87a"), Buffer.from("GIF89a")],
   "image/webp": [Buffer.from("RIFF")],  // RIFF....WEBP
@@ -46,6 +47,18 @@ const MAGIC_BYTES: Record<string, Buffer[]> = {
 };
 
 function validateMagicBytes(filePath: string, mimetype: string): boolean {
+  if (mimetype === "image/heic" || mimetype === "image/heif") {
+    try {
+      const fd = fs.openSync(filePath, "r");
+      const buf = Buffer.alloc(16);
+      fs.readSync(fd, buf, 0, 16, 0);
+      fs.closeSync(fd);
+      return buf.subarray(4, 8).toString("ascii") === "ftyp";
+    } catch {
+      return false;
+    }
+  }
+
   const signatures = MAGIC_BYTES[mimetype];
   if (!signatures) return true; // No signature check for unknown types (webm, mp4 have complex headers)
   try {
@@ -70,7 +83,7 @@ const MEDIA_DIR = path.join(UPLOAD_DIR, "media");
 });
 
 // ── Allowed MIME types ──
-const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
 const VOICE_MIMES = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"];
 const VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime"];
 const ALL_MIMES = [...IMAGE_MIMES, ...VOICE_MIMES, ...VIDEO_MIMES];

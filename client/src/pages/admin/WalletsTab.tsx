@@ -104,13 +104,41 @@ export function WalletsTab({ search, showFilters, refreshSignal = 0 }: { search:
         sortBy,
       });
       if (res.success) {
-        setWallets(res.data || []);
+        const safeWallets = Array.isArray(res.data) ? res.data.map((w: any) => ({
+          ...w,
+          userId: String(w?.userId || w?.id || ""),
+          username: String(w?.username || "unknown"),
+          displayName: w?.displayName ?? null,
+          coins: Number(w?.coins || 0),
+          diamonds: Number(w?.diamonds || 0),
+          totalBalance: Number(w?.totalBalance ?? w?.coins ?? 0),
+          totalDeposits: Number(w?.totalDeposits || 0),
+          totalWithdrawals: Number(w?.totalWithdrawals || 0),
+          pendingTxs: Number(w?.pendingTxs || 0),
+          txCount: Number(w?.txCount || 0),
+          isActive: Boolean(w?.isActive),
+          isBanned: Boolean(w?.isBanned),
+          withdrawEnabled: Boolean(w?.withdrawEnabled),
+        })) : [];
+
+        setWallets(safeWallets);
         setPagination((p) => ({
           ...p,
           total: res.pagination?.total || 0,
           totalPages: res.pagination?.totalPages || 0,
         }));
-        if (res.summary) setSummary(res.summary as WalletSummary);
+        if (res.summary) {
+          setSummary({
+            totalWallets: Number((res.summary as any)?.totalWallets || 0),
+            activeWallets: Number((res.summary as any)?.activeWallets || 0),
+            totalCoins: Number((res.summary as any)?.totalCoins || 0),
+            totalDiamonds: Number((res.summary as any)?.totalDiamonds || 0),
+            avgBalance: Number((res.summary as any)?.avgBalance || 0),
+            highestBalance: Number((res.summary as any)?.highestBalance || 0),
+          });
+        } else {
+          setSummary(null);
+        }
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -354,9 +382,24 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
         const txPayload = res.transactions || res.data?.transactions || [];
         const pagePayload = res.pagination || { total: Array.isArray(txPayload) ? txPayload.length : 0, totalPages: 1 };
 
-        setWalletInfo(walletPayload);
+        const normalizedWallet = walletPayload ? {
+          ...walletPayload,
+          userId: String(walletPayload.userId || walletPayload.id || userId),
+          username: String(walletPayload.username || "unknown"),
+          displayName: walletPayload.displayName ?? null,
+          country: walletPayload.country ?? null,
+          coins: Number(walletPayload.coins || 0),
+          diamonds: Number(walletPayload.diamonds || 0),
+          totalBalance: Number(walletPayload.totalBalance ?? walletPayload.coins ?? 0),
+          totalDeposits: Number(walletPayload.totalDeposits || 0),
+          totalWithdrawals: Number(walletPayload.totalWithdrawals || 0),
+          isBanned: Boolean(walletPayload.isBanned),
+          withdrawEnabled: Boolean(walletPayload.withdrawEnabled),
+        } : null;
+
+        setWalletInfo(normalizedWallet as WalletDetail | null);
         setTransactions(txPayload);
-        setWithdrawEnabled(Boolean(walletPayload?.withdrawEnabled));
+        setWithdrawEnabled(Boolean(normalizedWallet?.withdrawEnabled));
         setPagination((p) => ({
           ...p,
           total: pagePayload?.total || 0,

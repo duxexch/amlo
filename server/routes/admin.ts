@@ -764,19 +764,49 @@ router.get("/wallets", requireAdmin, async (req, res) => {
         userId: u.id,
         username: u.username,
         displayName: u.displayName,
+        avatar: u.avatar || null,
         coins: u.coins,
         diamonds: u.diamonds,
+        totalBalance: Number(u.coins || 0),
+        totalDeposits: 0,
+        totalWithdrawals: 0,
+        totalGiftsSent: 0,
+        totalGiftsReceived: 0,
+        pendingTxs: 0,
+        txCount: 0,
+        isActive: String(u.status || "").toLowerCase() === "online",
         level: u.level,
         isVerified: u.isVerified,
         isBanned: u.isBanned,
         country: u.country,
         lastOnlineAt: u.lastOnlineAt,
+        lastTransaction: null,
+        createdAt: u.createdAt,
         withdrawEnabled: withdrawAccessUsers.has(u.id),
       }));
+
+      const summary = wallets.reduce((acc, w) => {
+        acc.totalCoins += Number(w.coins || 0);
+        acc.totalDiamonds += Number(w.diamonds || 0);
+        acc.highestBalance = Math.max(acc.highestBalance, Number(w.totalBalance || 0));
+        if (w.isActive) acc.activeWallets += 1;
+        return acc;
+      }, {
+        totalWallets: wallets.length,
+        activeWallets: 0,
+        totalCoins: 0,
+        totalDiamonds: 0,
+        avgBalance: 0,
+        highestBalance: 0,
+      });
+      summary.avgBalance = summary.totalWallets > 0
+        ? Math.round(summary.totalCoins / summary.totalWallets)
+        : 0;
 
       return res.json({
         success: true,
         data: wallets,
+        summary,
         pagination: {
           page,
           limit,
@@ -801,24 +831,44 @@ router.get("/wallets/:userId", requireAdmin, async (req, res) => {
 
     // Get real transactions from DB
     const txResult = await storage.getUserTransactions(userId, 1, 50);
+    const transactions = Array.isArray(txResult?.data) ? txResult.data : [];
+    const wallet = {
+      userId: user.id,
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      avatar: user.avatar || null,
+      country: user.country || null,
+      coins: Number(user.coins || 0),
+      diamonds: Number(user.diamonds || 0),
+      totalBalance: Number(user.coins || 0),
+      totalDeposits: transactions
+        .filter((t: any) => t.type === "purchase" && t.status === "completed")
+        .reduce((s: number, t: any) => s + Math.max(0, Number(t.amount || 0)), 0),
+      totalWithdrawals: transactions
+        .filter((t: any) => t.type === "withdrawal")
+        .reduce((s: number, t: any) => s + Math.abs(Number(t.amount || 0)), 0),
+      isBanned: Boolean(user.isBanned),
+      withdrawEnabled: withdrawAccessUsers.has(userId),
+    };
 
     return res.json({
       success: true,
+      wallet,
+      transactions,
+      pagination: {
+        page: 1,
+        limit: 50,
+        total: transactions.length,
+        totalPages: 1,
+      },
       data: {
-        user: {
-          id: user.id,
-          username: user.username,
-          displayName: user.displayName,
-          coins: user.coins,
-          diamonds: user.diamonds,
-          level: user.level,
-          withdrawEnabled: withdrawAccessUsers.has(userId),
-        },
-        transactions: txResult.data,
+        user: wallet,
+        transactions,
         stats: {
-          totalSpent: txResult.data.filter((t: any) => t.type === "purchase").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
-          totalReceived: txResult.data.filter((t: any) => t.type === "gift_received").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
-          totalWithdrawn: txResult.data.filter((t: any) => t.type === "withdrawal").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
+          totalSpent: transactions.filter((t: any) => t.type === "purchase").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
+          totalReceived: transactions.filter((t: any) => t.type === "gift_received").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
+          totalWithdrawn: transactions.filter((t: any) => t.type === "withdrawal").reduce((s: number, t: any) => s + Number(t.amount || 0), 0),
         },
       },
     });

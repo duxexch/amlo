@@ -697,6 +697,13 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
       }
       toast.loading(t("wallet.processing"), { id: "recharge" });
       const session = await walletApi.createCheckoutSession(pkg.id, selectedProvider);
+      if ((session as any)?.manual) {
+        toast.success((session as any)?.message || t("wallet.paymentPendingReview", "تم إنشاء طلب الشحن وهو الآن قيد المراجعة"), { id: "recharge" });
+        if ((session as any)?.url) {
+          window.location.href = (session as any).url;
+        }
+        return;
+      }
       toast.success(t("wallet.redirectingToPayment", "جاري تحويلك إلى صفحة الدفع"), { id: "recharge" });
       haptic([50, 30, 100]);
       window.location.href = session.url;
