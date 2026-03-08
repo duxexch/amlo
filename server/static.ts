@@ -37,10 +37,6 @@ export function serveStatic(app: Express) {
       if (filePath.endsWith("sw.js")) {
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       }
-      // Always fetch fresh HTML shell to pick up latest asset hashes
-      if (filePath.endsWith("index.html")) {
-        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      }
       // Correct MIME for manifest
       if (filePath.endsWith("manifest.json")) {
         res.setHeader("Content-Type", "application/manifest+json");

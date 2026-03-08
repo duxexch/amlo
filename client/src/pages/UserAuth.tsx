@@ -46,8 +46,6 @@ export function UserAuth() {
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpEmail, setOtpEmail] = useState("");
   const [otpPurpose, setOtpPurpose] = useState<"register" | "login">("register");
-  const [showLoginChoice, setShowLoginChoice] = useState(false);
-  const [hasPinProfiles, setHasPinProfiles] = useState(false);
   const [loginOtpEmail, setLoginOtpEmail] = useState("");
   const [showLoginOtp, setShowLoginOtp] = useState(false);
   const [loginOtpValues, setLoginOtpValues] = useState(["", "", "", "", "", ""]);
@@ -77,6 +75,15 @@ export function UserAuth() {
     }
   }, [otpTimer]);
 
+  const startLoginOtpFlow = async () => {
+    const result = await loginOtpApi.sendOtp();
+    setLoginOtpEmail(result.email || "");
+    setAuthSuccess(result.devCode ? `${t("auth.otpTitle", "رمز التحقق")}: ${result.devCode}` : null);
+    setShowLoginOtp(true);
+    setLoginOtpValues(["", "", "", "", "", ""]);
+    setOtpTimer(60);
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -100,9 +107,8 @@ export function UserAuth() {
           return;
         }
         if (result.data.needsPinVerify) {
-          // Always require a second step after password (PIN when available, or OTP)
-          setHasPinProfiles(Boolean(result.data.hasPinProfiles));
-          setShowLoginChoice(true);
+          // PIN login is deprecated; always continue with OTP as the second step.
+          await startLoginOtpFlow();
         } else {
           setLocation("/");
         }
@@ -422,82 +428,7 @@ export function UserAuth() {
                 {t("auth.verifyOtp", "تحقق")}
               </button>
 
-              <button onClick={() => { setShowLoginOtp(false); setShowLoginChoice(true); setLoginOtpValues(["", "", "", "", "", ""]); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
-                <ChevronLeft className="w-4 h-4" />
-                {t("common.back", "رجوع")}
-              </button>
-            </motion.div>
-
-          ) : showLoginChoice ? (
-            /* Login Method Choice: PIN or OTP */
-            <motion.div
-              key="login-choice"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="text-center"
-            >
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center mx-auto mb-6">
-                <Lock className="w-8 h-8 text-white" />
-              </div>
-              <h2 className="text-2xl font-black text-white mb-2">{t("auth.chooseLoginMethod", "اختر طريقة الدخول")}</h2>
-              <p className="text-white/60 text-sm mb-8">{t("auth.chooseLoginMethodDesc", "يمكنك الدخول عبر رمز PIN أو رمز تحقق بالبريد")}</p>
-
-              {authError && (
-                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5 mb-4">
-                  <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
-                  <p className="text-xs text-destructive font-medium">{authError}</p>
-                </motion.div>
-              )}
-
-              <div className="space-y-3">
-                {hasPinProfiles && (
-                  <button
-                    onClick={() => { setShowLoginChoice(false); setLocation("/pin"); }}
-                    className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
-                  >
-                    <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                      <Lock className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1 text-end">
-                      <p className="text-white font-bold text-sm">{t("auth.loginWithPin", "الدخول برمز PIN")}</p>
-                      <p className="text-white/40 text-xs">{t("auth.loginWithPinDesc", "أدخل رمز PIN الخاص بملفك الشخصي")}</p>
-                    </div>
-                    <ArrowRight className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors" />
-                  </button>
-                )}
-
-                {/* OTP Option */}
-                <button
-                  onClick={async () => {
-                    setAuthLoading(true); setAuthError(null);
-                    try {
-                      const result = await loginOtpApi.sendOtp();
-                      setLoginOtpEmail(result.email || "");
-                      setAuthSuccess(result.devCode ? `${t("auth.otpTitle", "رمز التحقق")}: ${result.devCode}` : null);
-                      setShowLoginChoice(false);
-                      setShowLoginOtp(true);
-                      setLoginOtpValues(["", "", "", "", "", ""]);
-                      setOtpTimer(60);
-                    } catch (err: any) {
-                      setAuthError(err?.message || "حدث خطأ");
-                    } finally { setAuthLoading(false); }
-                  }}
-                  disabled={authLoading}
-                  className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                    <Mail className="w-6 h-6 text-emerald-400" />
-                  </div>
-                  <div className="flex-1 text-end">
-                    <p className="text-white font-bold text-sm">{t("auth.loginWithOtp", "الدخول برمز تحقق")}</p>
-                    <p className="text-white/40 text-xs">{t("auth.loginWithOtpDesc", "إرسال رمز تحقق إلى بريدك الإلكتروني")}</p>
-                  </div>
-                  {authLoading ? <Loader2 className="w-5 h-5 text-primary animate-spin" /> : <ArrowRight className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors" />}
-                </button>
-              </div>
-
-              <button onClick={() => { setShowLoginChoice(false); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors mt-6 flex items-center justify-center gap-1">
+              <button onClick={() => { setShowLoginOtp(false); setLoginOtpValues(["", "", "", "", "", ""]); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
                 <ChevronLeft className="w-4 h-4" />
                 {t("common.back", "رجوع")}
               </button>

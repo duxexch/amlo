@@ -10,7 +10,7 @@
  *   - Offline: Custom offline page fallback
  */
 
-var CACHE_VERSION = "ablox-v5";
+var CACHE_VERSION = "ablox-v6";
 var STATIC_CACHE = CACHE_VERSION + "-static";
 var DYNAMIC_CACHE = CACHE_VERSION + "-dynamic";
 var IMAGE_CACHE = CACHE_VERSION + "-images";
@@ -35,8 +35,24 @@ var NEVER_CACHE = [
 ];
 
 // Maximum cache sizes
-var MAX_DYNAMIC_ITEMS = 50;
+var MAX_DYNAMIC_ITEMS = 300;
 var MAX_IMAGE_ITEMS = 100;
+
+// User-centric APIs cached aggressively for fast repeat navigation.
+var USER_DATA_API_PATHS = [
+  "/api/auth/me",
+  "/api/social/friends",
+  "/api/social/conversations",
+  "/api/social/unread-count",
+  "/api/social/friends/requests",
+  "/api/social/chat/metrics",
+  "/api/v1/auth/me",
+  "/api/v1/social/friends",
+  "/api/v1/social/conversations",
+  "/api/v1/social/unread-count",
+  "/api/v1/social/friends/requests",
+  "/api/v1/social/chat/metrics",
+];
 
 // ══════════════════════════════════════════════════
 // Install: pre-cache app shell
@@ -95,9 +111,17 @@ self.addEventListener("fetch", function (event) {
   // Skip cross-origin requests
   if (url.origin !== self.location.origin) return;
 
-  // ── API calls → Network-First (5s timeout) ──
+  // ── API calls ──
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(networkFirst(request, DYNAMIC_CACHE, 5000));
+    var shouldCacheUserApi = USER_DATA_API_PATHS.some(function (p) {
+      return url.pathname === p || url.pathname.startsWith(p + "/");
+    });
+
+    if (shouldCacheUserApi) {
+      event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
+    } else {
+      event.respondWith(networkFirst(request, DYNAMIC_CACHE, 5000));
+    }
     return;
   }
 
@@ -119,9 +143,9 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // ── HTML navigations → Network-First to avoid stale app shell after deploy ──
+  // ── HTML / App shell → Stale-While-Revalidate ──
   if (request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html")) {
-    event.respondWith(networkFirst(request, STATIC_CACHE, 5000));
+    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
     return;
   }
 

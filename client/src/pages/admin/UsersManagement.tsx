@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { adminUsers, adminUpgradeRequests, adminWallets } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   getLevelConfig, getTierForLevel, getAllUnlockedFeatures,
   getLevelProgress, formatXp, getXpForNextLevel, TIERS, MAX_LEVEL,
@@ -42,6 +43,7 @@ interface User {
   email: string;
   coins: number;
   diamonds: number;
+  miles: number;
   level: number;
   xp: number;
   status: string;
@@ -95,8 +97,8 @@ export function UsersManagementPage() {
         <button
           onClick={() => setActiveTab("users")}
           className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all ${activeTab === "users"
-              ? "bg-primary text-white shadow-lg shadow-primary/20"
-              : "text-white/40 hover:text-white/60"
+            ? "bg-primary text-white shadow-lg shadow-primary/20"
+            : "text-white/40 hover:text-white/60"
             }`}
         >
           <Users className="w-4 h-4" />
@@ -105,8 +107,8 @@ export function UsersManagementPage() {
         <button
           onClick={() => setActiveTab("upgrades")}
           className={`flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold transition-all relative ${activeTab === "upgrades"
-              ? "bg-primary text-white shadow-lg shadow-primary/20"
-              : "text-white/40 hover:text-white/60"
+            ? "bg-primary text-white shadow-lg shadow-primary/20"
+            : "text-white/40 hover:text-white/60"
             }`}
         >
           <ArrowUpCircle className="w-4 h-4" />
@@ -197,19 +199,44 @@ function UsersTab() {
   const handleAdjustBalance = async (userId: string, payload: { amount: number; currency: "coins" | "diamonds" | "miles"; reason: string }) => {
     setAdjusting(true);
     try {
-      await adminWallets.adjust(userId, payload);
+      const res = await adminWallets.adjust(userId, payload);
+      const resolvedBalance = Number((res as any)?.data?.newBalance);
       setUsers((prev) => prev.map((u) => {
         if (u.id !== userId) return u;
-        if (payload.currency === "coins") return { ...u, coins: Math.max(0, u.coins + payload.amount) };
-        if (payload.currency === "diamonds") return { ...u, diamonds: Math.max(0, u.diamonds + payload.amount) };
-        return u;
+        if (payload.currency === "coins") {
+          const nextCoins = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, u.coins + payload.amount);
+          return { ...u, coins: nextCoins };
+        }
+        if (payload.currency === "diamonds") {
+          const nextDiamonds = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, u.diamonds + payload.amount);
+          return { ...u, diamonds: nextDiamonds };
+        }
+        const nextMiles = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, u.miles + payload.amount);
+        return { ...u, miles: nextMiles };
       }));
       setSelectedUser((prev) => {
         if (!prev || prev.id !== userId) return prev;
-        if (payload.currency === "coins") return { ...prev, coins: Math.max(0, prev.coins + payload.amount) };
-        if (payload.currency === "diamonds") return { ...prev, diamonds: Math.max(0, prev.diamonds + payload.amount) };
-        return prev;
+        if (payload.currency === "coins") {
+          const nextCoins = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, prev.coins + payload.amount);
+          return { ...prev, coins: nextCoins };
+        }
+        if (payload.currency === "diamonds") {
+          const nextDiamonds = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, prev.diamonds + payload.amount);
+          return { ...prev, diamonds: nextDiamonds };
+        }
+        const nextMiles = Number.isFinite(resolvedBalance) ? resolvedBalance : Math.max(0, prev.miles + payload.amount);
+        return { ...prev, miles: nextMiles };
       });
+      // Sync from backend source of truth to avoid drift on local optimistic math.
+      const userRes = await adminUsers.get(userId);
+      if (userRes.success && userRes.data) {
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...(userRes.data as Partial<User>) } : u)));
+        setSelectedUser((prev) => (prev && prev.id === userId ? { ...prev, ...(userRes.data as Partial<User>) } : prev));
+      }
+      toast.success(t("admin.finances.adjustSuccess", "تم تحويل الرصيد بنجاح"));
+    } catch (err: any) {
+      toast.error(err?.message || t("admin.finances.adjustFailed", "فشل تعديل الرصيد"));
+      throw err;
     } finally {
       setAdjusting(false);
     }
@@ -546,8 +573,8 @@ function UserDetailModal({
               key={tab}
               onClick={() => setModalTab(tab)}
               className={`flex-1 py-3 text-xs font-bold transition-colors border-b-2 ${modalTab === tab
-                  ? "border-primary text-primary"
-                  : "border-transparent text-white/30 hover:text-white/50"
+                ? "border-primary text-primary"
+                : "border-transparent text-white/30 hover:text-white/50"
                 }`}
             >
               {tab === "info" && t("admin.users.userInfo")}
@@ -685,8 +712,8 @@ function UserDetailModal({
                                     disabled={isActive || actionLoading === user.id}
                                     onClick={() => onLevelChange(user.id, lvl)}
                                     className={`h-8 rounded-lg text-xs font-bold transition-all ${isActive
-                                        ? "ring-2 ring-primary text-white"
-                                        : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
+                                      ? "ring-2 ring-primary text-white"
+                                      : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
                                       }`}
                                     style={isActive ? { background: tierItem.color, color: "#fff" } : {}}
                                   >
@@ -982,8 +1009,8 @@ function UpgradeRequestsTab({ onCountChange }: { onCountChange: (n: number) => v
             key={s}
             onClick={() => { setStatusFilter(s); setPagination((p) => ({ ...p, page: 1 })); }}
             className={`px-4 h-9 text-xs font-bold rounded-lg border transition-colors ${statusFilter === s
-                ? "bg-primary/10 border-primary/30 text-primary"
-                : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
+              ? "bg-primary/10 border-primary/30 text-primary"
+              : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
               }`}
           >
             {s === "pending" ? t("admin.users.statusPending") :

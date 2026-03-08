@@ -2100,19 +2100,6 @@ router.get("/wallet/income", async (req: Request, res: Response) => {
 });
 
 /**
- * POST /social/wallet/recharge — شحن العملات
- * ⚠️ DEPRECATED: Use /api/v1/payments/checkout (Stripe) instead.
- * This endpoint is kept as a redirect for backward compatibility.
- */
-router.post("/wallet/recharge", async (_req: Request, res: Response) => {
-  return res.status(410).json({
-    success: false,
-    message: "هذا المسار ملغي. استخدم /api/v1/payments/checkout لشحن العملات عبر Stripe",
-    redirect: "/api/v1/payments/checkout",
-  });
-});
-
-/**
  * GET /social/wallet/payment-methods — طرق الدفع المتاحة حسب الدولة والاستخدام
  */
 router.get("/wallet/payment-methods", async (req: Request, res: Response) => {

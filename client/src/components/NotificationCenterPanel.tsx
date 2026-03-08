@@ -73,7 +73,7 @@ export function NotificationCenterPanel() {
     <>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-5 left-5 z-[95] w-11 h-11 rounded-full bg-[#101026] border border-white/15 text-white/80 hover:text-white hover:bg-[#161633] shadow-xl flex items-center justify-center"
+        className="fixed top-4 left-4 z-[95] w-11 h-11 rounded-full bg-[#101026] border border-white/15 text-white/80 hover:text-white hover:bg-[#161633] shadow-xl flex items-center justify-center"
         title="Notifications"
       >
         <Bell className="w-5 h-5" />
@@ -85,7 +85,7 @@ export function NotificationCenterPanel() {
       </button>
 
       {open && (
-        <div className="fixed bottom-20 left-5 z-[95] w-[min(92vw,420px)] max-h-[70vh] bg-[#0b0b1e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="fixed top-16 left-4 z-[95] w-[min(92vw,420px)] max-h-[70vh] bg-[#0b0b1e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10">
             <span className="text-sm font-bold text-white/85">Notifications</span>
             <div className="flex items-center gap-1.5">

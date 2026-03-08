@@ -267,9 +267,11 @@ export function useActiveChat(
         void showDesktopNotification(senderName, preview);
       }
 
-      setConversations(prev =>
-        prev.map(c => {
+      setConversations(prev => {
+        let found = false;
+        const next = prev.map(c => {
           if (c.id === data.conversationId) {
+            found = true;
             return {
               ...c,
               lastMessage: data.message,
@@ -278,7 +280,17 @@ export function useActiveChat(
             };
           }
           return c;
-        })
+        });
+
+        if (!found) {
+          // Conversation may be newly created by the other side; resync list.
+          void chatApi.conversations().then((convs) => {
+            setConversations(Array.isArray(convs) ? (convs as Conversation[]) : []);
+          }).catch(() => { });
+        }
+
+        return next;
+      }
       );
     };
 
@@ -428,7 +440,10 @@ export function useActiveChat(
       }, 100);
 
       const s = getSocket();
-      s.emit("messages-read", { conversationId: conv.id, receiverId: conv.otherUser?.id });
+      // Emit after initial render to avoid read-ack racing with initial fetch.
+      setTimeout(() => {
+        s.emit("messages-read", { conversationId: conv.id, receiverId: conv.otherUser?.id });
+      }, 120);
     } catch (err) {
       console.error("Failed to load messages:", err);
     }
