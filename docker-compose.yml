@@ -124,6 +124,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Worker has no HTTP endpoint; disable image-level HTTP healthcheck to avoid false "unhealthy".
+    healthcheck:
+      disable: true
     volumes:
       - ablox_logs:/app/logs
     networks:
