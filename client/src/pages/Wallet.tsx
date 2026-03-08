@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   History, Coins, TrendingUp,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import coinImg from "@/assets/images/coin-3d.png";
 import { useTranslation } from "react-i18next";
+import { useSearch } from "wouter";
 import { walletApi } from "@/lib/socialApi";
 import { toast } from "sonner";
 
@@ -21,6 +22,7 @@ import type { WalletTab, ChartPeriod, DateRange } from "./wallet/types";
 /* ─── Main Wallet Page ─── */
 export function Wallet() {
   const { t, i18n } = useTranslation();
+  const search = useSearch();
   const dir = i18n.dir();
   const touchStartY = useRef(0);
   const [isPulling, setIsPulling] = useState(false);
@@ -64,6 +66,7 @@ export function Wallet() {
   } = useIncomeData(activeTab);
   const {
     packages, milesPackages, milesLoading,
+    depositProviders, depositMethods, selectedProvider, setSelectedProvider, detectedCountry,
     handlePurchase, handleMilesPurchase,
     refreshMiles,
   } = useRechargeData(activeTab, loadBalance);
@@ -114,6 +117,24 @@ export function Wallet() {
   ];
 
   const tierIcons = [Compass, Plane, Rocket, Star, Crown, Zap];
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const status = params.get("status");
+    if (!status) return;
+
+    if (status === "success") {
+      void loadBalance();
+      toast.success(t("wallet.rechargeSuccess", "تم الشحن بنجاح"));
+    } else if (status === "cancelled") {
+      toast.info(t("wallet.paymentCancelled", "تم إلغاء عملية الدفع"));
+    }
+
+    params.delete("status");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [search, loadBalance, t]);
 
   const resolveMethodLabel = (id: string | null | undefined) => {
     if (!id) return "-";
@@ -259,16 +280,81 @@ export function Wallet() {
         {/* ──────── RECHARGE TAB ──────── */}
         {activeTab === "recharge" && (
           <motion.div key="recharge" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="space-y-6">
-            {/* #5: Coming Soon overlay */}
-            <GlassCard className="p-8 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500/20 to-purple-500/10 border border-violet-500/15 flex items-center justify-center">
-                <CreditCard className="w-8 h-8 text-violet-400" />
+            <GlassCard className="p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-white flex items-center gap-2"><CreditCard className="w-4 h-4 text-violet-400" /> {t("wallet.selectPaymentProvider", "اختر بوابة الدفع")}</h3>
+                <span className="text-[11px] text-white/35">{t("wallet.countryDetected", "الدولة")}: {detectedCountry || t("common.unknown", "غير معروف")}</span>
               </div>
-              <h3 className="text-xl font-black text-white mb-2">{t("wallet.comingSoon", "قريباً")}</h3>
-              <p className="text-white/40 text-sm leading-relaxed max-w-sm mx-auto">
-                {t("wallet.rechargeComingSoon", "خدمة الشحن قيد التطوير وستكون متاحة قريباً. ترقبوا!")}
-              </p>
+
+              {depositProviders.length > 0 ? (
+                <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                  {depositProviders.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => setSelectedProvider(p.key)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${selectedProvider === p.key
+                        ? "bg-violet-500/20 border-violet-400/40 text-violet-200"
+                        : "bg-white/[0.04] border-white/[0.08] text-white/45 hover:text-white/70"
+                        }`}
+                    >
+                      {p.displayName}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-300/80">
+                  {t("wallet.noProvidersForCountry", "لا توجد بوابات دفع مفعلة لدولتك حالياً")}
+                </div>
+              )}
+
+              {depositMethods.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {depositMethods
+                    .filter((m: any) => !selectedProvider || String(m.provider || "").toLowerCase() === selectedProvider)
+                    .map((m: any) => (
+                      <span key={m.id} className="text-[10px] px-2 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white/60">
+                        {m.icon || "💳"} {m.nameAr || m.name || m.provider}
+                      </span>
+                    ))}
+                </div>
+              )}
             </GlassCard>
+
+            {packages.length > 0 ? (
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                {packages.map((pkg, i) => (
+                  <motion.div key={pkg.id || `${pkg.coins}-${i}`} initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: i * 0.04 }}>
+                    <GlassCard onClick={() => handlePurchase(pkg)} className="p-5 hover:bg-white/[0.06] transition-all cursor-pointer active:scale-95 border-violet-500/5 relative overflow-hidden">
+                      {pkg.popular && (
+                        <span className="absolute top-2 end-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-300 font-bold">
+                          {t("wallet.popular", "الأكثر طلباً")}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-indigo-500/10 border border-violet-500/10 flex items-center justify-center">
+                          <img src={coinImg} alt="coin" className="w-6 h-6 object-contain" />
+                        </div>
+                        <div>
+                          <p className="text-white font-black text-lg">{pkg.coins.toLocaleString()}</p>
+                          <p className="text-white/25 text-xs">{t("common.coins")}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <p className="text-violet-300 font-bold text-sm">{pkg.price}</p>
+                        {pkg.bonus > 0 && (
+                          <p className="text-emerald-400 text-xs font-bold">+{pkg.bonus.toLocaleString()} {t("wallet.bonus", "بونص")}</p>
+                        )}
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <GlassCard className="p-8 text-center">
+                <CreditCard className="w-12 h-12 text-white/10 mx-auto mb-4" />
+                <p className="text-white/25 text-sm">{t("common.noResults")}</p>
+              </GlassCard>
+            )}
           </motion.div>
         )}
 
@@ -344,11 +430,10 @@ export function Wallet() {
                 { key: "commission", label: t("wallet.filterCommission") },
               ].map(f => (
                 <button key={f.key} onClick={() => setTxFilter(f.key)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    txFilter === f.key
-                      ? "bg-violet-600/80 text-white border border-violet-500/50"
-                      : "bg-white/[0.04] text-white/30 border border-white/[0.06] hover:text-white/60"
-                  }`}>
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${txFilter === f.key
+                    ? "bg-violet-600/80 text-white border border-violet-500/50"
+                    : "bg-white/[0.04] text-white/30 border border-white/[0.06] hover:text-white/60"
+                    }`}>
                   {f.label}
                 </button>
               ))}
@@ -359,11 +444,10 @@ export function Wallet() {
               <CalendarDays className="w-4 h-4 text-white/25 shrink-0" />
               {dateRangeOptions.map(dr => (
                 <button key={dr.key} onClick={() => setDateRange(dr.key)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    dateRange === dr.key
-                      ? "bg-cyan-600/80 text-white border border-cyan-500/50"
-                      : "bg-white/[0.04] text-white/30 border border-white/[0.06] hover:text-white/60"
-                  }`}>
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${dateRange === dr.key
+                    ? "bg-cyan-600/80 text-white border border-cyan-500/50"
+                    : "bg-white/[0.04] text-white/30 border border-white/[0.06] hover:text-white/60"
+                    }`}>
                   {dr.label}
                 </button>
               ))}
@@ -463,11 +547,10 @@ export function Wallet() {
                 <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.06] rounded-xl p-0.5">
                   {chartPeriods.map(cp => (
                     <button key={cp.days} onClick={() => setChartPeriod(cp.days)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                        chartPeriod === cp.days
-                          ? "bg-violet-600/80 text-white"
-                          : "text-white/30 hover:text-white/60"
-                      }`}>
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${chartPeriod === cp.days
+                        ? "bg-violet-600/80 text-white"
+                        : "text-white/30 hover:text-white/60"
+                        }`}>
                       {cp.days}d
                     </button>
                   ))}
@@ -498,9 +581,8 @@ export function Wallet() {
                             <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[#1a1a3e] border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20">
                               {d.total.toLocaleString()} • {new Date(d.day).toLocaleDateString(i18n.language, { month: "short", day: "numeric" })}
                             </div>
-                            <div className={`w-full rounded-t-md transition-all duration-200 group-hover:opacity-100 ${
-                              d.total > 0 ? "bg-gradient-to-t from-violet-600 to-violet-400 opacity-70" : "bg-white/[0.06] opacity-40"
-                            }`} style={{ height: `${h}%`, minHeight: 3 }} />
+                            <div className={`w-full rounded-t-md transition-all duration-200 group-hover:opacity-100 ${d.total > 0 ? "bg-gradient-to-t from-violet-600 to-violet-400 opacity-70" : "bg-white/[0.06] opacity-40"
+                              }`} style={{ height: `${h}%`, minHeight: 3 }} />
                           </div>
                           {i % 5 === 0 && (
                             <span className="text-[8px] text-white/15 font-mono whitespace-nowrap">
@@ -643,22 +725,23 @@ export function Wallet() {
               {/* Method */}
               <div className="space-y-3">
                 <label className="text-sm font-bold text-white/50">{t("wallet.withdrawMethod")}</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {(availableWithdrawMethods.length > 0 ? availableWithdrawMethods : [
-                    { id: "bank", nameAr: t("wallet.methodBank"), icon: "💳" },
-                    { id: "paypal", name: "PayPal", icon: "🅿️" },
-                    { id: "usdt", name: "USDT", icon: "🪙" },
-                  ]).map((m: any) => (
-                    <button key={m.id || m.key} onClick={() => setWithdrawMethod(m.id || m.key)}
-                      className={`py-3.5 rounded-2xl font-bold text-sm transition-all duration-200 border flex items-center justify-center gap-2 ${
-                        withdrawMethod === (m.id || m.key)
+                {availableWithdrawMethods.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-3">
+                    {availableWithdrawMethods.map((m: any) => (
+                      <button key={m.id || m.key} onClick={() => setWithdrawMethod(m.id || m.key)}
+                        className={`py-3.5 rounded-2xl font-bold text-sm transition-all duration-200 border flex items-center justify-center gap-2 ${withdrawMethod === (m.id || m.key)
                           ? "bg-violet-600/80 text-white border-violet-500/50 shadow-md shadow-violet-500/15"
                           : "bg-white/[0.03] text-white/40 border-white/[0.06] hover:text-white/70 hover:bg-white/[0.06]"
-                      }`}>
-                      {m.id === "bank" ? <CreditCard className="w-4 h-4" /> : m.id === "paypal" ? <BadgeDollarSign className="w-4 h-4" /> : m.id === "usdt" ? <Coins className="w-4 h-4" /> : <WalletIcon className="w-4 h-4" />} {(m.nameAr || m.name)}
-                    </button>
-                  ))}
-                </div>
+                          }`}>
+                        {m.id === "bank" ? <CreditCard className="w-4 h-4" /> : m.id === "paypal" ? <BadgeDollarSign className="w-4 h-4" /> : m.id === "usdt" ? <Coins className="w-4 h-4" /> : <WalletIcon className="w-4 h-4" />} {(m.nameAr || m.name)}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-300/80">
+                    {t("wallet.noWithdrawMethods", "لا توجد وسائل سحب متاحة حالياً")}
+                  </div>
+                )}
               </div>
 
               {/* Method Fields */}
@@ -684,17 +767,15 @@ export function Wallet() {
                     </select>
                     <input placeholder={t("wallet.walletAddress")} value={usdtAddress}
                       onChange={e => { setUsdtAddress(e.target.value); setUsdtError(null); }}
-                      className={`w-full bg-white/[0.04] border rounded-xl py-3.5 px-5 text-white text-sm focus:outline-none transition-all placeholder:text-white/20 ${
-                        usdtError ? "border-red-500/50 focus:border-red-500/70" : "border-white/[0.08] focus:border-violet-500/50"
-                      }`} dir="ltr" />
+                      className={`w-full bg-white/[0.04] border rounded-xl py-3.5 px-5 text-white text-sm focus:outline-none transition-all placeholder:text-white/20 ${usdtError ? "border-red-500/50 focus:border-red-500/70" : "border-white/[0.08] focus:border-violet-500/50"
+                        }`} dir="ltr" />
                     {usdtError && (
                       <p className="text-red-400 text-xs flex items-center gap-1"><XCircle className="w-3 h-3" /> {usdtError}</p>
                     )}
                     {usdtAddress && !usdtError && (
-                      <p className={`text-xs flex items-center gap-1 ${
-                        validateUsdtAddress(usdtAddress, usdtNetwork)
-                          ? "text-emerald-400" : "text-amber-400"
-                      }`}>
+                      <p className={`text-xs flex items-center gap-1 ${validateUsdtAddress(usdtAddress, usdtNetwork)
+                        ? "text-emerald-400" : "text-amber-400"
+                        }`}>
                         {validateUsdtAddress(usdtAddress, usdtNetwork) ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
                         {validateUsdtAddress(usdtAddress, usdtNetwork)
                           ? usdtNetwork.toUpperCase()
@@ -821,7 +902,7 @@ export function Wallet() {
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4" onClick={() => setShowWithdrawConfirm(false)}>
             <motion.div initial={{ scale: 0.9, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 30 }} transition={{ type: "spring", bounce: 0.2 }}
               className="bg-gradient-to-br from-[#12122e] to-[#0a0a1f] border border-white/10 rounded-3xl p-7 max-w-md w-full shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
-              
+
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-500/5 border border-amber-500/15 flex items-center justify-center">
                   <AlertCircle className="w-7 h-7 text-amber-400" />
@@ -868,7 +949,7 @@ export function Wallet() {
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4" onClick={() => setSelectedTx(null)}>
             <motion.div initial={{ scale: 0.9, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 30 }} transition={{ type: "spring", bounce: 0.2 }}
               className="bg-gradient-to-br from-[#12122e] to-[#0a0a1f] border border-white/10 rounded-3xl p-7 max-w-md w-full shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
-              
+
               <div className="flex items-center justify-between">
                 <h4 className="text-white font-black text-lg">{t("wallet.transactionDetails")}</h4>
                 <button onClick={() => setSelectedTx(null)} className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/40 hover:text-white transition-all">

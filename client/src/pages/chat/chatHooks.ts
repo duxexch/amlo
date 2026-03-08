@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { chatApi, callsApi, chatBlocksApi, messageReportsApi, translateApi, uploadMedia } from "@/lib/socialApi";
+import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { toast } from "sonner";
 import { getSocket, socketManager } from "@/lib/socketManager";
 import type {
@@ -64,6 +65,8 @@ async function showDesktopNotification(title: string, body: string) {
     }
   }
   if (permission !== "granted") return;
+
+  void ensurePushSubscription();
 
   try {
     const n = new Notification(title, {
@@ -262,7 +265,12 @@ export function useActiveChat(
 
       if (document.hidden || conv?.id !== data.conversationId) {
         const senderName = data.sender?.displayName || data.sender?.username || "Ablock";
-        const preview = data.message?.content || (data.message?.type === "image" ? "Image" : "Voice message");
+        const preview = data.message?.content
+          || (data.message?.type === "image"
+            ? "Image"
+            : data.message?.type === "video"
+              ? "Video"
+              : "Voice message");
         void showDesktopNotification(senderName, preview);
       }
 
@@ -627,8 +635,8 @@ export function useActiveChat(
     }
   }, [newMessage, activeConv, sendingMsg, blockStatus, replyTo, setConversations, scheduleAutoRetry]);
 
-  /** Send a media message (image or voice) */
-  const sendMedia = useCallback(async (file: File | Blob, type: "image" | "voice", t: any) => {
+  /** Send a media message (image/video/voice) */
+  const sendMedia = useCallback(async (file: File | Blob, type: "image" | "video" | "voice", t: any) => {
     if (!activeConv || sendingMsg) return;
     if (blockStatus?.isBlocked) return;
 
@@ -639,7 +647,7 @@ export function useActiveChat(
       id: tempId,
       conversationId: activeConv.id,
       senderId: "me",
-      content: type === "image" ? "📷 صورة" : "🎤 رسالة صوتية",
+      content: type === "image" ? "📷 صورة" : (type === "video" ? "🎬 فيديو" : "🎤 رسالة صوتية"),
       type,
       mediaUrl: localUrl,
       createdAt: new Date().toISOString(),
@@ -658,7 +666,7 @@ export function useActiveChat(
       const mediaUrl = await uploadMedia(file, file instanceof File ? file.name : undefined);
       // Then send message with the server URL
       const sentMsg = await chatApi.sendMessage(activeConv.id, {
-        content: type === "image" ? "📷 صورة" : "🎤 رسالة صوتية",
+        content: type === "image" ? "📷 صورة" : (type === "video" ? "🎬 فيديو" : "🎤 رسالة صوتية"),
         type,
         mediaUrl,
       }) as any;
@@ -733,7 +741,7 @@ export function useActiveChat(
       } finally {
         setSendingMsg(false);
       }
-    } else if ((failedMsg.type === "image" || failedMsg.type === "voice") && failedMsg.mediaUrl) {
+    } else if ((failedMsg.type === "image" || failedMsg.type === "video" || failedMsg.type === "voice") && failedMsg.mediaUrl) {
       try {
         const resp = await fetch(failedMsg.mediaUrl);
         const blob = await resp.blob();

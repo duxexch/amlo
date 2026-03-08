@@ -238,9 +238,9 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
 
     const hasProfiles = profiles.length > 0;
 
-    // Set session — but don't verify PIN yet
+    // Set session after password, but always require a second step (PIN or login OTP)
     req.session.userId = user.id;
-    req.session.pinVerified = !hasProfiles; // If no profiles, skip PIN
+    req.session.pinVerified = false;
     req.session.activeProfileIndex = undefined;
 
     // Update last login
@@ -257,7 +257,8 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
         displayName: user.displayName,
         avatar: user.avatar,
         needsPinSetup: !hasProfiles,
-        needsPinVerify: hasProfiles,
+        needsPinVerify: true,
+        hasPinProfiles: hasProfiles,
         profileCount: profiles.length,
       },
     });

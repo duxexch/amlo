@@ -47,6 +47,7 @@ export function UserAuth() {
   const [otpEmail, setOtpEmail] = useState("");
   const [otpPurpose, setOtpPurpose] = useState<"register" | "login">("register");
   const [showLoginChoice, setShowLoginChoice] = useState(false);
+  const [hasPinProfiles, setHasPinProfiles] = useState(false);
   const [loginOtpEmail, setLoginOtpEmail] = useState("");
   const [showLoginOtp, setShowLoginOtp] = useState(false);
   const [loginOtpValues, setLoginOtpValues] = useState(["", "", "", "", "", ""]);
@@ -99,7 +100,8 @@ export function UserAuth() {
           return;
         }
         if (result.data.needsPinVerify) {
-          // User has profiles — show choice: PIN or OTP
+          // Always require a second step after password (PIN when available, or OTP)
+          setHasPinProfiles(Boolean(result.data.hasPinProfiles));
           setShowLoginChoice(true);
         } else {
           setLocation("/");
@@ -449,20 +451,21 @@ export function UserAuth() {
               )}
 
               <div className="space-y-3">
-                {/* PIN Option */}
-                <button
-                  onClick={() => { setShowLoginChoice(false); setLocation("/pin"); }}
-                  className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                    <Lock className="w-6 h-6 text-primary" />
-                  </div>
-                  <div className="flex-1 text-end">
-                    <p className="text-white font-bold text-sm">{t("auth.loginWithPin", "الدخول برمز PIN")}</p>
-                    <p className="text-white/40 text-xs">{t("auth.loginWithPinDesc", "أدخل رمز PIN الخاص بملفك الشخصي")}</p>
-                  </div>
-                  <ArrowRight className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors" />
-                </button>
+                {hasPinProfiles && (
+                  <button
+                    onClick={() => { setShowLoginChoice(false); setLocation("/pin"); }}
+                    className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                      <Lock className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1 text-end">
+                      <p className="text-white font-bold text-sm">{t("auth.loginWithPin", "الدخول برمز PIN")}</p>
+                      <p className="text-white/40 text-xs">{t("auth.loginWithPinDesc", "أدخل رمز PIN الخاص بملفك الشخصي")}</p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors" />
+                  </button>
+                )}
 
                 {/* OTP Option */}
                 <button

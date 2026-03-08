@@ -1163,7 +1163,7 @@ router.post("/wallets/:userId/adjust", requireAdmin, async (req, res) => {
     const adjustSchema = z.object({
       amount: z.number().int().min(-1000000).max(1000000),
       reason: z.string().min(1).max(500),
-      currency: z.enum(["coins", "diamonds"]).default("coins"),
+      currency: z.enum(["coins", "diamonds", "miles"]).default("coins"),
     });
 
     const parsed = adjustSchema.safeParse(req.body);
@@ -1181,10 +1181,14 @@ router.post("/wallets/:userId/adjust", requireAdmin, async (req, res) => {
         newBalance = user.coins + amount;
         if (newBalance < 0) throw new Error("NEGATIVE_BALANCE");
         await tx.update(schema.users).set({ coins: newBalance }).where(eq(schema.users.id, userId));
-      } else {
+      } else if (currency === "diamonds") {
         newBalance = user.diamonds + amount;
         if (newBalance < 0) throw new Error("NEGATIVE_BALANCE");
         await tx.update(schema.users).set({ diamonds: newBalance }).where(eq(schema.users.id, userId));
+      } else {
+        newBalance = user.miles + amount;
+        if (newBalance < 0) throw new Error("NEGATIVE_BALANCE");
+        await tx.update(schema.users).set({ miles: newBalance }).where(eq(schema.users.id, userId));
       }
 
       // Record transaction
@@ -1258,6 +1262,149 @@ function parsePaymentMethodDetails(raw: unknown): { provider: string; countries:
   } catch {
     return fallback;
   }
+}
+
+type GatewayConfig = {
+  enabled: boolean;
+  displayName: string;
+  countries: string[];
+  mode?: "sandbox" | "live";
+  priority?: number;
+  credentials: Record<string, string>;
+};
+
+const PAYMENT_GATEWAY_SETTINGS_KEY = "payment_gateways_config";
+
+const DEFAULT_PAYMENT_GATEWAYS: Record<string, GatewayConfig> = {
+  stripe: {
+    enabled: true,
+    displayName: "Stripe",
+    countries: ["*"],
+    mode: "live",
+    priority: 1,
+    credentials: {
+      publicKey: "",
+      secretKey: "",
+      webhookSecret: "",
+    },
+  },
+  paypal: {
+    enabled: false,
+    displayName: "PayPal",
+    countries: ["*"],
+    mode: "live",
+    priority: 2,
+    credentials: {
+      clientId: "",
+      clientSecret: "",
+      webhookId: "",
+    },
+  },
+  paymob: {
+    enabled: false,
+    displayName: "Paymob",
+    countries: ["EG", "AE", "SA", "JO"],
+    mode: "live",
+    priority: 3,
+    credentials: {
+      apiKey: "",
+      integrationId: "",
+      iframeId: "",
+      hmacSecret: "",
+    },
+  },
+  myfatoorah: {
+    enabled: false,
+    displayName: "MyFatoorah",
+    countries: ["SA", "AE", "KW", "QA", "BH", "OM"],
+    mode: "live",
+    priority: 4,
+    credentials: {
+      apiToken: "",
+      webhookSecret: "",
+    },
+  },
+  tap: {
+    enabled: false,
+    displayName: "Tap Payments",
+    countries: ["SA", "AE", "KW", "BH", "QA", "OM"],
+    mode: "live",
+    priority: 5,
+    credentials: {
+      secretKey: "",
+      publicKey: "",
+      webhookSecret: "",
+    },
+  },
+  moyasar: {
+    enabled: false,
+    displayName: "Moyasar",
+    countries: ["SA"],
+    mode: "live",
+    priority: 6,
+    credentials: {
+      secretKey: "",
+      publishableKey: "",
+      webhookSecret: "",
+    },
+  },
+};
+
+function mergePaymentGatewayConfig(raw: unknown): Record<string, GatewayConfig> {
+  const base = JSON.parse(JSON.stringify(DEFAULT_PAYMENT_GATEWAYS)) as Record<string, GatewayConfig>;
+  if (!raw || typeof raw !== "object") return base;
+
+  const obj = raw as Record<string, unknown>;
+  for (const [provider, cfg] of Object.entries(obj)) {
+    if (!cfg || typeof cfg !== "object") continue;
+    const current = base[provider] || {
+      enabled: false,
+      displayName: provider,
+      countries: ["*"],
+      mode: "live",
+      priority: 99,
+      credentials: {},
+    };
+
+    const next = cfg as Record<string, unknown>;
+    const credentials = (next.credentials && typeof next.credentials === "object")
+      ? Object.fromEntries(
+        Object.entries(next.credentials as Record<string, unknown>).map(([k, v]) => [k, String(v || "")])
+      )
+      : current.credentials;
+
+    base[provider] = {
+      enabled: Boolean(next.enabled ?? current.enabled),
+      displayName: String(next.displayName || current.displayName || provider),
+      countries: Array.isArray(next.countries)
+        ? (next.countries as unknown[]).map((c) => String(c || "").toUpperCase()).filter(Boolean)
+        : current.countries,
+      mode: (next.mode === "sandbox" || next.mode === "live") ? next.mode : (current.mode || "live"),
+      priority: Number.isFinite(Number(next.priority)) ? Number(next.priority) : (current.priority || 99),
+      credentials,
+    };
+  }
+
+  return base;
+}
+
+function sanitizePaymentGatewaysForAdmin(config: Record<string, GatewayConfig>) {
+  return Object.fromEntries(
+    Object.entries(config).map(([provider, cfg]) => {
+      const credentials = Object.fromEntries(
+        Object.entries(cfg.credentials || {}).map(([k, v]) => {
+          const val = String(v || "");
+          return [k, val ? `${val.slice(0, 4)}***${val.slice(-2)}` : ""];
+        })
+      );
+
+      return [provider, {
+        ...cfg,
+        credentials,
+        hasCredentials: Object.values(cfg.credentials || {}).some((v) => String(v || "").trim().length > 0),
+      }];
+    })
+  );
 }
 
 router.get("/payment-methods", requireAdmin, async (_req, res) => {
@@ -1374,6 +1521,105 @@ router.delete("/payment-methods/:id", requireAdmin, async (req, res) => {
     return res.json({ success: true, message: "تم حذف طريقة الدفع" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// PAYMENT GATEWAYS — إعدادات ربط بوابات الدفع
+// ══════════════════════════════════════════════════════════
+
+router.get("/payment-gateways", requireAdmin, async (_req, res) => {
+  try {
+    const setting = await storage.getSetting(PAYMENT_GATEWAY_SETTINGS_KEY);
+    const parsed = setting?.value ? JSON.parse(setting.value) : {};
+    const merged = mergePaymentGatewayConfig(parsed);
+    return res.json({
+      success: true,
+      data: {
+        providers: sanitizePaymentGatewaysForAdmin(merged),
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "تعذر تحميل إعدادات بوابات الدفع" });
+  }
+});
+
+router.patch("/payment-gateways/:provider", requireAdmin, async (req, res) => {
+  try {
+    const provider = paramStr(req.params.provider).toLowerCase();
+    if (!provider) {
+      return res.status(400).json({ success: false, message: "اسم بوابة الدفع مطلوب" });
+    }
+
+    const schemaUpdate = z.object({
+      enabled: z.boolean().optional(),
+      displayName: z.string().min(1).max(120).optional(),
+      countries: z.array(z.string().min(2).max(2)).max(100).optional(),
+      mode: z.enum(["sandbox", "live"]).optional(),
+      priority: z.number().int().min(1).max(999).optional(),
+      credentials: z.record(z.string(), z.string()).optional(),
+    });
+
+    const parsed = schemaUpdate.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || "بيانات غير صالحة" });
+    }
+
+    const existing = await storage.getSetting(PAYMENT_GATEWAY_SETTINGS_KEY);
+    const currentRaw = existing?.value ? JSON.parse(existing.value) : {};
+    const merged = mergePaymentGatewayConfig(currentRaw);
+
+    const current = merged[provider] || {
+      enabled: false,
+      displayName: provider,
+      countries: ["*"],
+      mode: "live" as const,
+      priority: 99,
+      credentials: {},
+    };
+
+    const next = parsed.data;
+    const credentials = {
+      ...(current.credentials || {}),
+      ...(next.credentials || {}),
+    };
+
+    merged[provider] = {
+      enabled: next.enabled ?? current.enabled,
+      displayName: next.displayName ?? current.displayName,
+      countries: (next.countries || current.countries || ["*"]).map((c) => c.toUpperCase()),
+      mode: next.mode ?? current.mode,
+      priority: next.priority ?? current.priority,
+      credentials,
+    };
+
+    await storage.upsertSetting(
+      PAYMENT_GATEWAY_SETTINGS_KEY,
+      JSON.stringify(merged),
+      "payments",
+      "Payment gateway providers and credentials"
+    );
+
+    emitFinanceUpdate("payment-gateways-updated", { provider });
+    io.emit("payment-methods-updated", { ts: Date.now(), scope: "gateway" });
+
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_payment_gateway",
+      "payment_gateway",
+      provider,
+      `Updated gateway ${provider}`
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        provider,
+        config: sanitizePaymentGatewaysForAdmin({ [provider]: merged[provider] })[provider],
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "تعذر حفظ إعدادات بوابة الدفع" });
   }
 });
 

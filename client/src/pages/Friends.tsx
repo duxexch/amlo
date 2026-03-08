@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { friendsApi, chatApi } from "@/lib/socialApi";
+import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { friendVisibilityApi, profileApi } from "@/lib/authApi";
 import { useLocation } from "wouter";
 import { useConversations } from "./chat/chatHooks";
@@ -62,6 +63,8 @@ async function showFriendsDesktopNotification(title: string, body: string, mode:
     }
   }
   if (permission !== "granted") return;
+
+  void ensurePushSubscription();
 
   try {
     const n = new Notification(title, {
@@ -249,8 +252,8 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
           <button
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${visibleProfile === 2
-                ? "bg-purple-500/15 hover:bg-purple-500/25"
-                : "bg-white/5 hover:bg-white/10"
+              ? "bg-purple-500/15 hover:bg-purple-500/25"
+              : "bg-white/5 hover:bg-white/10"
               }`}
             title={t("social.profileVisibility", "ملف ظاهر")}
           >
@@ -953,8 +956,8 @@ export function Friends() {
                 key={ti.key}
                 onClick={() => setTab(ti.key)}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all relative ${tab === ti.key
-                    ? "bg-primary/15 text-primary shadow-[0_0_12px_rgba(var(--primary-rgb),0.15)]"
-                    : "text-white/40 hover:text-white/60 hover:bg-white/[0.03]"
+                  ? "bg-primary/15 text-primary shadow-[0_0_12px_rgba(var(--primary-rgb),0.15)]"
+                  : "text-white/40 hover:text-white/60 hover:bg-white/[0.03]"
                   }`}
               >
                 <ti.icon className="w-3.5 h-3.5" />

@@ -834,7 +834,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
 
     // Check feature toggles
     const pricing = await getAllPricing();
-    if ((type === "image" || type === "voice") && !pricing.messages.media_enabled) {
+    if ((type === "image" || type === "video" || type === "voice") && !pricing.messages.media_enabled) {
       return res.status(403).json({ success: false, message: "إرسال الوسائط معطل حالياً" });
     }
 

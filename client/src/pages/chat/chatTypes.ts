@@ -16,7 +16,7 @@ export interface ChatUser {
 }
 
 // ── Message types ──
-export type MessageType = "text" | "image" | "voice" | "gift" | "system";
+export type MessageType = "text" | "image" | "video" | "voice" | "gift" | "system";
 
 export interface ChatMessage {
   id: string;

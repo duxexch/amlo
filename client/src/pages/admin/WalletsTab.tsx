@@ -542,7 +542,7 @@ function AdjustBalanceModal({ userId, username, onClose, onSuccess }: {
   const { t } = useTranslation();
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
-  const [currency, setCurrency] = useState<"coins" | "diamonds">("coins");
+  const [currency, setCurrency] = useState<"coins" | "diamonds" | "miles">("coins");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -587,14 +587,14 @@ function AdjustBalanceModal({ userId, username, onClose, onSuccess }: {
         <div className="space-y-3">
           {/* Currency toggle */}
           <div className="flex gap-2">
-            {(["coins", "diamonds"] as const).map((c) => (
+            {(["coins", "diamonds", "miles"] as const).map((c) => (
               <button
                 key={c}
                 onClick={() => setCurrency(c)}
                 className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-colors ${currency === c ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50"
                   }`}
               >
-                {c === "coins" ? "🪙" : "💎"} {t(`admin.finances.${c}`)}
+                {c === "coins" ? "🪙" : c === "diamonds" ? "💎" : "🧭"} {t(`admin.finances.${c}`, c === "miles" ? "miles" : c)}
               </button>
             ))}
           </div>

@@ -22,6 +22,7 @@ import { useActiveChat, useReportModal, useAutoMessageTranslations } from "./cha
 import type { ChatMessage, Conversation, ChatSettings } from "./chatTypes";
 import { chatApi } from "@/lib/socialApi";
 import { authApi } from "@/lib/authApi";
+import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { UserAvatar } from "@/components/UserAvatar";
 import { formatTime } from "@/lib/timeUtils";
 import { toast } from "sonner";
@@ -139,7 +140,7 @@ const MessageBubble = memo(function MessageBubble({
       <div className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
         <div className="w-7 h-7 shrink-0 invisible" />
         <div className="rounded-2xl px-4 py-2.5 bg-red-500/10 border border-red-500/20">
-          <p className="text-sm text-white/60">{msg.content || (msg.type === "image" ? "📷" : "🎙️")}</p>
+          <p className="text-sm text-white/60">{msg.content || (msg.type === "image" ? "📷" : msg.type === "video" ? "🎬" : "🎙️")}</p>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-[10px] text-red-400">{t("chat.sendFailed", "فشل الإرسال")}</span>
             {onRetry && (
@@ -245,6 +246,15 @@ const MessageBubble = memo(function MessageBubble({
         >
           {msg.type === "image" && msg.mediaUrl && (
             <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2 cursor-zoom-in hover:opacity-90 transition-opacity" onClick={(e) => { e.stopPropagation(); onOpenImage(msg.mediaUrl!); }} />
+          )}
+          {msg.type === "video" && msg.mediaUrl && (
+            <video
+              src={msg.mediaUrl}
+              controls
+              playsInline
+              className="rounded-xl max-h-72 mb-2 w-full bg-black/30"
+              onClick={(e) => e.stopPropagation()}
+            />
           )}
           {msg.content && (showOriginalText || !hasTranslated) && (
             <p className="text-sm leading-relaxed whitespace-pre-wrap" dir="auto">{msg.content}</p>
@@ -704,9 +714,20 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type.startsWith("image/")) {
-      chat.sendMedia(file, "image", t);
+    if (!file) {
+      e.target.value = "";
+      return;
     }
+
+    const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+    if (!isImage && !isVideo) {
+      toast.error(t("chat.invalidMedia", "يرجى اختيار صورة أو فيديو صحيح"));
+      e.target.value = "";
+      return;
+    }
+
+    chat.sendMedia(file, isVideo ? "video" : "image", t);
     e.target.value = "";
   };
 
@@ -796,8 +817,14 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
   const applyNotifyMode = async (mode: ChatNotifyMode) => {
     setNotifyModeState(mode);
     setChatNotifyMode(mode);
-    if ((mode === "all" || mode === "push") && typeof Notification !== "undefined" && Notification.permission === "default") {
-      try { await Notification.requestPermission(); } catch { }
+    if ((mode === "all" || mode === "push") && typeof Notification !== "undefined") {
+      let permission = Notification.permission;
+      if (permission === "default") {
+        try { permission = await Notification.requestPermission(); } catch { permission = Notification.permission; }
+      }
+      if (permission === "granted") {
+        void ensurePushSubscription();
+      }
     }
     setShowNotifyMenu(false);
     toast.success(t("social.notificationsUpdated", "تم تحديث إعدادات الإشعارات"));
@@ -1223,7 +1250,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                 {/* Image upload */}
                 {settings?.chat_media_enabled && (
                   <>
-                    <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+                    <input ref={imageInputRef} type="file" accept="image/*,video/mp4,video/webm,video/quicktime" className="hidden" onChange={handleImageSelect} />
                     <button onClick={() => imageInputRef.current?.click()}
                       disabled={isOffline || chat.sendingMsg || chat.blockStatus?.isBlocked}
                       className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-white/5 text-white/30 hover:text-white/50 transition-all">

@@ -468,6 +468,19 @@ export const adminPaymentMethods = {
     request(`/payment-methods/${id}`, { method: "DELETE" }),
 };
 
+export const adminPaymentGateways = {
+  list: () => request<{ providers: Record<string, any> }>("/payment-gateways"),
+
+  update: (provider: string, data: {
+    enabled?: boolean;
+    displayName?: string;
+    countries?: string[];
+    mode?: "sandbox" | "live";
+    priority?: number;
+    credentials?: Record<string, string>;
+  }) => request(`/payment-gateways/${provider}`, { method: "PATCH", body: JSON.stringify(data) }),
+};
+
 // ── Wallets ──────────────────────────────────────────────
 
 export interface WalletFilters {
@@ -496,7 +509,7 @@ export const adminWallets = {
     return request<any>(`/wallets/${userId}?${params}`);
   },
 
-  adjust: (userId: string, data: { amount: number; reason: string; currency?: "coins" | "diamonds" }) =>
+  adjust: (userId: string, data: { amount: number; reason: string; currency?: "coins" | "diamonds" | "miles" }) =>
     request(`/wallets/${userId}/adjust`, { method: "POST", body: JSON.stringify(data) }),
 };
 

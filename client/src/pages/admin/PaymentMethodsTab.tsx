@@ -2,9 +2,9 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Edit3, Trash2, X, AlertCircle, CheckCircle, XCircle,
-  Globe, ToggleLeft, ToggleRight, Loader2,
+  Globe, ToggleLeft, ToggleRight, Loader2, KeyRound, Link,
 } from "lucide-react";
-import { adminPaymentMethods } from "@/lib/adminApi";
+import { adminPaymentGateways, adminPaymentMethods } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
 import { useConfirmDialog } from "../wallet/helpers";
 import type { PaymentMethod } from "./financeTypes";
@@ -41,6 +41,10 @@ export function PaymentMethodsTab({ search, refreshSignal = 0 }: { search: strin
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [gateways, setGateways] = useState<Record<string, any>>({});
+  const [selectedGateway, setSelectedGateway] = useState<string>("stripe");
+  const [gatewaySaving, setGatewaySaving] = useState(false);
+  const [gatewayError, setGatewayError] = useState("");
   const [editMethod, setEditMethod] = useState<PaymentMethod | null>(null);
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
@@ -53,11 +57,22 @@ export function PaymentMethodsTab({ search, refreshSignal = 0 }: { search: strin
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await adminPaymentMethods.list();
+      const [res, gatewayRes] = await Promise.all([
+        adminPaymentMethods.list(),
+        adminPaymentGateways.list(),
+      ]);
       if (res.success) setMethods(res.data || []);
+      if (gatewayRes.success) {
+        const providers = gatewayRes.data?.providers || {};
+        setGateways(providers);
+        if (!providers[selectedGateway]) {
+          const first = Object.keys(providers)[0];
+          if (first) setSelectedGateway(first);
+        }
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, []);
+  }, [selectedGateway]);
 
   useEffect(() => { fetchData(); }, [fetchData, refreshSignal]);
 
@@ -151,6 +166,52 @@ export function PaymentMethodsTab({ search, refreshSignal = 0 }: { search: strin
     }));
   };
 
+  const selectedGatewayConfig = gateways[selectedGateway] || null;
+
+  const gatewayCountryToggle = (code: string) => {
+    if (!selectedGatewayConfig) return;
+    const prev = Array.isArray(selectedGatewayConfig.countries) ? selectedGatewayConfig.countries : ["*"];
+    const next = prev.includes(code)
+      ? prev.filter((c: string) => c !== code)
+      : [...prev.filter((c: string) => c !== "*"), code];
+    setGateways((g) => ({
+      ...g,
+      [selectedGateway]: {
+        ...selectedGatewayConfig,
+        countries: next.length > 0 ? next : ["*"],
+      },
+    }));
+  };
+
+  const saveGateway = async () => {
+    if (!selectedGatewayConfig) return;
+    setGatewaySaving(true);
+    setGatewayError("");
+    try {
+      await adminPaymentGateways.update(selectedGateway, {
+        enabled: !!selectedGatewayConfig.enabled,
+        displayName: String(selectedGatewayConfig.displayName || selectedGateway),
+        countries: Array.isArray(selectedGatewayConfig.countries) && selectedGatewayConfig.countries.length > 0
+          ? selectedGatewayConfig.countries
+          : ["*"],
+        mode: selectedGatewayConfig.mode === "sandbox" ? "sandbox" : "live",
+        priority: Number(selectedGatewayConfig.priority || 99),
+        credentials: selectedGatewayConfig.credentials || {},
+      });
+      await fetchData();
+    } catch (e: any) {
+      setGatewayError(e?.message || t("admin.finances.errorOccurred"));
+    } finally {
+      setGatewaySaving(false);
+    }
+  };
+
+  const gatewayCredentialKeys = useMemo(() => {
+    const creds = selectedGatewayConfig?.credentials || {};
+    const keys = Object.keys(creds);
+    return keys.length > 0 ? keys : ["publicKey", "secretKey"];
+  }, [selectedGatewayConfig]);
+
   const getTypeLabel = (type: string) => { const opt = PM_TYPE_OPTIONS.find((o) => o.value === type); return opt ? t(opt.labelKey) : type; };
   const getUsageLabel = (usage?: string) => {
     switch (usage) {
@@ -212,6 +273,146 @@ export function PaymentMethodsTab({ search, refreshSignal = 0 }: { search: strin
             <Plus className="w-3.5 h-3.5" /> {t("admin.finances.addPaymentMethod")}
           </button>
         </div>
+      </div>
+
+      {/* Gateway connections */}
+      <div className="bg-[#0c0c1d] border border-white/8 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold text-white flex items-center gap-2"><Link className="w-4 h-4 text-primary" /> ربط بوابات الدفع</p>
+            <p className="text-xs text-white/35">إدارة مفاتيح Stripe وبوابات عالمية/محلية، مع دعم الدولة تلقائياً.</p>
+          </div>
+          <button
+            onClick={saveGateway}
+            disabled={!selectedGatewayConfig || gatewaySaving}
+            className="h-8 px-3 rounded-lg bg-primary text-white text-xs font-bold hover:bg-primary/90 disabled:opacity-50"
+          >
+            {gatewaySaving ? "...جاري الحفظ" : "حفظ إعدادات البوابة"}
+          </button>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+          {Object.entries(gateways).map(([provider, cfg]) => (
+            <button
+              key={provider}
+              onClick={() => setSelectedGateway(provider)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border whitespace-nowrap ${selectedGateway === provider
+                ? "bg-primary/15 text-primary border-primary/30"
+                : "bg-white/5 text-white/50 border-white/10 hover:text-white/70"
+                }`}
+            >
+              {cfg.displayName || provider}
+            </button>
+          ))}
+        </div>
+
+        {selectedGatewayConfig && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setGateways((g) => ({ ...g, [selectedGateway]: { ...selectedGatewayConfig, enabled: !selectedGatewayConfig.enabled } }))}
+                  className={`w-11 h-6 rounded-full relative transition-colors ${selectedGatewayConfig.enabled ? "bg-green-500" : "bg-white/15"}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${selectedGatewayConfig.enabled ? "left-0.5" : "left-[22px]"}`} />
+                </button>
+                <span className="text-xs text-white/70">مفعلة لهذه البوابة</span>
+              </div>
+
+              <FormField
+                label="اسم العرض"
+                value={String(selectedGatewayConfig.displayName || "")}
+                onChange={(v) => setGateways((g) => ({ ...g, [selectedGateway]: { ...selectedGatewayConfig, displayName: v } }))}
+                placeholder="Stripe"
+              />
+
+              <div>
+                <label className="text-xs text-white/40 font-medium mb-1.5 block">الوضع</label>
+                <select
+                  className="w-full bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white/70 focus:outline-none"
+                  value={selectedGatewayConfig.mode === "sandbox" ? "sandbox" : "live"}
+                  onChange={(e) => setGateways((g) => ({ ...g, [selectedGateway]: { ...selectedGatewayConfig, mode: e.target.value } }))}
+                >
+                  <option value="live">Live</option>
+                  <option value="sandbox">Sandbox</option>
+                </select>
+              </div>
+
+              <FormField
+                label="الأولوية"
+                value={String(selectedGatewayConfig.priority ?? 99)}
+                onChange={(v) => setGateways((g) => ({ ...g, [selectedGateway]: { ...selectedGatewayConfig, priority: Number(v || 99) } }))}
+                placeholder="1"
+                type="number"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-white/40 font-medium mb-2 block flex items-center gap-1">
+                  <Globe className="w-3 h-3" /> الدول المدعومة (اتركها * لكل الدول)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setGateways((g) => ({ ...g, [selectedGateway]: { ...selectedGatewayConfig, countries: ["*"] } }))}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${(selectedGatewayConfig.countries || []).includes("*")
+                      ? "bg-primary/15 border-primary/30 text-primary font-bold"
+                      : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
+                      }`}
+                  >
+                    كل الدول
+                  </button>
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <button
+                      key={c.code}
+                      type="button"
+                      onClick={() => gatewayCountryToggle(c.code)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${(selectedGatewayConfig.countries || []).includes(c.code)
+                        ? "bg-primary/15 border-primary/30 text-primary font-bold"
+                        : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
+                        }`}
+                    >
+                      {t(c.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-white/40 font-medium mb-2 block flex items-center gap-1">
+                  <KeyRound className="w-3 h-3" /> مفاتيح الربط
+                </label>
+                <div className="space-y-2">
+                  {gatewayCredentialKeys.map((key) => (
+                    <FormField
+                      key={key}
+                      label={key}
+                      value={String(selectedGatewayConfig.credentials?.[key] || "")}
+                      onChange={(v) => setGateways((g) => ({
+                        ...g,
+                        [selectedGateway]: {
+                          ...selectedGatewayConfig,
+                          credentials: {
+                            ...(selectedGatewayConfig.credentials || {}),
+                            [key]: v,
+                          },
+                        },
+                      }))}
+                      placeholder={`Enter ${key}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {gatewayError && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" /> {gatewayError}
+          </div>
+        )}
       </div>
 
       {/* Payment Methods Grid */}

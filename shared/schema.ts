@@ -591,7 +591,7 @@ export const sendMessageSchema = z.object({
   // resolves participant from :conversationId and does not send this field.
   receiverId: z.string().min(1).max(100).optional(),
   content: z.string().min(1).max(5000).optional(),
-  type: z.enum(["text", "image", "voice", "gift"]).default("text"),
+  type: z.enum(["text", "image", "video", "voice", "gift"]).default("text"),
   clientMessageId: z.string().min(8).max(100).optional(),
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
@@ -874,7 +874,7 @@ export const worldSearchSchema = z.object({
 
 export const worldMessageSchema = z.object({
   content: z.string().min(1).max(5000).optional(),
-  type: z.enum(["text", "image", "voice", "gift"]).default("text"),
+  type: z.enum(["text", "image", "video", "voice", "gift"]).default("text"),
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
 });
@@ -1632,7 +1632,7 @@ export const createGroupSchema = z.object({
 
 export const sendGroupMessageSchema = z.object({
   content: z.string().min(1).max(5000).optional(),
-  type: z.enum(["text", "image", "voice", "gift"]).default("text"),
+  type: z.enum(["text", "image", "video", "voice", "gift"]).default("text"),
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
 });

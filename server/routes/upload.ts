@@ -1,7 +1,7 @@
 /**
  * File Upload Service — خدمة رفع الملفات
  * ================================================
- * Handles avatar, image, and voice message uploads.
+ * Handles avatar, image, video, and voice message uploads.
  * Stores files locally in /uploads/ directory.
  * In production, swap with S3/R2 presigned URLs.
  *
@@ -41,6 +41,8 @@ const MAGIC_BYTES: Record<string, Buffer[]> = {
   "audio/ogg": [Buffer.from("OggS")],
   "audio/mpeg": [Buffer.from([0xFF, 0xFB]), Buffer.from([0xFF, 0xF3]), Buffer.from([0xFF, 0xF2]), Buffer.from("ID3")],
   "audio/wav": [Buffer.from("RIFF")],
+  "video/mp4": [Buffer.from([0x00, 0x00, 0x00])],
+  "video/webm": [Buffer.from([0x1A, 0x45, 0xDF, 0xA3])],
 };
 
 function validateMagicBytes(filePath: string, mimetype: string): boolean {
@@ -70,7 +72,8 @@ const MEDIA_DIR = path.join(UPLOAD_DIR, "media");
 // ── Allowed MIME types ──
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const VOICE_MIMES = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"];
-const ALL_MIMES = [...IMAGE_MIMES, ...VOICE_MIMES];
+const VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime"];
+const ALL_MIMES = [...IMAGE_MIMES, ...VOICE_MIMES, ...VIDEO_MIMES];
 
 // ── Multer config ──
 const avatarStorage = multer.diskStorage({
@@ -152,7 +155,7 @@ router.post("/avatar", uploadAvatar.single("file"), async (req, res) => {
   });
 });
 
-// ── Upload media (image/voice for chat) ──
+// ── Upload media (image/video/voice for chat) ──
 router.post("/media", uploadMedia.single("file"), (req, res) => {
   const userId = (req.session as any)?.userId;
   if (!req.file) {
@@ -169,8 +172,10 @@ router.post("/media", uploadMedia.single("file"), (req, res) => {
   }
 
   const isVoice = VOICE_MIMES.includes(req.file.mimetype);
+  const isVideo = VIDEO_MIMES.includes(req.file.mimetype);
   const url = `/uploads/media/${req.file.filename}`;
-  uploadLog.info(`Media uploaded: ${req.file.filename} (${isVoice ? "voice" : "image"}, ${(req.file.size / 1024).toFixed(1)}KB) by user ${userId}`);
+  const mediaType = isVoice ? "voice" : (isVideo ? "video" : "image");
+  uploadLog.info(`Media uploaded: ${req.file.filename} (${mediaType}, ${(req.file.size / 1024).toFixed(1)}KB) by user ${userId}`);
 
   return res.json({
     success: true,
@@ -178,7 +183,7 @@ router.post("/media", uploadMedia.single("file"), (req, res) => {
       url,
       filename: req.file.filename,
       size: req.file.size,
-      type: isVoice ? "voice" : "image",
+      type: mediaType,
       mimetype: req.file.mimetype,
     },
   });

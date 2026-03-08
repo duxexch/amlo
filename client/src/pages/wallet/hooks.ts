@@ -287,11 +287,7 @@ export function useWithdrawFlow(
               }
             } catch { }
           }
-          setAvailableWithdrawMethods([
-            { id: "bank", name: "Bank", nameAr: "تحويل بنكي", icon: "💳" },
-            { id: "paypal", name: "PayPal", nameAr: "باي بال", icon: "🅿️" },
-            { id: "usdt", name: "USDT", nameAr: "تيذر", icon: "🪙" },
-          ]);
+          setAvailableWithdrawMethods([]);
         });
     }
   }, [activeTab, t, withdrawMethod]);
@@ -388,6 +384,10 @@ export function useWithdrawFlow(
 
   const handleWithdrawConfirm = () => {
     const amount = Number(withdrawAmount);
+    if (availableWithdrawMethods.length === 0) {
+      toast.error(t("wallet.noWithdrawMethods", "لا توجد وسائل سحب متاحة حالياً"));
+      return;
+    }
     if (!amount || amount < 1000) return;
     if (withdrawLimits) {
       if (withdrawLimits.hasActiveRequest) {
@@ -619,6 +619,10 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
   const [packagesLoaded, setPackagesLoaded] = useState(false);
   const [milesPackages, setMilesPackages] = useState<MilesPackage[]>([]);
   const [milesLoading, setMilesLoading] = useState(false);
+  const [depositProviders, setDepositProviders] = useState<Array<{ key: string; displayName: string; mode: string; priority: number }>>([]);
+  const [depositMethods, setDepositMethods] = useState<Array<{ id: string; name?: string; nameAr?: string; provider?: string; icon?: string }>>([]);
+  const [selectedProvider, setSelectedProvider] = useState("stripe");
+  const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
 
   // Fetch coin packages from API
   useEffect(() => {
@@ -641,6 +645,37 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
     }
   }, [packagesLoaded]);
 
+  useEffect(() => {
+    if (activeTab !== "recharge") return;
+
+    walletApi.paymentProviders()
+      .then((data: any) => {
+        const providers = Array.isArray(data?.providers) ? data.providers : [];
+        const methods = Array.isArray(data?.paymentMethods) ? data.paymentMethods : [];
+
+        const validProviders = providers
+          .filter((p: any) => p?.key && p?.isReady === true)
+          .sort((a: any, b: any) => Number(a.priority || 99) - Number(b.priority || 99));
+
+        setDepositProviders(validProviders.map((p: any) => ({
+          key: String(p.key),
+          displayName: String(p.displayName || p.key),
+          mode: String(p.mode || "live"),
+          priority: Number(p.priority || 99),
+        })));
+        setDepositMethods(methods);
+        setDetectedCountry(data?.country || null);
+
+        if (validProviders.length > 0) {
+          setSelectedProvider((prev) => validProviders.some((p: any) => p.key === prev) ? prev : String(validProviders[0].key));
+        }
+      })
+      .catch(() => {
+        setDepositProviders([]);
+        setDepositMethods([]);
+      });
+  }, [activeTab]);
+
   // Load miles packages when tab active
   useEffect(() => {
     if (activeTab === "miles" && milesPackages.length === 0) {
@@ -654,11 +689,17 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
 
   const handlePurchase = async (pkg: RechargePackage) => {
     try {
+      if (!pkg.id) {
+        throw new Error(t("wallet.packageUnavailable", "الباقة غير متاحة حالياً"));
+      }
+      if (!selectedProvider) {
+        throw new Error(t("wallet.selectPaymentProvider", "اختر بوابة الدفع أولاً"));
+      }
       toast.loading(t("wallet.processing"), { id: "recharge" });
-      await walletApi.recharge({ amount: pkg.coins, paymentMethod: "store" });
+      const session = await walletApi.createCheckoutSession(pkg.id, selectedProvider);
+      toast.success(t("wallet.redirectingToPayment", "جاري تحويلك إلى صفحة الدفع"), { id: "recharge" });
       haptic([50, 30, 100]);
-      toast.success(t("wallet.rechargeSuccess"), { id: "recharge", description: `+${(pkg.coins + pkg.bonus).toLocaleString()} ${t("common.coins")}` });
-      loadBalance();
+      window.location.href = session.url;
     } catch (err: any) {
       toast.error(err?.message || t("common.error", "Error"), { id: "recharge" });
     }
@@ -686,6 +727,7 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
 
   return {
     packages, milesPackages, milesLoading,
+    depositProviders, depositMethods, selectedProvider, setSelectedProvider, detectedCountry,
     handlePurchase, handleMilesPurchase,
     refreshMiles,
   };

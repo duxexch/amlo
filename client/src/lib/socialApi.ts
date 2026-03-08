@@ -6,7 +6,7 @@ const API_BASE = "/api/social";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
-/** Upload a media file (image/voice) for chat */
+/** Upload a media file (image/video/voice) for chat */
 export async function uploadMedia(file: File | Blob, filename?: string): Promise<string> {
   const formData = new FormData();
   formData.append("file", file, filename || (file instanceof File ? file.name : "recording.webm"));
@@ -173,6 +173,62 @@ export const walletApi = {
   income: () => request<{ totalReceived: number; todayReceived: number; weekReceived: number; monthReceived: number }>("/wallet/income"),
   recharge: (data: { packageId?: string; amount: number; paymentMethod?: string }) =>
     request("/wallet/recharge", { method: "POST", body: JSON.stringify(data) }),
+  paymentProviders: async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/v1/payments/providers", {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw { status: res.status, ...json };
+      return json.data as {
+        country: string | null;
+        providers: Array<{
+          key: string;
+          displayName: string;
+          mode: string;
+          priority: number;
+          countries: string[];
+          hasCredentials: boolean;
+          requiredCredentials: string[];
+          isReady: boolean;
+        }>;
+        paymentMethods: Array<any>;
+      };
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw { status: 408, success: false, message: "انتهت مهلة الطلب" };
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+  createCheckoutSession: async (packageId: string, provider = "stripe") => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/v1/payments/checkout", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId, provider }),
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw { status: res.status, ...json };
+      return json.data as { sessionId: string; url: string };
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw { status: 408, success: false, message: "انتهت مهلة الطلب" };
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
   withdraw: (data: { amount: number; paymentMethodId?: string; paymentDetails?: string }) =>
     request("/wallet/withdraw", { method: "POST", body: JSON.stringify(data) }),
   paymentMethods: (usage: "deposit" | "withdrawal" = "withdrawal") =>
