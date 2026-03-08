@@ -17,7 +17,7 @@ import { TX_TYPE_OPTIONS, TX_STATUS_OPTIONS } from "./financeTypes";
 // TRANSACTIONS TAB
 // ════════════════════════════════════════════════════════════
 
-export function TransactionsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
+export function TransactionsTab({ search, showFilters, refreshSignal = 0 }: { search: string; showFilters: boolean; refreshSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +51,7 @@ export function TransactionsTab({ search, showFilters }: { search: string; showF
     finally { setLoading(false); }
   }, [pagination.page, pagination.limit, filters, search, startDate, endDate]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshSignal]);
 
   const handleAction = async (txId: string, data: { status?: string; adminNotes?: string; rejectionReason?: string; amount?: number; description?: string }) => {
     setActionLoading(txId);

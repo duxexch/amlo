@@ -12,7 +12,7 @@ import type { FinanceStats } from "./financeTypes";
 // FINANCIAL DASHBOARD — لوحة المالية
 // ════════════════════════════════════════════════════════════
 
-export function FinancialDashboard() {
+export function FinancialDashboard({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [stats, setStats] = useState<FinanceStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +31,7 @@ export function FinancialDashboard() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => { loadStats(); }, [loadStats, refreshSignal]);
 
   // #13: Auto-refresh every 30 seconds
   useEffect(() => {
@@ -66,8 +66,10 @@ export function FinancialDashboard() {
   const cards: DashCard[] = [
     { label: t("admin.finances.dashTotalRevenue"), value: stats.revenue?.total || 0, icon: DollarSign, color: "text-emerald-400", bg: "bg-emerald-500/10" },
     { label: t("admin.finances.dashTodayRevenue"), value: stats.revenue?.today || 0, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
-    { label: t("admin.finances.dashMonthRevenue"), value: stats.revenue?.month || 0, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-500/10",
-      growth: monthGrowth },
+    {
+      label: t("admin.finances.dashMonthRevenue"), value: stats.revenue?.month || 0, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-500/10",
+      growth: monthGrowth
+    },
     { label: t("admin.finances.dashTotalWithdrawn"), value: stats.withdrawn || 0, icon: ArrowUpRight, color: "text-red-400", bg: "bg-red-500/10" },
     { label: t("admin.finances.dashPendingWithdrawals"), value: stats.withdrawals?.pending || 0, icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", suffix: ` (${(stats.withdrawals?.pendingAmount || 0).toLocaleString()} ${t("admin.finances.coins")})` },
     { label: t("admin.finances.dashGiftVolume"), value: stats.giftVolume || 0, icon: Gift, color: "text-pink-400", bg: "bg-pink-500/10" },
@@ -83,30 +85,30 @@ export function FinancialDashboard() {
         </div>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-      {cards.map((c, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.05 }}
-          className="bg-white/[0.03] border border-white/5 rounded-xl p-3 flex items-center gap-3"
-        >
-          <div className={`${c.bg} p-2 rounded-lg`}>
-            <c.icon className={`w-4 h-4 ${c.color}`} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] text-white/40 truncate">{c.label}</p>
-            <div className="flex items-center gap-1.5">
-              <p className="text-sm font-bold text-white">{c.value.toLocaleString()}{c.suffix || ""}</p>
-              {c.growth !== undefined && c.growth !== null && (
-                <span className={`text-[9px] font-bold ${c.growth >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {c.growth >= 0 ? "↑" : "↓"}{Math.abs(c.growth)}%
-                </span>
-              )}
+        {cards.map((c, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className="bg-white/[0.03] border border-white/5 rounded-xl p-3 flex items-center gap-3"
+          >
+            <div className={`${c.bg} p-2 rounded-lg`}>
+              <c.icon className={`w-4 h-4 ${c.color}`} />
             </div>
-          </div>
-        </motion.div>
-      ))}
+            <div className="min-w-0">
+              <p className="text-[10px] text-white/40 truncate">{c.label}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-bold text-white">{c.value.toLocaleString()}{c.suffix || ""}</p>
+                {c.growth !== undefined && c.growth !== null && (
+                  <span className={`text-[9px] font-bold ${c.growth >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {c.growth >= 0 ? "↑" : "↓"}{Math.abs(c.growth)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        ))}
       </div>
     </div>
   );

@@ -35,7 +35,7 @@ function FormField({ label, value, onChange, placeholder, type = "text" }: {
 // PAYMENT METHODS TAB
 // ════════════════════════════════════════════════════════════
 
-export function PaymentMethodsTab({ search }: { search: string }) {
+export function PaymentMethodsTab({ search, refreshSignal = 0 }: { search: string; refreshSignal?: number }) {
   const { t } = useTranslation();
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
@@ -59,7 +59,7 @@ export function PaymentMethodsTab({ search }: { search: string }) {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshSignal]);
 
   const openCreate = () => {
     setEditMethod(null);
@@ -192,11 +192,10 @@ export function PaymentMethodsTab({ search }: { search: string }) {
           <button
             onClick={handleToggleAll}
             disabled={toggleAllLoading || methods.length === 0}
-            className={`flex items-center gap-1.5 px-3 h-8 rounded-xl text-xs font-bold transition-colors border disabled:opacity-40 ${
-              allActive
+            className={`flex items-center gap-1.5 px-3 h-8 rounded-xl text-xs font-bold transition-colors border disabled:opacity-40 ${allActive
                 ? "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20"
                 : "bg-green-500/10 border-green-500/20 text-green-400 hover:bg-green-500/20"
-            }`}
+              }`}
           >
             {toggleAllLoading ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -401,11 +400,10 @@ export function PaymentMethodsTab({ search }: { search: string }) {
                         key={c.code}
                         type="button"
                         onClick={() => toggleCountry(c.code)}
-                        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                          formData.countries.includes(c.code)
+                        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formData.countries.includes(c.code)
                             ? "bg-primary/15 border-primary/30 text-primary font-bold"
                             : "bg-white/5 border-white/10 text-white/40 hover:text-white/60"
-                        }`}
+                          }`}
                       >
                         {t(c.labelKey)}
                       </button>

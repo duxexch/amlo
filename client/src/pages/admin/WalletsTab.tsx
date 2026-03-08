@@ -77,7 +77,7 @@ const WALLET_STATUS_OPTIONS = [
 // WALLETS TAB
 // ════════════════════════════════════════════════════════════
 
-export function WalletsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
+export function WalletsTab({ search, showFilters, refreshSignal = 0 }: { search: string; showFilters: boolean; refreshSignal?: number }) {
   const { t } = useTranslation();
   const [wallets, setWallets] = useState<WalletItem[]>([]);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
@@ -114,7 +114,7 @@ export function WalletsTab({ search, showFilters }: { search: string; showFilter
     finally { setLoading(false); }
   }, [pagination.page, pagination.limit, search, statusFilter, sortBy]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshSignal]);
 
   return (
     <div className="space-y-2.5">
@@ -591,9 +591,8 @@ function AdjustBalanceModal({ userId, username, onClose, onSuccess }: {
               <button
                 key={c}
                 onClick={() => setCurrency(c)}
-                className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-colors ${
-                  currency === c ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50"
-                }`}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-colors ${currency === c ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50"
+                  }`}
               >
                 {c === "coins" ? "🪙" : "💎"} {t(`admin.finances.${c}`)}
               </button>

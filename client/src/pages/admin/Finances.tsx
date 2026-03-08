@@ -14,6 +14,7 @@ import { PaymentMethodsTab } from "./PaymentMethodsTab";
 import { CurrenciesTab } from "./CurrenciesTab";
 import { WithdrawalsTab } from "./WithdrawalsTab";
 import { FinancialDashboard } from "./FinancialDashboard";
+import { getSocket } from "@/lib/socketManager";
 
 export function FinancesPage() {
   const { t } = useTranslation();
@@ -21,6 +22,7 @@ export function FinancesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [refreshSignal, setRefreshSignal] = useState(0);
 
   // Debounced search
   useEffect(() => {
@@ -35,6 +37,15 @@ export function FinancesPage() {
     setShowFilters(false);
   }, [activeTab]);
 
+  useEffect(() => {
+    const socket = getSocket();
+    const onFinanceUpdated = () => setRefreshSignal((v) => v + 1);
+    socket.on("finance-updated", onFinanceUpdated);
+    return () => {
+      socket.off("finance-updated", onFinanceUpdated);
+    };
+  }, []);
+
   const tabs: { key: FinanceTab; labelKey: string; icon: React.ElementType }[] = [
     { key: "transactions", labelKey: "admin.finances.tabTransactions", icon: Wallet },
     { key: "withdrawals", labelKey: "admin.finances.tabWithdrawals", icon: ArrowUpRight },
@@ -46,7 +57,7 @@ export function FinancesPage() {
   return (
     <div className="space-y-2.5">
       {/* Financial Dashboard */}
-      <FinancialDashboard />
+      <FinancialDashboard refreshSignal={refreshSignal} />
 
       {/* Header with Search & Filter */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -71,9 +82,8 @@ export function FinancesPage() {
           {activeTab !== "payment-methods" && (
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-3 h-9 text-sm rounded-xl border transition-colors flex-shrink-0 ${
-                showFilters ? "bg-primary/10 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
-              }`}
+              className={`flex items-center gap-2 px-3 h-9 text-sm rounded-xl border transition-colors flex-shrink-0 ${showFilters ? "bg-primary/10 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
+                }`}
             >
               <Filter className="w-4 h-4" /> {t("admin.finances.filterLabel")}
             </button>
@@ -87,11 +97,10 @@ export function FinancesPage() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`relative flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-              activeTab === tab.key
+            className={`relative flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === tab.key
                 ? "text-white"
                 : "text-white/40 hover:text-white/60"
-            }`}
+              }`}
           >
             {activeTab === tab.key && (
               <motion.div
@@ -117,7 +126,7 @@ export function FinancesPage() {
             transition={{ duration: 0.2 }}
           >
             <ErrorBoundary>
-              <TransactionsTab search={search} showFilters={showFilters} />
+              <TransactionsTab search={search} showFilters={showFilters} refreshSignal={refreshSignal} />
             </ErrorBoundary>
           </motion.div>
         ) : activeTab === "wallets" ? (
@@ -129,7 +138,7 @@ export function FinancesPage() {
             transition={{ duration: 0.2 }}
           >
             <ErrorBoundary>
-              <WalletsTab search={search} showFilters={showFilters} />
+              <WalletsTab search={search} showFilters={showFilters} refreshSignal={refreshSignal} />
             </ErrorBoundary>
           </motion.div>
         ) : activeTab === "withdrawals" ? (
@@ -141,7 +150,7 @@ export function FinancesPage() {
             transition={{ duration: 0.2 }}
           >
             <ErrorBoundary>
-              <WithdrawalsTab search={search} showFilters={showFilters} />
+              <WithdrawalsTab search={search} showFilters={showFilters} refreshSignal={refreshSignal} />
             </ErrorBoundary>
           </motion.div>
         ) : activeTab === "currencies" ? (
@@ -165,7 +174,7 @@ export function FinancesPage() {
             transition={{ duration: 0.2 }}
           >
             <ErrorBoundary>
-              <PaymentMethodsTab search={search} />
+              <PaymentMethodsTab search={search} refreshSignal={refreshSignal} />
             </ErrorBoundary>
           </motion.div>
         )}

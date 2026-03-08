@@ -45,6 +45,22 @@ import { decryptMessage } from "../utils/encryption";
 
 const router = Router();
 
+// Financial/admin responses should never be cached by browser or proxies.
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
+function emitFinanceUpdate(type: string, payload: Record<string, unknown> = {}) {
+  io.emit("finance-updated", {
+    type,
+    ts: Date.now(),
+    ...payload,
+  });
+}
+
 /** Strip sensitive fields from DB objects before sending to client (centralized) */
 import { sanitizeUser } from "../utils/sanitize";
 const stripSensitive = sanitizeUser;
@@ -673,16 +689,31 @@ router.patch("/transactions/:id", requireAdmin, async (req, res) => {
     if (!parsed.success) return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.issues });
     const { status, adminNotes, rejectionReason, amount, description } = parsed.data;
 
+    if (amount !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "لا يمكن تعديل مبلغ المعاملة مباشرة لأسباب أمنية",
+      });
+    }
+
+    if (status && !["pending", "completed", "rejected"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "حالة غير مدعومة لهذا المسار",
+      });
+    }
+
     const updateData: any = {};
     if (status) updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
     if (rejectionReason) updateData.adminNotes = `رفض: ${rejectionReason}`;
-    if (amount !== undefined) updateData.amount = amount;
     if (description !== undefined) updateData.description = description;
 
     const updated = await storage.updateTransaction(paramStr(req.params.id), updateData);
 
     await storage.addAdminLog(req.session.adminId!, "update_transaction", "transaction", paramStr(req.params.id), `Status → ${status || "unchanged"}`);
+
+    emitFinanceUpdate("transaction-updated", { transactionId: paramStr(req.params.id), status: updateData.status || null });
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
@@ -1095,6 +1126,7 @@ router.patch("/withdrawal-requests/:id", requireAdmin, async (req, res) => {
     });
 
     await storage.addAdminLog(req.session.adminId!, "update_withdrawal", "withdrawal", wrId, `Status → ${status}`);
+    emitFinanceUpdate("withdrawal-updated", { withdrawalId: wrId, status });
 
     // #2: Notify user via Socket.io when admin changes withdrawal status
     try {
@@ -1177,6 +1209,17 @@ router.post("/wallets/:userId/adjust", requireAdmin, async (req, res) => {
       userId,
       `${amount > 0 ? "+" : ""}${amount} ${currency} — ${reason} (new: ${result.newBalance})`,
     );
+
+    emitFinanceUpdate("wallet-adjusted", {
+      userId,
+      currency,
+      amount,
+      newBalance: result.newBalance,
+    });
+
+    io.to(`user:${userId}`).emit("balance-update", {
+      [currency]: result.newBalance,
+    });
 
     return res.json({
       success: true,
@@ -1270,6 +1313,9 @@ router.post("/payment-methods", requireAdmin, async (req, res) => {
 
     await storage.addAdminLog(req.session.adminId!, "create_payment_method", "payment_method", pm?.id || "", `Created: ${name}`);
 
+    emitFinanceUpdate("payment-methods-updated", { action: "created", id: pm?.id || null });
+    io.emit("payment-methods-updated", { ts: Date.now() });
+
     return res.status(201).json({ success: true, data: pm });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في إنشاء طريقة الدفع" });
@@ -1308,6 +1354,8 @@ router.patch("/payment-methods/:id", requireAdmin, async (req, res) => {
     const updated = await storage.updatePaymentMethod(paramStr(req.params.id), updateData);
     if (!updated) return res.status(404).json({ success: false, message: "طريقة الدفع غير موجودة" });
     const details = parsePaymentMethodDetails((updated as any).accountDetails);
+    emitFinanceUpdate("payment-methods-updated", { action: "updated", id: paramStr(req.params.id) });
+    io.emit("payment-methods-updated", { ts: Date.now() });
     return res.json({
       success: true,
       data: { ...updated, provider: details.provider, countries: details.countries, fee: details.fee, usageTarget: details.usageTarget },
@@ -1319,7 +1367,10 @@ router.patch("/payment-methods/:id", requireAdmin, async (req, res) => {
 
 router.delete("/payment-methods/:id", requireAdmin, async (req, res) => {
   try {
-    await storage.deletePaymentMethod(paramStr(req.params.id));
+    const id = paramStr(req.params.id);
+    await storage.deletePaymentMethod(id);
+    emitFinanceUpdate("payment-methods-updated", { action: "deleted", id });
+    io.emit("payment-methods-updated", { ts: Date.now() });
     return res.json({ success: true, message: "تم حذف طريقة الدفع" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });

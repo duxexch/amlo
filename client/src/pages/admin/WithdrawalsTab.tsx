@@ -14,7 +14,7 @@ import { WR_STATUS_OPTIONS } from "./financeTypes";
 // WITHDRAWALS TAB — طلبات السحب
 // ════════════════════════════════════════════════════════════
 
-export function WithdrawalsTab({ search, showFilters }: { search: string; showFilters: boolean }) {
+export function WithdrawalsTab({ search, showFilters, refreshSignal = 0 }: { search: string; showFilters: boolean; refreshSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +47,7 @@ export function WithdrawalsTab({ search, showFilters }: { search: string; showFi
     setLoading(false);
   }, [pagination.page, pagination.limit, statusFilter, search, startDate, endDate]);
 
-  useEffect(() => { loadRequests(); }, [loadRequests]);
+  useEffect(() => { loadRequests(); }, [loadRequests, refreshSignal]);
   useEffect(() => { setPagination((p) => ({ ...p, page: 1 })); }, [statusFilter, search, startDate, endDate]);
 
   // #17: Confirm dialog for large withdrawals (> 10,000 coins)
@@ -103,9 +103,8 @@ export function WithdrawalsTab({ search, showFilters }: { search: string; showFi
                   <button
                     key={opt.value}
                     onClick={() => setStatusFilter(opt.value)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                      statusFilter === opt.value ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
-                    }`}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${statusFilter === opt.value ? "bg-primary/15 border-primary/30 text-primary" : "bg-white/5 border-white/10 text-white/50 hover:text-white"
+                      }`}
                   >
                     {t(opt.labelKey)}
                   </button>

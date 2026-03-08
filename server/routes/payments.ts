@@ -11,6 +11,7 @@ import { Router, type Request, type Response } from "express";
 import Stripe from "stripe";
 import { getPool } from "../db";
 import { createLogger } from "../logger";
+import { io } from "../index";
 
 const log = createLogger("payments");
 const router = Router();
@@ -181,6 +182,15 @@ router.post("/webhook", async (req: Request, res: Response) => {
              VALUES ($1, 'purchase', $2, $3, 'coins', $4, $5, 'stripe', 'completed')`,
             [userId, coinAmount, rows[0].coins, `شراء ${coinAmount} كوينز عبر Stripe`, session.id]
           );
+
+          // Push immediate balance + finance refresh signals to connected clients.
+          io.to(`user:${userId}`).emit("balance-update", { coins: rows[0].coins });
+          io.emit("finance-updated", {
+            type: "purchase-completed",
+            ts: Date.now(),
+            userId,
+            transactionRef: session.id,
+          });
         }
 
         await client.query("COMMIT");

@@ -2219,19 +2219,21 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
 
     socialLog.info({ audit: "withdrawal_requested", userId, amount: parsed.data.amount, withdrawalId: result.id }, "Withdrawal requested");
 
-    // Notify all connected admin sockets about the new withdrawal
-    try {
-      for (const [, s] of io.sockets.sockets) {
-        if ((s as any).adminId) {
-          s.emit("admin:new-withdrawal", {
-            id: result.id,
-            userId,
-            amount: parsed.data.amount,
-            createdAt: result.createdAt,
-          });
-        }
-      }
-    } catch { /* non-critical */ }
+    io.emit("finance-updated", {
+      type: "withdrawal-created",
+      ts: Date.now(),
+      withdrawalId: result.id,
+      userId,
+      amount: parsed.data.amount,
+    });
+
+    // Backward-compatible event for any clients still listening to legacy admin event.
+    io.emit("admin:new-withdrawal", {
+      id: result.id,
+      userId,
+      amount: parsed.data.amount,
+      createdAt: result.createdAt,
+    });
 
     return res.json({ success: true, data: result, message: "تم إرسال طلب السحب بنجاح" });
   } catch (err: any) {

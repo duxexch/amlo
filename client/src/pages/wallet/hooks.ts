@@ -59,7 +59,7 @@ export function useWalletBalance() {
         socket.off("gift-received", handleGiftReceived);
         socket.off("balance-update", handleBalanceUpdate);
       };
-    } catch {}
+    } catch { }
   }, [loadBalance, t]);
 
   // Auto-refresh on tab focus
@@ -118,7 +118,7 @@ export function useWalletTransactions(activeTab: WalletTab) {
       setTransactions(prev => [...prev, ...items]);
       setTxPage(nextPage);
       setTxHasMore(items.length >= 20);
-    } catch {}
+    } catch { }
     setTxLoadingMore(false);
   };
 
@@ -161,7 +161,7 @@ export function useWalletTransactions(activeTab: WalletTab) {
       setTransactions(Array.isArray(data) ? data : data?.data || []);
       setTxPage(1);
       setTxHasMore(true);
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   return {
@@ -253,7 +253,7 @@ export function useWithdrawFlow(
         .finally(() => setWrLoading(false));
       walletApi.withdrawLimits()
         .then((res: any) => setWithdrawLimits(res))
-        .catch(() => {});
+        .catch(() => { });
 
       walletApi.paymentMethods("withdrawal")
         .then((res: any) => {
@@ -285,7 +285,7 @@ export function useWithdrawFlow(
                 setAvailableWithdrawMethods(parsed.data as WalletPaymentMethodOption[]);
                 return;
               }
-            } catch {}
+            } catch { }
           }
           setAvailableWithdrawMethods([
             { id: "bank", name: "Bank", nameAr: "تحويل بنكي", icon: "💳" },
@@ -303,7 +303,7 @@ export function useWithdrawFlow(
       try {
         const { rate, ts } = JSON.parse(cached);
         if (Date.now() - ts < 5 * 60_000 && rate > 0) { setConversionRate(rate); return; }
-      } catch {}
+      } catch { }
     }
     walletApi.conversionRate()
       .then((res: any) => {
@@ -312,7 +312,7 @@ export function useWithdrawFlow(
           sessionStorage.setItem("wallet:conversionRate", JSON.stringify({ rate: res.coinsPerUsd, ts: Date.now() }));
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Socket: withdrawal-status-change
@@ -329,8 +329,48 @@ export function useWithdrawFlow(
       };
       socket.on("withdrawal-status-change", handleWithdrawalStatus);
       return () => { socket.off("withdrawal-status-change", handleWithdrawalStatus); };
-    } catch {}
+    } catch { }
   }, [loadBalance, t]);
+
+  // Keep payment methods cache fresh across all connected users.
+  useEffect(() => {
+    try {
+      const socket = getSocket();
+      const handlePaymentMethodsUpdated = () => {
+        sessionStorage.removeItem("wallet:withdrawMethods");
+        if (activeTab !== "withdraw") return;
+
+        walletApi.paymentMethods("withdrawal")
+          .then((res: any) => {
+            const list = Array.isArray(res) ? res : [];
+            const normalized: WalletPaymentMethodOption[] = list.map((m: any) => ({
+              id: m.id,
+              name: m.name,
+              nameAr: m.nameAr,
+              icon: m.icon,
+              provider: m.provider,
+              usageTarget: m.usageTarget,
+              countries: m.countries,
+              fee: m.fee,
+              minAmount: m.minAmount,
+              maxAmount: m.maxAmount,
+            }));
+            setAvailableWithdrawMethods(normalized);
+            if (normalized.length > 0 && !normalized.some((m) => m.id === withdrawMethod)) {
+              setWithdrawMethod(normalized[0].id);
+            }
+          })
+          .catch(() => { });
+      };
+
+      socket.on("payment-methods-updated", handlePaymentMethodsUpdated);
+      return () => {
+        socket.off("payment-methods-updated", handlePaymentMethodsUpdated);
+      };
+    } catch {
+      return;
+    }
+  }, [activeTab, withdrawMethod]);
 
   // Number formatting for withdraw input
   const handleWithdrawAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -427,7 +467,7 @@ export function useWithdrawFlow(
         setWithdrawalRequests(res?.data || []);
         setWrPage(1);
         setWrHasMore((res?.data || []).length >= 20);
-      }).catch(() => {});
+      }).catch(() => { });
     } catch (err: any) {
       const msg = err?.message || t("common.error", "حدث خطأ");
       setWithdrawError(msg);
@@ -462,7 +502,7 @@ export function useWithdrawFlow(
       setWithdrawalRequests(prev => [...prev, ...items]);
       setWrPage(nextPage);
       setWrHasMore(items.length >= 20);
-    } catch {}
+    } catch { }
     setWrLoadingMore(false);
   };
 
@@ -471,7 +511,7 @@ export function useWithdrawFlow(
       setWithdrawalRequests(res?.data || []);
       setWrPage(1);
       setWrHasMore((res?.data || []).length >= 20);
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   return {
@@ -538,13 +578,13 @@ export function useIncomeData(activeTab: WalletTab) {
   const refreshIncome = () => {
     walletApi.income()
       .then(data => setIncome(data || { totalReceived: 0, todayReceived: 0, weekReceived: 0, monthReceived: 0 }))
-      .catch(() => {});
+      .catch(() => { });
     walletApi.spendingSummary()
       .then((res: any) => {
         setTotalSpent(res?.totalSpent || 0);
         setSpendingBreakdown(Array.isArray(res?.breakdown) ? res.breakdown : []);
       })
-      .catch(() => {});
+      .catch(() => { });
   };
 
   return {
@@ -596,7 +636,7 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
             })));
           }
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setPackagesLoaded(true));
     }
   }, [packagesLoaded]);
@@ -640,7 +680,7 @@ export function useRechargeData(activeTab: WalletTab, loadBalance: () => Promise
     setMilesLoading(true);
     walletApi.milesPricing()
       .then((data: any) => { if (data?.packages) setMilesPackages(data.packages); })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setMilesLoading(false));
   };
 
