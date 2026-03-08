@@ -1431,13 +1431,6 @@ app.use((req, res, next) => {
     const cpu = process.cpuUsage();
     const pool = getPool();
     const onlineCount = await getOnlineUsersCount();
-    let notificationMetrics: any = null;
-    try {
-      const { getNotificationQueueMetrics } = await import("./services/notificationQueue");
-      notificationMetrics = await getNotificationQueueMetrics();
-    } catch {
-      notificationMetrics = null;
-    }
 
     const lines = [
       `# HELP ablox_uptime_seconds Server uptime in seconds`,
@@ -1468,38 +1461,6 @@ app.use((req, res, next) => {
       `# TYPE ablox_socket_connections gauge`,
       `ablox_socket_connections ${io.engine.clientsCount}`,
     ];
-
-    if (notificationMetrics) {
-      lines.push(
-        `# HELP ablox_notifications_enqueued_total Notifications enqueued`,
-        `# TYPE ablox_notifications_enqueued_total counter`,
-        `ablox_notifications_enqueued_total ${notificationMetrics.enqueued || 0}`,
-        `# HELP ablox_notifications_duplicates_total Duplicate notifications skipped`,
-        `# TYPE ablox_notifications_duplicates_total counter`,
-        `ablox_notifications_duplicates_total ${notificationMetrics.duplicates || 0}`,
-        `# HELP ablox_notifications_processed_total Notifications processed`,
-        `# TYPE ablox_notifications_processed_total counter`,
-        `ablox_notifications_processed_total ${notificationMetrics.processed || 0}`,
-        `# HELP ablox_notifications_failed_total Notification dispatch failures`,
-        `# TYPE ablox_notifications_failed_total counter`,
-        `ablox_notifications_failed_total ${notificationMetrics.failed || 0}`,
-        `# HELP ablox_notifications_retried_total Notification retries scheduled`,
-        `# TYPE ablox_notifications_retried_total counter`,
-        `ablox_notifications_retried_total ${notificationMetrics.retried || 0}`,
-        `# HELP ablox_notifications_dropped_total Notifications dropped after max attempts`,
-        `# TYPE ablox_notifications_dropped_total counter`,
-        `ablox_notifications_dropped_total ${notificationMetrics.dropped || 0}`,
-        `# HELP ablox_notifications_dlq_total Notifications moved to dead-letter queue`,
-        `# TYPE ablox_notifications_dlq_total counter`,
-        `ablox_notifications_dlq_total ${notificationMetrics.dlq || 0}`,
-        `# HELP ablox_notifications_queue_depth Current notification queue depth`,
-        `# TYPE ablox_notifications_queue_depth gauge`,
-        `ablox_notifications_queue_depth ${notificationMetrics.queueDepth || 0}`,
-        `# HELP ablox_notifications_dlq_depth Current dead-letter queue depth`,
-        `# TYPE ablox_notifications_dlq_depth gauge`,
-        `ablox_notifications_dlq_depth ${notificationMetrics.dlqDepth || 0}`,
-      );
-    }
 
     // DB pool metrics
     if (pool) {

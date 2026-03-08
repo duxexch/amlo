@@ -17,7 +17,6 @@ export type LocalizedPushJob = {
     userId: string;
     preferenceKey: NotificationPreferenceKey;
     kind: "message" | "call" | "friend";
-    idempotencyKey?: string;
     actorName?: string;
     bodyPreview?: string;
     url: string;

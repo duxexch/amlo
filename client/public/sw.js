@@ -10,7 +10,7 @@
  *   - Offline: Custom offline page fallback
  */
 
-var CACHE_VERSION = "ablox-v4";
+var CACHE_VERSION = "ablox-v5";
 var STATIC_CACHE = CACHE_VERSION + "-static";
 var DYNAMIC_CACHE = CACHE_VERSION + "-dynamic";
 var IMAGE_CACHE = CACHE_VERSION + "-images";
@@ -119,7 +119,13 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // ── HTML / App shell → Stale-While-Revalidate ──
+  // ── HTML navigations → Network-First to avoid stale app shell after deploy ──
+  if (request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html")) {
+    event.respondWith(networkFirst(request, STATIC_CACHE, 5000));
+    return;
+  }
+
+  // ── Other shell requests → Stale-While-Revalidate ──
   event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
 });
 
@@ -199,7 +205,7 @@ self.addEventListener("periodicsync", function (event) {
   if (event.tag === "update-content") {
     event.waitUntil(
       caches.open(DYNAMIC_CACHE).then(function (cache) {
-        return cache.add("/api/social/featured-streams").catch(function () {});
+        return cache.add("/api/social/featured-streams").catch(function () { });
       })
     );
   }
@@ -215,7 +221,7 @@ self.addEventListener("message", function (event) {
   if (event.data && event.data.type === "CACHE_URLS") {
     var urls = event.data.urls || [];
     caches.open(STATIC_CACHE).then(function (cache) {
-      cache.addAll(urls).catch(function () {});
+      cache.addAll(urls).catch(function () { });
     });
   }
 });

@@ -317,7 +317,6 @@ router.post("/friends/request", async (req, res) => {
       userId: receiverId,
       preferenceKey: "friendRequests",
       kind: "friend",
-      idempotencyKey: `friend-request:${friendship.id}`,
       actorName: senderForPush?.displayName || senderForPush?.username || "User",
       url: "/friends",
     });
@@ -931,7 +930,6 @@ router.post("/conversations/:id/messages", async (req, res) => {
       userId: otherId,
       preferenceKey: "messages",
       kind: "message",
-      idempotencyKey: `message:${msg.id}`,
       actorName: sender?.displayName || sender?.username || "User",
       bodyPreview: content || (type === "image" ? "[image]" : type === "video" ? "[video]" : type === "voice" ? "[voice]" : ""),
       url: "/friends",
@@ -1415,7 +1413,6 @@ router.post("/calls", async (req, res) => {
         userId: receiverId,
         preferenceKey: "calls",
         kind: "call",
-        idempotencyKey: `call:${call.id}`,
         actorName: caller.displayName || caller.username || "User",
         url: "/friends",
         persistent: true,

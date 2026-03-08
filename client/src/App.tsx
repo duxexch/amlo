@@ -28,6 +28,7 @@ const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })))
 const Room = lazy(() => import("@/pages/Room").then(m => ({ default: m.Room })));
 const Wallet = lazy(() => import("@/pages/Wallet").then(m => ({ default: m.Wallet })));
 const UserAuth = lazy(() => import("@/pages/UserAuth").then(m => ({ default: m.UserAuth })));
+const PinEntry = lazy(() => import("@/pages/PinEntry").then(m => ({ default: m.PinEntry })));
 const PinSetup = lazy(() => import("@/pages/PinSetup").then(m => ({ default: m.PinSetup })));
 const Profile = lazy(() => import("@/pages/Profile").then(m => ({ default: m.Profile })));
 const Policy = lazy(() => import("@/pages/Policy").then(m => ({ default: m.Policy })));
@@ -159,6 +160,7 @@ function Router() {
   if (isAccountApply) return <Suspense fallback={<PageLoader />}><Route path="/account-apply" component={AccountApply} /></Suspense>;
   if (location === "/call") return <Suspense fallback={<PageLoader />}><CallScreen /></Suspense>;
   if (location === "/auth") return <Suspense fallback={<PageLoader />}><UserAuth /></Suspense>;
+  if (location === "/pin") return <Suspense fallback={<PageLoader />}><PinEntry /></Suspense>;
   if (location === "/pin-setup") return <Suspense fallback={<PageLoader />}><PinSetup /></Suspense>;
   if (location.startsWith("/reset-password")) return <Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>;
   if (location === "/download") return <Suspense fallback={<PageLoader />}><DownloadPage /></Suspense>;
@@ -175,7 +177,7 @@ function App() {
     callId?: string;
   }>({});
   const [location, navigate] = useLocation();
-  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
+  const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
 
   // ── Listen for incoming calls via Socket.io ──
   useEffect(() => {

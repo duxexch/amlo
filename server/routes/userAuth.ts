@@ -512,11 +512,55 @@ router.post("/pin/setup", async (req: Request, res: Response) => {
  * POST /auth/pin/verify — Verify PIN → set active profile in session
  */
 router.post("/pin/verify", async (req: Request, res: Response) => {
-  return res.status(410).json({
-    success: false,
-    message: "تم إيقاف تسجيل الدخول عبر PIN. استخدم تسجيل الدخول بكلمة المرور ثم رمز التحقق بالبريد.",
-    code: "PIN_LOGIN_DISABLED",
-  });
+  try {
+    const userId = requireAuth(req, res);
+    if (!userId) return;
+
+    const parsed = verifyPinSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة", errors: parsed.error.issues });
+    }
+
+    const { pin } = parsed.data;
+    const db = getDb();
+    if (!db) {
+      return res.status(503).json({ success: false, message: "قاعدة البيانات غير متاحة حالياً" });
+    }
+
+    // Get all profiles for user
+    const profiles = await db
+      .select()
+      .from(schema.userProfiles)
+      .where(eq(schema.userProfiles.userId, userId));
+
+    if (profiles.length === 0) {
+      return res.status(404).json({ success: false, message: "لم يتم إعداد أي ملف شخصي بعد", code: "NO_PROFILES" });
+    }
+
+    // Try PIN against each profile
+    for (const profile of profiles) {
+      const match = await verifyPasswordAsync(pin, profile.pinHash);
+      if (match) {
+        req.session.pinVerified = true;
+        req.session.activeProfileIndex = profile.profileIndex;
+
+        log(`PIN verified for user ${userId}, profile ${profile.profileIndex}`);
+
+        return res.json({
+          success: true,
+          data: {
+            profileIndex: profile.profileIndex,
+            profile: stripSensitive(profile),
+          },
+        });
+      }
+    }
+
+    return res.status(401).json({ success: false, message: "رمز PIN غير صحيح" });
+  } catch (err: any) {
+    authLog.error({ err }, "PIN verify error");
+    return res.status(500).json({ success: false, message: "حدث خطأ في التحقق من رمز PIN" });
+  }
 });
 
 /**
