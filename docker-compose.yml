@@ -200,10 +200,21 @@ services:
     container_name: ablox_coturn
     restart: unless-stopped
     network_mode: host
+    command: >
+      /bin/sh -c "turnserver -c /etc/turnserver.conf
+      --static-auth-secret=$${TURN_SECRET}
+      $${TURN_EXTERNAL_IP:+--external-ip=$${TURN_EXTERNAL_IP}}"
     volumes:
       - ./config/turnserver.conf:/etc/turnserver.conf:ro
     environment:
       TURN_SECRET: ${TURN_SECRET:-AbL0x_TURN_S3cr3t_2026!}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+    healthcheck:
+      test: ["CMD-SHELL", "pidof turnserver >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     deploy:
       resources:
         limits:
