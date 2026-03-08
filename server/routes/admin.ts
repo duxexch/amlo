@@ -725,6 +725,30 @@ router.patch("/transactions/:id", requireAdmin, async (req, res) => {
 // WALLETS — المحافظ
 // ══════════════════════════════════════════════════════════
 
+const WITHDRAW_ACCESS_USERS_SETTING_KEY = "wallet_withdraw_access_user_ids";
+
+async function getWithdrawAccessUsersSet(): Promise<Set<string>> {
+  const setting = await storage.getSetting(WITHDRAW_ACCESS_USERS_SETTING_KEY);
+  if (!setting?.value) return new Set<string>();
+  try {
+    const parsed = JSON.parse(setting.value);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.map((v) => String(v || "").trim()).filter(Boolean));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+async function saveWithdrawAccessUsersSet(usersSet: Set<string>) {
+  const payload = JSON.stringify(Array.from(usersSet));
+  await storage.upsertSetting(
+    WITHDRAW_ACCESS_USERS_SETTING_KEY,
+    payload,
+    "wallet",
+    "User IDs allowed to access withdraw feature"
+  );
+}
+
 router.get("/wallets", requireAdmin, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -735,6 +759,7 @@ router.get("/wallets", requireAdmin, async (req, res) => {
     const result = await storage.getUsersPaginated?.(page, limit, { search });
 
     if (result) {
+      const withdrawAccessUsers = await getWithdrawAccessUsersSet();
       const wallets = result.data.map((u: any) => ({
         userId: u.id,
         username: u.username,
@@ -746,6 +771,7 @@ router.get("/wallets", requireAdmin, async (req, res) => {
         isBanned: u.isBanned,
         country: u.country,
         lastOnlineAt: u.lastOnlineAt,
+        withdrawEnabled: withdrawAccessUsers.has(u.id),
       }));
 
       return res.json({
@@ -768,11 +794,13 @@ router.get("/wallets", requireAdmin, async (req, res) => {
 
 router.get("/wallets/:userId", requireAdmin, async (req, res) => {
   try {
-    const user = await storage.getUser(paramStr(req.params.userId));
+    const userId = paramStr(req.params.userId);
+    const user = await storage.getUser(userId);
     if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+    const withdrawAccessUsers = await getWithdrawAccessUsersSet();
 
     // Get real transactions from DB
-    const txResult = await storage.getUserTransactions(paramStr(req.params.userId), 1, 50);
+    const txResult = await storage.getUserTransactions(userId, 1, 50);
 
     return res.json({
       success: true,
@@ -784,6 +812,7 @@ router.get("/wallets/:userId", requireAdmin, async (req, res) => {
           coins: user.coins,
           diamonds: user.diamonds,
           level: user.level,
+          withdrawEnabled: withdrawAccessUsers.has(userId),
         },
         transactions: txResult.data,
         stats: {
@@ -795,6 +824,52 @@ router.get("/wallets/:userId", requireAdmin, async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.patch("/wallets/:userId/withdraw-access", requireAdmin, async (req, res) => {
+  try {
+    const userId = paramStr(req.params.userId);
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "قيمة enabled مطلوبة" });
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
+
+    const usersSet = await getWithdrawAccessUsersSet();
+    if (parsed.data.enabled) {
+      usersSet.add(userId);
+    } else {
+      usersSet.delete(userId);
+    }
+    await saveWithdrawAccessUsersSet(usersSet);
+
+    await storage.addAdminLog(
+      req.session.adminId!,
+      parsed.data.enabled ? "enable_withdraw_access" : "disable_withdraw_access",
+      "user",
+      userId,
+      `${parsed.data.enabled ? "Enabled" : "Disabled"} withdraw access for @${user.username}`
+    );
+
+    io.to(`user:${userId}`).emit("withdraw-access-updated", {
+      enabled: parsed.data.enabled,
+      ts: Date.now(),
+    });
+
+    emitFinanceUpdate("withdraw-access-updated", { userId, enabled: parsed.data.enabled });
+
+    return res.json({
+      success: true,
+      data: {
+        userId,
+        enabled: parsed.data.enabled,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "تعذر تحديث صلاحية السحب" });
   }
 });
 

@@ -81,6 +81,20 @@ function detectCountry(req: Request, userCountry?: string | null): string {
   return headerCountry.length === 2 ? headerCountry : "";
 }
 
+const WITHDRAW_ACCESS_USERS_SETTING_KEY = "wallet_withdraw_access_user_ids";
+
+async function isWithdrawAccessEnabledForUser(userId: string): Promise<boolean> {
+  const setting = await storage.getSetting(WITHDRAW_ACCESS_USERS_SETTING_KEY);
+  if (!setting?.value) return false;
+  try {
+    const parsed = JSON.parse(setting.value);
+    if (!Array.isArray(parsed)) return false;
+    return parsed.map((v: unknown) => String(v || "").trim()).includes(userId);
+  } catch {
+    return false;
+  }
+}
+
 // ── UUID param validation middleware — rejects malformed :id early ──
 router.param("id", (req, res, next, value) => {
   if (!isValidUuid(String(value))) {
@@ -2067,6 +2081,22 @@ router.get("/wallet/payment-methods", async (req: Request, res: Response) => {
     const usageRaw = String(req.query.usage || "withdrawal").toLowerCase();
     const usage = usageRaw === "deposit" || usageRaw === "withdrawal" ? usageRaw : "withdrawal";
 
+    if (usage === "withdrawal") {
+      const withdrawEnabled = await isWithdrawAccessEnabledForUser(userId);
+      if (!withdrawEnabled) {
+        return res.json({
+          success: true,
+          data: [],
+          meta: {
+            usage,
+            country: null,
+            total: 0,
+            withdrawEnabled: false,
+          },
+        });
+      }
+    }
+
     const user = await storage.getUser(userId);
     const country = detectCountry(req, user?.country || null);
 
@@ -2102,12 +2132,30 @@ router.get("/wallet/payment-methods", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/wallet/withdraw-access", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const enabled = await isWithdrawAccessEnabledForUser(userId);
+    return res.json({ success: true, data: { enabled } });
+  } catch {
+    return res.status(500).json({ success: false, message: "تعذر تحميل صلاحية السحب" });
+  }
+});
+
 /**
  * POST /social/wallet/withdraw — طلب سحب (مؤمن ضد السحب المزدوج)
  */
 router.post("/wallet/withdraw", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+
+  const withdrawEnabled = await isWithdrawAccessEnabledForUser(userId);
+  if (!withdrawEnabled) {
+    return res.status(403).json({ success: false, message: "خيار السحب غير متاح لحسابك حالياً" });
+  }
+
   // Rate limit financial operations
   if (await isFinancialRateLimited(userId)) {
     return res.status(429).json({ success: false, message: "عدد كبير من الطلبات — حاول بعد قليل" });
@@ -2259,6 +2307,12 @@ router.post("/wallet/withdraw", async (req: Request, res: Response) => {
 router.get("/wallet/withdrawal-requests", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+
+  const withdrawEnabled = await isWithdrawAccessEnabledForUser(userId);
+  if (!withdrawEnabled) {
+    return res.status(403).json({ success: false, message: "خيار السحب غير متاح لحسابك حالياً" });
+  }
+
   try {
     const page = parseInt(req.query.page as string) || 1;
     const result = await storage.getWithdrawalRequests(page, 20, { userId });
@@ -2310,6 +2364,12 @@ router.get("/wallet/income-chart", async (req: Request, res: Response) => {
 router.post("/wallet/cancel-withdrawal", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+
+  const withdrawEnabled = await isWithdrawAccessEnabledForUser(userId);
+  if (!withdrawEnabled) {
+    return res.status(403).json({ success: false, message: "خيار السحب غير متاح لحسابك حالياً" });
+  }
+
   try {
     const { withdrawalId } = req.body;
     if (!withdrawalId) return res.status(400).json({ success: false, message: "معرف الطلب مطلوب" });
@@ -2414,6 +2474,12 @@ router.get("/wallet/spending-summary", async (req: Request, res: Response) => {
 router.get("/wallet/withdraw-limits", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+
+  const withdrawEnabled = await isWithdrawAccessEnabledForUser(userId);
+  if (!withdrawEnabled) {
+    return res.status(403).json({ success: false, message: "خيار السحب غير متاح لحسابك حالياً" });
+  }
+
   try {
     const db = getDb();
     if (!db) return res.json({ success: true, data: { dailyLimit: DAILY_WITHDRAW_LIMIT, weeklyLimit: WEEKLY_WITHDRAW_LIMIT, dailyUsed: 0, weeklyUsed: 0, dailyRemaining: DAILY_WITHDRAW_LIMIT, weeklyRemaining: WEEKLY_WITHDRAW_LIMIT, hasActiveRequest: false } });

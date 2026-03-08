@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useSearch } from "wouter";
 import { walletApi } from "@/lib/socialApi";
 import { toast } from "sonner";
+import { getSocket } from "@/lib/socketManager";
 
 import { GlassCard, ShimmerButton, CountUp, Skeleton, SkeletonCard, SkeletonGrid } from "./wallet/components";
 import { useStatusBadge, useTxMeta, validateUsdtAddress, haptic, useEscapeKey } from "./wallet/helpers";
@@ -32,6 +33,7 @@ export function Wallet() {
 
   // ── Tab state ──
   const [activeTab, setActiveTab] = useState<WalletTab>("recharge");
+  const [withdrawEnabled, setWithdrawEnabled] = useState(false);
 
   // ── Custom hooks ──
   const { balance, balanceLoading, balanceHidden, setBalanceHidden, loadBalance } = useWalletBalance();
@@ -116,6 +118,8 @@ export function Wallet() {
     { key: "withdraw", icon: <Send className="w-4 h-4" />, label: t("wallet.tabWithdraw") },
   ];
 
+  const visibleTabs = withdrawEnabled ? tabs : tabs.filter((tab) => tab.key !== "withdraw");
+
   const tierIcons = [Compass, Plane, Rocket, Star, Crown, Zap];
 
   useEffect(() => {
@@ -135,6 +139,31 @@ export function Wallet() {
     const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
     window.history.replaceState({}, "", nextUrl);
   }, [search, loadBalance, t]);
+
+  useEffect(() => {
+    walletApi.withdrawAccess()
+      .then((data: any) => setWithdrawEnabled(Boolean(data?.enabled)))
+      .catch(() => setWithdrawEnabled(false));
+
+    try {
+      const socket = getSocket();
+      const handleWithdrawAccessUpdated = (payload: { enabled?: boolean }) => {
+        setWithdrawEnabled(Boolean(payload?.enabled));
+      };
+      socket.on("withdraw-access-updated", handleWithdrawAccessUpdated);
+      return () => {
+        socket.off("withdraw-access-updated", handleWithdrawAccessUpdated);
+      };
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!withdrawEnabled && activeTab === "withdraw") {
+      setActiveTab("recharge");
+    }
+  }, [withdrawEnabled, activeTab]);
 
   const resolveMethodLabel = (id: string | null | undefined) => {
     if (!id) return "-";
@@ -260,7 +289,7 @@ export function Wallet() {
       {/* TABS                                           */}
       {/* ═══════════════════════════════════════════════ */}
       <div className="flex gap-1.5 p-1.5 bg-white/[0.03] border border-white/[0.06] rounded-2xl overflow-x-auto hide-scrollbar">
-        {tabs.map(tab => (
+        {visibleTabs.map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             className={`relative flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap flex-1 justify-center
               ${activeTab === tab.key ? "text-white" : "text-white/30 hover:text-white/50 hover:bg-white/[0.03]"}`}>
@@ -635,7 +664,7 @@ export function Wallet() {
         )}
 
         {/* ──────── WITHDRAW TAB ──────── */}
-        {activeTab === "withdraw" && (
+        {withdrawEnabled && activeTab === "withdraw" && (
           <motion.div key="withdraw" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="space-y-6">
             {/* Available Balance */}
             <GlassCard className="p-6">

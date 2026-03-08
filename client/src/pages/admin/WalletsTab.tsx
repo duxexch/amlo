@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Coins, Diamond, TrendingUp, DollarSign, CheckCircle,
-  Ban, Edit3, ChevronRight, ChevronLeft, X, Loader2, FileText, Save,
+  Ban, Edit3, ChevronRight, ChevronLeft, X, Loader2, FileText, Save, Shield,
 } from "lucide-react";
 import { adminWallets, adminAdjustments } from "@/lib/adminApi";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,7 @@ interface WalletItem {
   isBanned: boolean;
   lastTransaction: string | null;
   createdAt: string;
+  withdrawEnabled?: boolean;
 }
 
 interface WalletSummary {
@@ -57,6 +58,7 @@ interface WalletDetail {
   totalDeposits: number;
   totalWithdrawals: number;
   isBanned: boolean;
+  withdrawEnabled?: boolean;
 }
 
 const WALLET_SORT_OPTIONS = [
@@ -235,19 +237,24 @@ export function WalletsTab({ search, showFilters, refreshSignal = 0 }: { search:
                       )}
                     </td>
                     <td className="py-2 px-3 text-center">
-                      {w.isBanned ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-red-500/10 text-red-500 border border-red-500/20">
-                          <Ban className="w-2.5 h-2.5" /> {t("admin.finances.statusBanned")}
+                      <div className="flex flex-col items-center gap-1">
+                        {w.isBanned ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-red-500/10 text-red-500 border border-red-500/20">
+                            <Ban className="w-2.5 h-2.5" /> {t("admin.finances.statusBanned")}
+                          </span>
+                        ) : w.isActive ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-green-400/10 text-green-400 border border-green-400/20">
+                            <CheckCircle className="w-2.5 h-2.5" /> {t("admin.finances.statusActive")}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white/5 text-white/30 border border-white/10">
+                            {t("admin.finances.statusIdle")}
+                          </span>
+                        )}
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border ${w.withdrawEnabled ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-white/5 text-white/35 border-white/10"}`}>
+                          <Shield className="w-2.5 h-2.5" /> {w.withdrawEnabled ? t("admin.finances.withdrawEnabled", "السحب مفعل") : t("admin.finances.withdrawDisabled", "السحب مخفي")}
                         </span>
-                      ) : w.isActive ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-green-400/10 text-green-400 border border-green-400/20">
-                          <CheckCircle className="w-2.5 h-2.5" /> {t("admin.finances.statusActive")}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white/5 text-white/30 border border-white/10">
-                          {t("admin.finances.statusIdle")}
-                        </span>
-                      )}
+                      </div>
                     </td>
                     <td className="py-2 px-3 text-center">
                       <button
@@ -331,6 +338,8 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 0 });
   const [typeFilter, setTypeFilter] = useState("");
   const [adjustments, setAdjustments] = useState<BalanceAdjustment[]>([]);
+  const [withdrawEnabled, setWithdrawEnabled] = useState(false);
+  const [withdrawUpdating, setWithdrawUpdating] = useState(false);
 
   const fetchData = useCallback(async () => {
     setTxLoading(true);
@@ -341,12 +350,17 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
         type: typeFilter || undefined,
       });
       if (res.success) {
-        setWalletInfo(res.wallet);
-        setTransactions(res.transactions || []);
+        const walletPayload = res.wallet || res.data?.user || null;
+        const txPayload = res.transactions || res.data?.transactions || [];
+        const pagePayload = res.pagination || { total: Array.isArray(txPayload) ? txPayload.length : 0, totalPages: 1 };
+
+        setWalletInfo(walletPayload);
+        setTransactions(txPayload);
+        setWithdrawEnabled(Boolean(walletPayload?.withdrawEnabled));
         setPagination((p) => ({
           ...p,
-          total: res.pagination?.total || 0,
-          totalPages: res.pagination?.totalPages || 0,
+          total: pagePayload?.total || 0,
+          totalPages: pagePayload?.totalPages || 0,
         }));
       }
     } catch (e) { console.error(e); }
@@ -367,6 +381,21 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
 
   const getTypeLabel = (type: string) => { const opt = TX_TYPE_OPTIONS.find((o) => o.value === type); return opt ? t(opt.labelKey) : type; };
   const getStatusLabel = (status: string) => { const opt = TX_STATUS_OPTIONS.find((o) => o.value === status); return opt ? t(opt.labelKey) : status; };
+
+  const handleToggleWithdrawAccess = async () => {
+    if (!walletInfo || withdrawUpdating) return;
+    setWithdrawUpdating(true);
+    try {
+      const next = !withdrawEnabled;
+      await adminWallets.setWithdrawAccess(walletInfo.userId, next);
+      setWithdrawEnabled(next);
+      setWalletInfo((prev) => prev ? { ...prev, withdrawEnabled: next } : prev);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setWithdrawUpdating(false);
+    }
+  };
 
   return (
     <motion.div
@@ -424,6 +453,20 @@ function WalletDetailModal({ userId, onClose }: { userId: string; onClose: () =>
                   <p className="text-[10px] text-red-400/60 mb-0.5">{t("admin.finances.totalWithdrawals")}</p>
                   <p className="text-sm font-bold text-red-400">-{walletInfo.totalWithdrawals.toLocaleString()}</p>
                 </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between bg-black/20 rounded-xl border border-white/5 px-3 py-2">
+                <div>
+                  <p className="text-[11px] text-white/45 font-bold">{t("admin.finances.withdrawAccess", "صلاحية السحب")}</p>
+                  <p className="text-[10px] text-white/30">{withdrawEnabled ? t("admin.finances.withdrawEnabled", "مفعلة لهذا المستخدم") : t("admin.finances.withdrawDisabled", "مخفية عن هذا المستخدم")}</p>
+                </div>
+                <button
+                  onClick={handleToggleWithdrawAccess}
+                  disabled={withdrawUpdating}
+                  className={`h-8 px-3 rounded-lg text-xs font-bold border transition-colors ${withdrawEnabled ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : "bg-white/5 text-white/60 border-white/15"}`}
+                >
+                  {withdrawUpdating ? t("common.loading", "جاري...") : (withdrawEnabled ? t("admin.finances.disable", "تعطيل") : t("admin.finances.enable", "تفعيل"))}
+                </button>
               </div>
             </div>
 

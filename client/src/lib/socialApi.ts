@@ -231,6 +231,7 @@ export const walletApi = {
   },
   withdraw: (data: { amount: number; paymentMethodId?: string; paymentDetails?: string }) =>
     request("/wallet/withdraw", { method: "POST", body: JSON.stringify(data) }),
+  withdrawAccess: () => request<{ enabled: boolean }>("/wallet/withdraw-access"),
   paymentMethods: (usage: "deposit" | "withdrawal" = "withdrawal") =>
     request<any[]>(`/wallet/payment-methods?usage=${usage}`),
   withdrawalRequests: (page = 1) => request<any>(`/wallet/withdrawal-requests?page=${page}`),

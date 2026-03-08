@@ -511,6 +511,12 @@ export const adminWallets = {
 
   adjust: (userId: string, data: { amount: number; reason: string; currency?: "coins" | "diamonds" | "miles" }) =>
     request(`/wallets/${userId}/adjust`, { method: "POST", body: JSON.stringify(data) }),
+
+  setWithdrawAccess: (userId: string, enabled: boolean) =>
+    request<{ userId: string; enabled: boolean }>(`/wallets/${userId}/withdraw-access`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
 };
 
 // ── Financial Stats ──────────────────────────────────────
