@@ -122,6 +122,10 @@ export async function applyDatabaseConstraints(): Promise<void> {
   const p = getPool();
   if (!p) return;
 
+  // Cluster-safe lock keys: ensures only one worker applies startup DDL at a time.
+  const LOCK_KEY_1 = 918273;
+  const LOCK_KEY_2 = 445566;
+
   const constraints = [
     // ── CHECK constraints — prevent invalid values ──
     `DO $$ BEGIN
@@ -276,15 +280,41 @@ export async function applyDatabaseConstraints(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS payment_orders_status_idx ON payment_orders (status, created_at DESC);`,
   ];
 
+  let client: pg.PoolClient | null = null;
+  let lockAcquired = false;
+
   try {
-    const client = await p.connect();
+    client = await p.connect();
+
+    const lockRes = await client.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock($1, $2) AS locked",
+      [LOCK_KEY_1, LOCK_KEY_2],
+    );
+    lockAcquired = Boolean(lockRes.rows[0]?.locked);
+
+    if (!lockAcquired) {
+      log("Database constraints apply skipped (another worker is running it)", "db");
+      return;
+    }
+
     for (const sql of constraints) {
       await client.query(sql);
     }
-    client.release();
+
     log("Database constraints applied", "db");
   } catch (err: any) {
     log(`Failed to apply constraints: ${err.message}`, "db");
+  } finally {
+    if (client) {
+      if (lockAcquired) {
+        try {
+          await client.query("SELECT pg_advisory_unlock($1, $2)", [LOCK_KEY_1, LOCK_KEY_2]);
+        } catch {
+          // Ignore unlock errors; lock is session-scoped and will release on connection close.
+        }
+      }
+      client.release();
+    }
   }
 }
 
