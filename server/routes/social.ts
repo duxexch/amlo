@@ -345,6 +345,16 @@ router.post("/friends/:id/reject", async (req, res) => {
     if (!friendship) return res.status(404).json({ success: false, message: "الطلب غير موجود" });
 
     await db.delete(schema.friendships).where(eq(schema.friendships.id, friendship.id));
+
+    // Notify sender that request was rejected
+    const senderSocketId = await getUserSocketId(friendship.senderId);
+    if (senderSocketId) {
+      io.to(`user:${friendship.senderId}`).emit("friend-rejected", {
+        friendshipId: friendship.id,
+        rejectedBy: userId,
+      });
+    }
+
     return res.json({ success: true, message: "تم رفض الطلب" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -465,17 +475,22 @@ router.get("/users/search", searchLimiter, async (req, res) => {
         )
       : [];
 
-    const enriched = await Promise.all(results.map(async r => {
+    const onlineMap = await areUsersOnline(resultIds);
+
+    const enriched = results.map((r) => {
       const fs = existingFriendships.find(
         f => (f.senderId === userId && f.receiverId === r.id) || (f.senderId === r.id && f.receiverId === userId)
       );
       return {
         ...r,
-        isOnline: await isUserOnline(r.id),
+        isOnline: onlineMap.get(r.id) || false,
         friendshipStatus: fs?.status || null,
         friendshipId: fs?.id || null,
+        friendshipDirection: fs
+          ? (fs.senderId === userId ? "outgoing" : "incoming")
+          : null,
       };
-    }));
+    });
 
     return res.json({ success: true, data: enriched });
   } catch (err: any) {
@@ -706,15 +721,12 @@ router.get("/conversations/:id/messages", async (req, res) => {
 
     // Notify sender that messages were read
     if (markedRead.length > 0) {
-      const senderSocketId = await getUserSocketId(otherId);
-      if (senderSocketId) {
-        io.to(`user:${otherId}`).emit("messages-read", {
-          conversationId: conv.id,
-          readBy: userId,
-          readAt: now.toISOString(),
-          messageIds: markedRead.map(m => m.id),
-        });
-      }
+      io.to(`user:${otherId}`).emit("messages-read", {
+        conversationId: conv.id,
+        readBy: userId,
+        readAt: now.toISOString(),
+        messageIds: markedRead.map(m => m.id),
+      });
     }
 
     const decrypted = decryptMessages(msgs.reverse(), req.params.id);
@@ -793,11 +805,31 @@ router.post("/conversations/:id/messages", async (req, res) => {
     // Validate message body
     const parsed = sendMessageSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ success: false, message: "بيانات الرسالة غير صالحة" });
-    const { content, type, mediaUrl, giftId, replyToId } = parsed.data;
+    const { content, type, mediaUrl, giftId, replyToId, clientMessageId } = parsed.data;
     if (!content && (type === "text" || !type)) return res.status(400).json({ success: false, message: "الرسالة فارغة" });
     // Content length validation
     if (content && content.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ success: false, message: `الرسالة طويلة جداً (الحد ${MAX_MESSAGE_LENGTH} حرف)` });
+    }
+
+    // Idempotency guard for weak networks/retries: return existing message if same client message ID was already accepted.
+    if (clientMessageId) {
+      const [existingMsg] = await db.select().from(schema.messages)
+        .where(and(
+          eq(schema.messages.conversationId, conv.id),
+          eq(schema.messages.senderId, userId),
+          eq(schema.messages.clientMessageId, clientMessageId),
+        ))
+        .limit(1);
+
+      if (existingMsg) {
+        const alreadyStored = {
+          ...existingMsg,
+          content: existingMsg.content ? decryptMessage(existingMsg.content, conv.id) : null,
+          isEncrypted: true,
+        };
+        return res.json({ success: true, data: alreadyStored });
+      }
     }
 
     // Check feature toggles
@@ -823,6 +855,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
       type: type || "text",
       mediaUrl: mediaUrl || null,
       giftId: giftId || null,
+      clientMessageId: clientMessageId || null,
       replyToId: replyToId || null,
       coinsCost: messageCost,
     }).returning();
@@ -849,23 +882,17 @@ router.post("/conversations/:id/messages", async (req, res) => {
     const decryptedMsg = { ...msg, content: content || null, isEncrypted: true };
 
     // Send real-time notification
-    const receiverSocketId = await getUserSocketId(otherId);
-    if (receiverSocketId) {
-      io.to(`user:${otherId}`).emit("new-message", {
-        message: decryptedMsg,
-        conversationId: conv.id,
-        sender,
-      });
-    }
+    io.to(`user:${otherId}`).emit("new-message", {
+      message: decryptedMsg,
+      conversationId: conv.id,
+      sender,
+    });
 
     // Also notify sender socket for multi-tab sync
-    const senderSocketId = await getUserSocketId(userId);
-    if (senderSocketId) {
-      io.to(`user:${userId}`).emit("message-sent", {
-        message: decryptedMsg,
-        conversationId: conv.id,
-      });
-    }
+    io.to(`user:${userId}`).emit("message-sent", {
+      message: decryptedMsg,
+      conversationId: conv.id,
+    });
 
     chatMetrics.sentTotal += 1;
     chatMetrics.sendLatencyMsTotal += Date.now() - startedAt;

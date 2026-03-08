@@ -12,6 +12,9 @@ import { AnnouncementPopup } from "@/components/ui/AnnouncementPopup";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { useState, useEffect, lazy, Suspense } from "react";
+import { callsApi } from "@/lib/socialApi";
+import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 // ── Lazy-loaded pages (code splitting) ──
 const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })));
@@ -158,8 +161,14 @@ function Router() {
 }
 
 function App() {
+  const { t } = useTranslation();
   const [incomingCall, setIncomingCall] = useState(false);
-  const [incomingCallInfo, setIncomingCallInfo] = useState<{ callerName?: string; isVideo?: boolean; callId?: string }>({});
+  const [incomingCallInfo, setIncomingCallInfo] = useState<{
+    callerName?: string;
+    callerId?: string;
+    isVideo?: boolean;
+    callId?: string;
+  }>({});
   const [location, navigate] = useLocation();
   const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
 
@@ -170,10 +179,13 @@ function App() {
       socket = getSocket();
       const handleIncomingCall = (data: any) => {
         if (data && typeof data === "object") {
+          const call = data.call || {};
+          const caller = data.caller || {};
           setIncomingCallInfo({
-            callerName: data.callerName || data.senderName,
-            isVideo: data.type === "video",
-            callId: data.callId,
+            callerName: caller.displayName || caller.username || data.callerName || data.senderName,
+            callerId: call.callerId || caller.id || data.callerId,
+            isVideo: (call.type || data.type) === "video",
+            callId: call.id || data.callId,
           });
           setIncomingCall(true);
         }
@@ -201,13 +213,30 @@ function App() {
             isOpen={incomingCall} 
             callerName={incomingCallInfo.callerName}
             isVideo={incomingCallInfo.isVideo}
-            onAccept={() => {
-              setIncomingCall(false);
-              if (incomingCallInfo.callId) {
-                navigate(`/call?id=${incomingCallInfo.callId}&type=${incomingCallInfo.isVideo ? 'video' : 'audio'}`);
+            onAccept={async () => {
+              const { callId, callerId, isVideo } = incomingCallInfo;
+              if (!callId || !callerId) {
+                setIncomingCall(false);
+                toast.error(t("social.callDataIncomplete", "بيانات المكالمة غير مكتملة"));
+                return;
               }
-            }} 
-            onDecline={() => setIncomingCall(false)} 
+              try {
+                await callsApi.answer(callId);
+              } catch {
+                toast.error(t("social.callAcceptFailed", "تعذر قبول المكالمة"));
+                setIncomingCall(false);
+                return;
+              }
+              setIncomingCall(false);
+              navigate(`/call?user=${callerId}&type=${isVideo ? "video" : "voice"}&session=${callId}`);
+            }}
+            onDecline={async () => {
+              const { callId } = incomingCallInfo;
+              if (callId) {
+                try { await callsApi.reject(callId); } catch {}
+              }
+              setIncomingCall(false);
+            }}
           />
           {isAppPage && <AnnouncementPopup />}
           {isAppPage && <PWAInstallBanner />}

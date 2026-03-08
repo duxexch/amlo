@@ -80,6 +80,7 @@ export const chatApi = {
   sendMessage: (conversationId: string, data: {
     content?: string;
     type?: string;
+    clientMessageId?: string;
     mediaUrl?: string;
     giftId?: string;
   }) =>

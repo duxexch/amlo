@@ -895,10 +895,12 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                           <select
                             value={translateLang}
                             onChange={(e) => setTranslateLang(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white/80 mb-2"
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white/90 mb-2"
                           >
                             {LANGUAGES.map((l) => (
-                              <option key={l.code} value={l.code}>{l.flag} {l.nativeLabel}</option>
+                              <option key={l.code} value={l.code} className="bg-white text-slate-900">
+                                {l.flag} {l.nativeLabel}
+                              </option>
                             ))}
                           </select>
 

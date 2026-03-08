@@ -174,6 +174,9 @@ export async function applyDatabaseConstraints(): Promise<void> {
     `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_auto_translate boolean NOT NULL DEFAULT true;`,
     `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_show_original_text boolean NOT NULL DEFAULT true;`,
     `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS chat_translate_lang text NOT NULL DEFAULT 'ar';`,
+    // ── Chat idempotency (safe migration) ──
+    `ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_message_id varchar(100);`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS msg_client_id_unique_idx ON messages (conversation_id, sender_id, client_message_id) WHERE client_message_id IS NOT NULL;`,
     // ── Chat/query performance indexes — safe + idempotent ──
     `CREATE INDEX IF NOT EXISTS conv_active_p1_last_idx ON conversations (participant1_id, last_message_at DESC) WHERE is_active = true;`,
     `CREATE INDEX IF NOT EXISTS conv_active_p2_last_idx ON conversations (participant2_id, last_message_at DESC) WHERE is_active = true;`,

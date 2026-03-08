@@ -87,6 +87,10 @@ function revokeBlobUrlIfNeeded(url?: string | null) {
   }
 }
 
+function createClientMessageId(): string {
+  return `cm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /** Hook: Manage conversations list + settings */
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -472,21 +476,26 @@ export function useActiveChat(
 
   const scheduleAutoRetry = useCallback((params: {
     tempId: string;
+    clientMessageId: string;
     conversationId: string;
     content: string;
     replyToId?: string | null;
     attempt: number;
     t: any;
   }) => {
-    const { tempId, conversationId, content, replyToId, attempt, t } = params;
-    const maxAttempts = 3;
+    const { tempId, clientMessageId, conversationId, content, replyToId, attempt, t } = params;
+    const maxAttempts = 5;
     if (attempt > maxAttempts) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
       toast.error(t("chat.sendFailed", "فشل إرسال الرسالة"));
       return;
     }
 
-    const delayMs = Math.min(8000, 1000 * (2 ** (attempt - 1)));
+    const quality = socketManager.getConnectionInfo().quality;
+    const offlineBase = quality === "offline" ? 4000 : 1000;
+    const weakFactor = quality === "poor" ? 1.75 : quality === "fair" ? 1.35 : 1;
+    const jitter = 0.85 + Math.random() * 0.5;
+    const delayMs = Math.min(30000, Math.round((offlineBase * (2 ** (attempt - 1)) * weakFactor) * jitter));
     setMessages(prev => prev.map(m => m.id === tempId
       ? { ...m, _pending: true, _failed: false, _retryCount: attempt, _nextRetryAt: new Date(Date.now() + delayMs).toISOString() }
       : m
@@ -496,10 +505,17 @@ export function useActiveChat(
     if (existing) clearTimeout(existing);
 
     const timer = setTimeout(async () => {
+      // Keep message queued while fully offline without consuming attempts.
+      if (socketManager.getConnectionInfo().quality === "offline") {
+        scheduleAutoRetry({ tempId, clientMessageId, conversationId, content, replyToId, attempt, t });
+        return;
+      }
+
       try {
         const sentMsg = await chatApi.sendMessage(conversationId, {
           content,
           type: "text",
+          clientMessageId,
           ...(replyToId ? { replyToId } : {}),
         }) as any;
 
@@ -511,7 +527,7 @@ export function useActiveChat(
         retryTimersRef.current.delete(tempId);
       } catch (err: any) {
         if (isTransientSendError(err)) {
-          scheduleAutoRetry({ tempId, conversationId, content, replyToId, attempt: attempt + 1, t });
+          scheduleAutoRetry({ tempId, clientMessageId, conversationId, content, replyToId, attempt: attempt + 1, t });
         } else {
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _pending: false, _failed: true } : m));
           retryTimersRef.current.delete(tempId);
@@ -529,11 +545,16 @@ export function useActiveChat(
 
     const content = newMessage.trim();
     const tempId = `temp-${Date.now()}`;
+    const clientMessageId = createClientMessageId();
+    const replyToId = replyTo?.id || null;
+    const replyToContent = replyTo?.content || null;
+    const replyToSenderName = replyTo ? (replyTo.senderId === "me" ? t("chat.you") : activeConv.otherUser?.displayName || "") : null;
 
     const optimisticMsg: ChatMessage = {
       id: tempId,
       conversationId: activeConv.id,
       senderId: "me",
+      clientMessageId,
       content,
       type: "text",
       createdAt: new Date().toISOString(),
@@ -542,9 +563,9 @@ export function useActiveChat(
       coinsCost: 0,
       isEncrypted: true,
       _pending: true,
-      replyToId: replyTo?.id || null,
-      replyToContent: replyTo?.content || null,
-      replyToSenderName: replyTo ? (replyTo.senderId === "me" ? t("chat.you") : activeConv.otherUser?.displayName || "") : null,
+      replyToId,
+      replyToContent,
+      replyToSenderName,
     };
 
     setMessages(prev => [...prev, optimisticMsg]);
@@ -560,7 +581,8 @@ export function useActiveChat(
       const sentMsg = await chatApi.sendMessage(activeConv.id, {
         content,
         type: "text",
-        ...(replyTo?.id ? { replyToId: replyTo.id } : {}),
+        clientMessageId,
+        ...(replyToId ? { replyToId } : {}),
       }) as any;
 
       setMessages(prev =>
@@ -588,9 +610,10 @@ export function useActiveChat(
         if (isTransientSendError(err)) {
           scheduleAutoRetry({
             tempId,
+            clientMessageId,
             conversationId: activeConv.id,
             content,
-            replyToId: replyTo?.id || null,
+            replyToId,
             attempt: 1,
             t,
           });
@@ -680,9 +703,11 @@ export function useActiveChat(
     if (failedMsg.type === "text" && failedMsg.content) {
       try {
         setSendingMsg(true);
+        const clientMessageId = failedMsg.clientMessageId || createClientMessageId();
         const sentMsg = await chatApi.sendMessage(activeConv.id, {
           content: failedMsg.content,
           type: "text",
+          clientMessageId,
           ...(failedMsg.replyToId ? { replyToId: failedMsg.replyToId } : {}),
         }) as any;
         setMessages(prev =>

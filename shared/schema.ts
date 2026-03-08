@@ -458,6 +458,7 @@ export const messages = pgTable(
     type: text("type").notNull().default("text"), // text | image | voice | gift | system
     mediaUrl: text("media_url"),
     giftId: varchar("gift_id").references(() => gifts.id, { onDelete: "set null" }),
+    clientMessageId: varchar("client_message_id", { length: 100 }),
     replyToId: varchar("reply_to_id"),
     isRead: boolean("is_read").notNull().default(false),
     readAt: timestamp("read_at"),
@@ -469,6 +470,7 @@ export const messages = pgTable(
   (table) => [
     index("msg_conv_idx").on(table.conversationId),
     index("msg_sender_idx").on(table.senderId),
+    index("msg_client_id_idx").on(table.clientMessageId),
     index("msg_created_idx").on(table.createdAt),
     index("msg_conv_created_idx").on(table.conversationId, table.createdAt),
   ],
@@ -585,9 +587,12 @@ export const updateReportSchema = z.object({
 
 // ── Social System Schemas ──
 export const sendMessageSchema = z.object({
-  receiverId: z.string().min(1).max(100),
+  // receiverId is required in some contexts, but conversation message endpoint
+  // resolves participant from :conversationId and does not send this field.
+  receiverId: z.string().min(1).max(100).optional(),
   content: z.string().min(1).max(5000).optional(),
   type: z.enum(["text", "image", "voice", "gift"]).default("text"),
+  clientMessageId: z.string().min(8).max(100).optional(),
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
   replyToId: z.string().max(100).optional(),

@@ -22,6 +22,7 @@ export interface ChatMessage {
   id: string;
   conversationId: string;
   senderId: string;
+  clientMessageId?: string | null;
   content: string | null;
   type: MessageType;
   mediaUrl?: string | null;

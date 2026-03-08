@@ -198,6 +198,29 @@ export function CallScreen() {
     callsApi.pricing().then(setPricing).catch(() => {});
   }, []);
 
+  // Ensure outgoing calls are created on server to trigger incoming-call notification.
+  useEffect(() => {
+    if (!userId || isRandomMatch || callId) return;
+
+    let cancelled = false;
+    callsApi.initiate(userId, callType)
+      .then((call: any) => {
+        if (cancelled) return;
+        if (call?.id) setCallId(call.id);
+        if (call?.status === "missed") {
+          setErrorMsg(t("social.userOffline", "المستخدم غير متصل حالياً"));
+          setStatus("failed");
+        }
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setErrorMsg(err?.message || t("social.callStartFailed", "تعذر بدء المكالمة"));
+        setStatus("failed");
+      });
+
+    return () => { cancelled = true; };
+  }, [userId, isRandomMatch, callId, callType, t]);
+
   // ── Initialize WebRTC call ──
   useEffect(() => {
     if (!userId) return;
@@ -245,6 +268,41 @@ export function CallScreen() {
       webrtcManager.endCall();
     };
   }, [userId, callType]);
+
+  useEffect(() => {
+    if (!callId) return;
+    const socket = getSocket();
+
+    const onCallAnswered = (data: { callId: string }) => {
+      if (data?.callId !== callId) return;
+      if (status === "ringing") setStatus("connecting");
+    };
+
+    const onCallRejected = (data: { callId: string }) => {
+      if (data?.callId !== callId) return;
+      setErrorMsg(t("social.callRejected", "تم رفض المكالمة"));
+      webrtcManager.endCall();
+      setStatus("ended");
+      setTimeout(() => navigate("/chat"), 1500);
+    };
+
+    const onCallEnded = (data: { callId: string }) => {
+      if (data?.callId !== callId) return;
+      webrtcManager.endCall();
+      setStatus("ended");
+      setTimeout(() => navigate("/chat"), 1200);
+    };
+
+    socket.on("call-answered", onCallAnswered);
+    socket.on("call-rejected", onCallRejected);
+    socket.on("call-ended", onCallEnded);
+
+    return () => {
+      socket.off("call-answered", onCallAnswered);
+      socket.off("call-rejected", onCallRejected);
+      socket.off("call-ended", onCallEnded);
+    };
+  }, [callId, navigate, status, t]);
 
   // ── Cleanup on tab close / navigation ──
   useEffect(() => {

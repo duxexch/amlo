@@ -326,10 +326,21 @@ function RequestCard({ request, onAccept, onReject }: { request: any; onAccept: 
 }
 
 // ── Search Result (dropdown) ──
-function SearchResult({ user, onAdd }: { user: any; onAdd: () => void }) {
+function SearchResult({
+  user,
+  onAdd,
+  onAcceptIncoming,
+  onRejectIncoming,
+}: {
+  user: any;
+  onAdd: () => void;
+  onAcceptIncoming: () => void;
+  onRejectIncoming: () => void;
+}) {
   const { t } = useTranslation();
   const [sent, setSent] = useState(user.friendshipStatus === "pending");
   const isFriend = user.friendshipStatus === "accepted";
+  const incomingPending = user.friendshipStatus === "pending" && user.friendshipDirection === "incoming";
   return (
     <div className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors">
       <UserAvatar user={user} size="sm" />
@@ -341,6 +352,23 @@ function SearchResult({ user, onAdd }: { user: any; onAdd: () => void }) {
         <span className="text-emerald-400 text-[10px] font-bold flex items-center gap-1 bg-emerald-500/10 px-2 py-1.5 rounded-lg">
           <UserCheck className="w-3 h-3" /> {t("social.alreadyFriends")}
         </span>
+      ) : incomingPending ? (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onAcceptIncoming}
+            className="w-7 h-7 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white flex items-center justify-center transition-all"
+            title={t("social.accept", "قبول")}
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onRejectIncoming}
+            className="w-7 h-7 rounded-lg bg-red-500/15 hover:bg-red-500 text-red-400 hover:text-white flex items-center justify-center transition-all"
+            title={t("social.reject", "رفض")}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       ) : sent ? (
         <span className="text-amber-400 text-[10px] font-bold flex items-center gap-1 bg-amber-500/10 px-2 py-1.5 rounded-lg">
           <Clock className="w-3 h-3" /> {t("social.requestSent")}
@@ -500,6 +528,11 @@ export function Friends() {
       toast.success(t("social.friendRequestAccepted", "تم قبول طلب الصداقة"));
     };
 
+    const onFriendRejected = () => {
+      if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
+      toast.info(t("social.friendRequestRejected", "تم رفض طلب الصداقة"));
+    };
+
     const onNewMessage = (data: NewMessagePayload) => {
       if (!data?.conversationId || !data?.message) return;
       if (activeConv?.id === data.conversationId) return;
@@ -534,11 +567,13 @@ export function Friends() {
 
     s.on("friend-request", onFriendRequest);
     s.on("friend-accepted", onFriendAccepted);
+    s.on("friend-rejected", onFriendRejected);
     s.on("new-message", onNewMessage);
 
     return () => {
       s.off("friend-request", onFriendRequest);
       s.off("friend-accepted", onFriendAccepted);
+      s.off("friend-rejected", onFriendRejected);
       s.off("new-message", onNewMessage);
     };
   }, [activeConv?.id, notifyMode, setConversations, t]);
@@ -624,6 +659,43 @@ export function Friends() {
 
   const handleCall = (userId: string, type: "voice" | "video") => {
     navigate(`/call?user=${userId}&type=${type}`);
+  };
+
+  const handleAcceptFromSearch = async (user: any) => {
+    if (!user?.friendshipId) return;
+    try {
+      await friendsApi.accept(user.friendshipId);
+      const [updatedFriends, updatedRequests] = await Promise.all([
+        friendsApi.list(),
+        friendsApi.requests(),
+      ]);
+      setFriends(updatedFriends || []);
+      setRequests(updatedRequests || []);
+      setSearchResults((prev) => prev.map((row) => (
+        row.id === user.id
+          ? { ...row, friendshipStatus: "accepted", friendshipDirection: null }
+          : row
+      )));
+      toast.success(t("social.friendRequestAccepted", "تم قبول طلب الصداقة"));
+    } catch {
+      toast.error(t("social.actionFailed", "تعذر تنفيذ العملية"));
+    }
+  };
+
+  const handleRejectFromSearch = async (user: any) => {
+    if (!user?.friendshipId) return;
+    try {
+      await friendsApi.reject(user.friendshipId);
+      setRequests((prev) => prev.filter((r) => r.id !== user.friendshipId));
+      setSearchResults((prev) => prev.map((row) => (
+        row.id === user.id
+          ? { ...row, friendshipStatus: null, friendshipId: null, friendshipDirection: null }
+          : row
+      )));
+      toast.info(t("social.friendRequestRejected", "تم رفض طلب الصداقة"));
+    } catch {
+      toast.error(t("social.actionFailed", "تعذر تنفيذ العملية"));
+    }
   };
 
   const tabs: { key: Tab; label: string; icon: typeof MessageCircle; count?: number }[] = [
@@ -836,7 +908,13 @@ export function Friends() {
                   </div>
                   <div className="p-1.5">
                     {searchResults.map(u => (
-                      <SearchResult key={u.id} user={u} onAdd={() => friendsApi.sendRequest(u.id).catch(() => { })} />
+                      <SearchResult
+                        key={u.id}
+                        user={u}
+                        onAdd={() => friendsApi.sendRequest(u.id).catch(() => { })}
+                        onAcceptIncoming={() => handleAcceptFromSearch(u)}
+                        onRejectIncoming={() => handleRejectFromSearch(u)}
+                      />
                     ))}
                   </div>
                   {searchResults.length === 0 && !searching && (
