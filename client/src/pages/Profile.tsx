@@ -156,6 +156,7 @@ export function Profile() {
   const [dailyMissions, setDailyMissions] = useState<any | null>(null);
   const [loadingMissions, setLoadingMissions] = useState(true);
   const [claimingMission, setClaimingMission] = useState(false);
+  const [claimingMissionId, setClaimingMissionId] = useState<string | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [showAvatarEditor, setShowAvatarEditor] = useState(false);
   const [avatarSourceUrl, setAvatarSourceUrl] = useState<string>("");
@@ -703,6 +704,27 @@ export function Profile() {
       setClaimingMission(false);
     }
   };
+
+  const claimSingleMission = async (missionId: string) => {
+    if (!missionId || claimingMissionId) return;
+    setClaimingMissionId(missionId);
+    try {
+      const result = await gamificationApi.claimMission(missionId);
+      if (result?.user) {
+        setUser((prev) => ({
+          ...prev,
+          xp: Number(result.user.xp ?? prev.xp),
+          level: Number(result.user.level ?? prev.level),
+          coins: Number(result.user.coins ?? prev.coins),
+        }));
+      }
+      await loadDailyMissions();
+    } catch (err: any) {
+      alert(err?.message || t("common.error", "حدث خطأ"));
+    } finally {
+      setClaimingMissionId(null);
+    }
+  };
   const toggleNotification = async (key: keyof typeof notifications) => {
     const newValue = !notifications[key];
     setNotifications({ ...notifications, [key]: newValue });
@@ -1016,10 +1038,26 @@ export function Profile() {
                     <div className="text-left">
                       <p className="text-yellow-400 text-[11px] font-bold">+{mission.rewardXp} XP</p>
                       <p className="text-emerald-300 text-[11px] font-bold">+{mission.rewardCoins} Coins</p>
+                      {(mission.rewardFreeCalls || 0) > 0 && (
+                        <p className="text-cyan-300 text-[11px] font-bold">+{mission.rewardFreeCalls} Free Calls</p>
+                      )}
                     </div>
                   </div>
                   <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full ${mission.done ? "bg-emerald-400" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    {mission.claimed ? (
+                      <span className="text-[11px] font-bold text-emerald-300">{t("profile.claimed", "تم الاستلام")}</span>
+                    ) : (
+                      <button
+                        onClick={() => claimSingleMission(mission.id)}
+                        disabled={!mission.claimable || claimingMissionId === mission.id}
+                        className="px-3 py-1 rounded-lg bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 text-[11px] font-bold disabled:opacity-40"
+                      >
+                        {claimingMissionId === mission.id ? t("common.loading", "جاري التحميل...") : t("profile.claimReward", "استلام المكافأة")}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -1027,7 +1065,7 @@ export function Profile() {
 
             <div className="flex items-center justify-between pt-2">
               <div className="text-xs text-white/50">
-                {t("profile.rewardPreview", "مكافأة اليوم")}: +{dailyMissions?.rewardPreview?.xp || 0} XP / +{dailyMissions?.rewardPreview?.coins || 0} Coins
+                {t("profile.rewardPreview", "مكافأة السلسلة")}: +{dailyMissions?.rewardPreview?.xp || 0} XP / +{dailyMissions?.rewardPreview?.coins || 0} Coins
               </div>
               <button
                 onClick={claimDailyMissions}

@@ -222,6 +222,7 @@ function App() {
 
         const senderName = data?.sender?.displayName || data?.sender?.username || "User";
         const preview = data?.message?.content || t("social.newMessage", "رسالة جديدة");
+        const targetUserId = data?.sender?.id || data?.message?.senderId;
         publishNotification({
           type: "message",
           titleKey: "notify.message.title",
@@ -229,9 +230,9 @@ function App() {
           params: { name: senderName },
           title: t("social.newMessage", "رسالة جديدة"),
           body: preview,
-          url: "/friends",
+          url: targetUserId ? `/friends?user=${encodeURIComponent(String(targetUserId))}` : "/friends",
           persistent: false,
-          meta: { kind: "chat-message" },
+          meta: { kind: "chat-message", userId: targetUserId || null },
         });
       };
 
@@ -290,7 +291,16 @@ function App() {
         <TooltipProvider>
           <ConnectionStatus />
           <Toaster />
-          <SonnerToaster position="top-center" richColors theme="dark" />
+          <SonnerToaster
+            position="top-center"
+            richColors
+            theme="dark"
+            toastOptions={{
+              classNames: {
+                description: "text-[11px] leading-tight",
+              },
+            }}
+          />
           <Router />
           <CallPopup
             isOpen={incomingCall}

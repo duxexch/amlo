@@ -51,7 +51,7 @@ function shouldShowChatPush(mode: ChatNotifyMode): boolean {
   return mode === "all" || mode === "push";
 }
 
-async function showFriendsDesktopNotification(title: string, body: string, mode: ChatNotifyMode) {
+async function showFriendsDesktopNotification(title: string, body: string, mode: ChatNotifyMode, url?: string) {
   if (typeof window === "undefined" || typeof Notification === "undefined") return;
   if (!shouldShowChatPush(mode)) return;
   let permission = Notification.permission;
@@ -71,9 +71,12 @@ async function showFriendsDesktopNotification(title: string, body: string, mode:
       body,
       icon: "/favicon.ico",
       tag: "ablox-social-notify",
+      data: { url: url || "/friends" },
     });
     n.onclick = () => {
       try { window.focus(); } catch { }
+      const targetUrl = typeof (n as any).data?.url === "string" ? (n as any).data.url : url;
+      if (targetUrl) window.location.href = targetUrl;
       n.close();
     };
   } catch { }
@@ -530,6 +533,9 @@ export function Friends() {
         setRequests((prev) => prev.filter((r) => r.id !== targetId));
       }
 
+      // Server payload can be partial in edge cases; always reconcile friends list.
+      void friendsApi.list().then((updated) => setFriends(updated || [])).catch(() => { });
+
       if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
       toast.success(t("social.friendRequestAccepted", "تم قبول طلب الصداقة"));
     };
@@ -546,6 +552,22 @@ export function Friends() {
       if (payload?.friendshipId) {
         setRequests((prev) => prev.filter((r) => r.id !== payload.friendshipId));
       }
+    };
+
+    const onFriendRequestSent = () => {
+      // Keep sent-request badges in sync without full page refresh.
+      void friendsApi.sent().then((list) => {
+        setSearchResults((prev) => prev.map((u) => {
+          const sent = (list || []).find((item: any) => item.receiverId === u.id);
+          if (!sent) return u;
+          return {
+            ...u,
+            friendshipStatus: "pending",
+            friendshipId: sent.id,
+            friendshipDirection: "outgoing",
+          };
+        }));
+      }).catch(() => { });
     };
 
     const onFriendRemoved = (payload: any) => {
@@ -598,10 +620,12 @@ export function Friends() {
         description: data.message.content || t("social.newMessage", "رسالة جديدة"),
       });
       if (document.hidden) {
+        const targetUserId = data.sender?.id || data.message?.senderId;
         void showFriendsDesktopNotification(
           senderName,
           data.message.content || t("social.newMessage", "رسالة جديدة"),
           notifyMode,
+          targetUserId ? `/friends?user=${encodeURIComponent(targetUserId)}` : "/friends",
         );
       }
     };
@@ -610,6 +634,7 @@ export function Friends() {
     s.on("friend-accepted", onFriendAccepted);
     s.on("friend-rejected", onFriendRejected);
     s.on("friend-request-removed", onFriendRequestRemoved);
+    s.on("friend-request-sent", onFriendRequestSent);
     s.on("friend-removed", onFriendRemoved);
     s.on("new-message", onNewMessage);
 
@@ -618,6 +643,7 @@ export function Friends() {
       s.off("friend-accepted", onFriendAccepted);
       s.off("friend-rejected", onFriendRejected);
       s.off("friend-request-removed", onFriendRequestRemoved);
+      s.off("friend-request-sent", onFriendRequestSent);
       s.off("friend-removed", onFriendRemoved);
       s.off("new-message", onNewMessage);
     };

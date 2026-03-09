@@ -40,6 +40,7 @@ import {
 } from "../../shared/schema";
 import { randomUUID, randomBytes, createHmac, createHash } from "crypto";
 import { sendOtp, verifyOtp, sendPasswordResetEmail } from "../services/email";
+import { markDailyLoginMission } from "../services/dailyMissionProgress";
 
 const router = Router();
 const authLog = createLogger("userAuth");
@@ -736,6 +737,7 @@ router.post("/login", authLimiter, async (req: Request, res: Response) => {
 
     // Update last login
     await storage.updateUser(user.id, { lastOnlineAt: new Date(), status: "online" });
+    await markDailyLoginMission(user.id);
     await addSecurityEvent(req, user.id, "login_success", {
       via: "password",
       trustedDevice: trustStatus.trusted,
@@ -2108,6 +2110,7 @@ async function setOAuthSession(req: Request, user: schema.User, db: NonNullable<
   req.session.activeProfileIndex = undefined;
 
   await db.update(schema.users).set({ lastOnlineAt: new Date(), status: "online" }).where(eq(schema.users.id, user.id));
+  await markDailyLoginMission(user.id);
 }
 
 /**

@@ -579,6 +579,7 @@ export const streamsApi = {
 // ── Gamification ──
 export const gamificationApi = {
   daily: () => request<any>("/gamification/daily"),
+  claimMission: (missionId: string) => request<any>(`/gamification/claim/${encodeURIComponent(missionId)}`, { method: "POST" }),
   claim: () => request<any>("/gamification/claim", { method: "POST" }),
   xpMe: () => request<{
     level: number;

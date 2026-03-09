@@ -22,6 +22,13 @@ import { getAllPricing } from "../pricingService";
 import { sendLocalizedPush, type LocalizedPushJob } from "../services/notificationDispatch";
 import { enqueueNotificationJob } from "../services/notificationQueue";
 import {
+  claimDailyMission,
+  getClaimedDailyMissionIds,
+  getDailyMissionDayKey,
+  isDailyLoginMissionDone,
+  unclaimDailyMission,
+} from "../services/dailyMissionProgress";
+import {
   generateLiveKitToken,
   getLiveKitPublicUrl,
   createLiveKitRoom,
@@ -99,6 +106,7 @@ const FREE_CALL_WINDOW_SECONDS = 24 * 60 * 60;
 type FreeCallQuota = {
   applied: boolean;
   remaining: number;
+  freeMinutesPerCall: number;
   counterKey?: string;
 };
 
@@ -107,9 +115,46 @@ function emitToUser(userId: string, event: string, payload: unknown) {
 }
 
 async function reserveFreeCallQuota(userId: string, enabled: boolean): Promise<FreeCallQuota> {
-  if (!enabled) return { applied: false, remaining: 0 };
+  if (!enabled) return { applied: false, remaining: 0, freeMinutesPerCall: 0 };
   const redis = getRedis();
-  if (!redis) return { applied: false, remaining: 0 };
+  if (!redis) return { applied: false, remaining: 0, freeMinutesPerCall: 0 };
+
+  const bonusCallsKey = `calls:free24h:bonus:calls:${userId}`;
+  const bonusMinutesKey = `calls:free24h:bonus:minutes:${userId}`;
+  const bonusScript = `
+    local callsKey = KEYS[1]
+    local minutesKey = KEYS[2]
+    local ttl = tonumber(ARGV[1])
+    local calls = tonumber(redis.call('GET', callsKey) or '0')
+    if calls <= 0 then
+      return {0, 0, 0}
+    end
+    calls = redis.call('DECR', callsKey)
+    if calls < 0 then
+      redis.call('SET', callsKey, '0')
+      calls = 0
+    end
+    local minutes = tonumber(redis.call('GET', minutesKey) or '0')
+    if minutes <= 0 then minutes = 4 end
+    if redis.call('TTL', callsKey) < 0 then redis.call('EXPIRE', callsKey, ttl) end
+    if redis.call('TTL', minutesKey) < 0 then redis.call('EXPIRE', minutesKey, ttl) end
+    return {1, calls, minutes}
+  `;
+
+  try {
+    const bonusRaw = await redis.eval(bonusScript, 2, bonusCallsKey, bonusMinutesKey, String(FREE_CALL_WINDOW_SECONDS));
+    const bonusTuple = Array.isArray(bonusRaw) ? bonusRaw : [0, 0, 0];
+    const bonusApplied = Number(bonusTuple[0] || 0) === 1;
+    if (bonusApplied) {
+      return {
+        applied: true,
+        remaining: Math.max(0, Number(bonusTuple[1] || 0)),
+        freeMinutesPerCall: Math.max(1, Number(bonusTuple[2] || FREE_CALL_MINUTES_PER_CALL)),
+      };
+    }
+  } catch {
+    // Fall through to default free-call pool.
+  }
 
   const counterKey = `calls:free24h:count:${userId}`;
   const script = `
@@ -135,10 +180,11 @@ async function reserveFreeCallQuota(userId: string, enabled: boolean): Promise<F
     return {
       applied,
       remaining: Math.max(0, FREE_CALLS_PER_24H - used),
+      freeMinutesPerCall: applied ? FREE_CALL_MINUTES_PER_CALL : 0,
       counterKey,
     };
   } catch {
-    return { applied: false, remaining: 0 };
+    return { applied: false, remaining: 0, freeMinutesPerCall: 0 };
   }
 }
 
@@ -1531,7 +1577,7 @@ router.post("/calls", async (req, res) => {
     }
 
     if (freeQuota.applied && call?.id) {
-      await markCallFreeMinutes(call.id, FREE_CALL_MINUTES_PER_CALL);
+      await markCallFreeMinutes(call.id, freeQuota.freeMinutesPerCall || FREE_CALL_MINUTES_PER_CALL);
     }
 
     if (receiverOnline) {
@@ -3182,6 +3228,16 @@ async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
   };
 }
 
+async function isDailyMissionsEnabled(db: any): Promise<boolean> {
+  if (!db) return true;
+  const [row] = await db.select({ value: schema.systemSettings.value })
+    .from(schema.systemSettings)
+    .where(eq(schema.systemSettings.key, "daily_missions_enabled"))
+    .limit(1);
+  const raw = String(row?.value || "true").toLowerCase();
+  return !(raw === "false" || raw === "0" || raw === "off" || raw === "no");
+}
+
 // GET /social/feature-flags — lightweight runtime flags for live UX
 router.get("/feature-flags", async (_req: Request, res: Response) => {
   try {
@@ -3204,48 +3260,236 @@ router.get("/feature-flags", async (_req: Request, res: Response) => {
   }
 });
 
-type DailyMissionState = {
-  id: "watch_minutes" | "send_gift" | "follow_user";
+const DAILY_MISSIONS_SETTING_KEY = "daily_missions_config_v2";
+
+type DailyMissionKind =
+  | "login_once"
+  | "watch_minutes"
+  | "send_gift"
+  | "follow_user"
+  | "send_message"
+  | "start_call"
+  | "complete_call_minutes"
+  | "add_friend";
+
+type DailyMissionReward = {
+  xp: number;
+  coins: number;
+  freeCalls?: number;
+  freeMinutesPerCall?: number;
+};
+
+type DailyMissionConfig = {
+  id: string;
   title: string;
+  kind: DailyMissionKind;
+  target: number;
+  enabled: boolean;
+  order: number;
+  reward: DailyMissionReward;
+};
+
+type DailyMissionState = {
+  id: string;
+  title: string;
+  kind: DailyMissionKind;
   progress: number;
   target: number;
   done: boolean;
+  claimed: boolean;
+  claimable: boolean;
   rewardXp: number;
   rewardCoins: number;
+  rewardFreeCalls: number;
+  rewardFreeMinutesPerCall: number;
 };
 
-async function computeDailyMissionState(db: any, userId: string) {
-  const [watchRow] = await db.select({
-    minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${schema.streamViewers.leftAt}, NOW()) - ${schema.streamViewers.joinedAt}))), 0) / 60`,
-  }).from(schema.streamViewers)
-    .where(and(
-      eq(schema.streamViewers.userId, userId),
-      sql`${schema.streamViewers.joinedAt} >= CURRENT_DATE`,
-    ));
-
-  const [giftRow] = await db.select({ count: count() }).from(schema.giftTransactions)
-    .where(and(
-      eq(schema.giftTransactions.senderId, userId),
-      sql`${schema.giftTransactions.createdAt} >= CURRENT_DATE`,
-    ));
-
-  const [followRow] = await db.select({ count: count() }).from(schema.userFollows)
-    .where(and(
-      eq(schema.userFollows.followerId, userId),
-      sql`${schema.userFollows.createdAt} >= CURRENT_DATE`,
-    ));
-
-  const watchMinutes = Math.max(0, Math.round(Number(watchRow?.minutes || 0)));
-  const giftCount = Math.max(0, Number(giftRow?.count || 0));
-  const followCount = Math.max(0, Number(followRow?.count || 0));
-
-  const missions: DailyMissionState[] = [
-    { id: "watch_minutes", title: "شاهد بثًا لمدة 20 دقيقة", progress: watchMinutes, target: 20, done: watchMinutes >= 20, rewardXp: 80, rewardCoins: 20 },
-    { id: "send_gift", title: "أرسل هدية واحدة", progress: giftCount, target: 1, done: giftCount >= 1, rewardXp: 120, rewardCoins: 35 },
-    { id: "follow_user", title: "تابع مستخدمًا جديدًا", progress: followCount, target: 1, done: followCount >= 1, rewardXp: 60, rewardCoins: 15 },
+function getDefaultDailyMissions(): DailyMissionConfig[] {
+  return [
+    { id: "login-task", title: "سجل دخولك اليوم", kind: "login_once", target: 1, enabled: true, order: 1, reward: { xp: 35, coins: 10, freeCalls: 1, freeMinutesPerCall: 5 } },
+    { id: "messages-10", title: "أرسل 10 رسائل", kind: "send_message", target: 10, enabled: true, order: 2, reward: { xp: 50, coins: 20 } },
+    { id: "watch-20", title: "شاهد بث 20 دقيقة", kind: "watch_minutes", target: 20, enabled: true, order: 3, reward: { xp: 80, coins: 20 } },
+    { id: "follow-1", title: "تابع مستخدمًا جديدًا", kind: "follow_user", target: 1, enabled: true, order: 4, reward: { xp: 55, coins: 15 } },
+    { id: "gift-1", title: "أرسل هدية واحدة", kind: "send_gift", target: 1, enabled: true, order: 5, reward: { xp: 100, coins: 30 } },
+    { id: "call-start-1", title: "ابدأ مكالمة واحدة", kind: "start_call", target: 1, enabled: true, order: 6, reward: { xp: 65, coins: 20 } },
+    { id: "call-mins-5", title: "أكمل 5 دقائق مكالمات", kind: "complete_call_minutes", target: 5, enabled: true, order: 7, reward: { xp: 90, coins: 35, freeCalls: 1, freeMinutesPerCall: 4 } },
+    { id: "friends-1", title: "أضف صديقًا جديدًا", kind: "add_friend", target: 1, enabled: true, order: 8, reward: { xp: 70, coins: 25 } },
   ];
+}
 
-  return missions;
+function clampMissionConfig(raw: any, fallback: DailyMissionConfig[]): DailyMissionConfig[] {
+  if (!Array.isArray(raw)) return fallback;
+  const allowedKinds = new Set<DailyMissionKind>([
+    "login_once",
+    "watch_minutes",
+    "send_gift",
+    "follow_user",
+    "send_message",
+    "start_call",
+    "complete_call_minutes",
+    "add_friend",
+  ]);
+
+  const clean = raw
+    .map((m: any, i: number): DailyMissionConfig | null => {
+      const id = String(m?.id || `mission-${i + 1}`).trim();
+      const kind = String(m?.kind || "") as DailyMissionKind;
+      if (!id || !allowedKinds.has(kind)) return null;
+      return {
+        id,
+        title: String(m?.title || id),
+        kind,
+        target: Math.max(1, Number(m?.target || 1)),
+        enabled: m?.enabled !== false,
+        order: Math.max(1, Number(m?.order || i + 1)),
+        reward: {
+          xp: Math.max(0, Number(m?.reward?.xp || 0)),
+          coins: Math.max(0, Number(m?.reward?.coins || 0)),
+          freeCalls: Math.max(0, Number(m?.reward?.freeCalls || 0)),
+          freeMinutesPerCall: Math.max(0, Number(m?.reward?.freeMinutesPerCall || 0)),
+        },
+      };
+    })
+    .filter(Boolean) as DailyMissionConfig[];
+
+  if (!clean.length) return fallback;
+  return clean.sort((a, b) => a.order - b.order);
+}
+
+async function getDailyMissionConfig(): Promise<DailyMissionConfig[]> {
+  const defaults = getDefaultDailyMissions();
+  const setting = await storage.getSetting(DAILY_MISSIONS_SETTING_KEY);
+  if (!setting?.value) return defaults;
+  try {
+    return clampMissionConfig(JSON.parse(setting.value), defaults);
+  } catch {
+    return defaults;
+  }
+}
+
+async function loadDailyMissionMetrics(db: any, userId: string) {
+  const [watchRow, giftRow, followRow, messageRow, callStartRow, callDurationRow, acceptedFriendsRow, loginDone] = await Promise.all([
+    db.select({
+      minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${schema.streamViewers.leftAt}, NOW()) - ${schema.streamViewers.joinedAt}))), 0) / 60`,
+    }).from(schema.streamViewers).where(and(eq(schema.streamViewers.userId, userId), sql`${schema.streamViewers.joinedAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ count: count() }).from(schema.giftTransactions).where(and(eq(schema.giftTransactions.senderId, userId), sql`${schema.giftTransactions.createdAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ count: count() }).from(schema.userFollows).where(and(eq(schema.userFollows.followerId, userId), sql`${schema.userFollows.createdAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ count: count() }).from(schema.messages).where(and(eq(schema.messages.senderId, userId), sql`${schema.messages.createdAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ count: count() }).from(schema.calls).where(and(eq(schema.calls.callerId, userId), sql`${schema.calls.createdAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ minutes: sql<number>`COALESCE(SUM(${schema.calls.durationSeconds}), 0) / 60` }).from(schema.calls).where(and(eq(schema.calls.callerId, userId), eq(schema.calls.status, "ended"), sql`${schema.calls.endedAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    db.select({ count: count() }).from(schema.friendships).where(and(eq(schema.friendships.status, "accepted"), or(eq(schema.friendships.senderId, userId), eq(schema.friendships.receiverId, userId)), sql`${schema.friendships.updatedAt} >= CURRENT_DATE`)).then((rows: any[]) => rows[0]),
+    isDailyLoginMissionDone(userId),
+  ]);
+
+  return {
+    loginOnce: loginDone ? 1 : 0,
+    watchMinutes: Math.max(0, Math.round(Number(watchRow?.minutes || 0))),
+    giftCount: Math.max(0, Number(giftRow?.count || 0)),
+    followCount: Math.max(0, Number(followRow?.count || 0)),
+    messageCount: Math.max(0, Number(messageRow?.count || 0)),
+    callStarts: Math.max(0, Number(callStartRow?.count || 0)),
+    callMinutes: Math.max(0, Math.round(Number(callDurationRow?.minutes || 0))),
+    newFriends: Math.max(0, Number(acceptedFriendsRow?.count || 0)),
+  };
+}
+
+function missionProgressForKind(kind: DailyMissionKind, metrics: Awaited<ReturnType<typeof loadDailyMissionMetrics>>): number {
+  switch (kind) {
+    case "login_once": return metrics.loginOnce;
+    case "watch_minutes": return metrics.watchMinutes;
+    case "send_gift": return metrics.giftCount;
+    case "follow_user": return metrics.followCount;
+    case "send_message": return metrics.messageCount;
+    case "start_call": return metrics.callStarts;
+    case "complete_call_minutes": return metrics.callMinutes;
+    case "add_friend": return metrics.newFriends;
+    default: return 0;
+  }
+}
+
+async function computeDailyMissionState(db: any, userId: string): Promise<DailyMissionState[]> {
+  const [config, claimedIds, metrics] = await Promise.all([
+    getDailyMissionConfig(),
+    getClaimedDailyMissionIds(userId),
+    loadDailyMissionMetrics(db, userId),
+  ]);
+
+  return config
+    .filter((m) => m.enabled)
+    .map((m) => {
+      const progress = missionProgressForKind(m.kind, metrics);
+      const done = progress >= m.target;
+      const claimed = claimedIds.has(m.id);
+      return {
+        id: m.id,
+        title: m.title,
+        kind: m.kind,
+        progress,
+        target: m.target,
+        done,
+        claimed,
+        claimable: done && !claimed,
+        rewardXp: m.reward.xp,
+        rewardCoins: m.reward.coins,
+        rewardFreeCalls: Math.max(0, Number(m.reward.freeCalls || 0)),
+        rewardFreeMinutesPerCall: Math.max(0, Number(m.reward.freeMinutesPerCall || 0)),
+      };
+    });
+}
+
+async function grantDailyMissionCallBonus(userId: string, freeCalls: number, freeMinutesPerCall: number) {
+  if (freeCalls <= 0) return;
+  const redis = getRedis();
+  if (!redis) return;
+  const callsKey = `calls:free24h:bonus:calls:${userId}`;
+  const minutesKey = `calls:free24h:bonus:minutes:${userId}`;
+  const ttl = FREE_CALL_WINDOW_SECONDS;
+
+  await redis.multi()
+    .incrby(callsKey, Math.max(0, Math.floor(freeCalls)))
+    .set(minutesKey, String(Math.max(1, Math.floor(freeMinutesPerCall) || FREE_CALL_MINUTES_PER_CALL)), "EX", ttl)
+    .expire(callsKey, ttl)
+    .exec();
+}
+
+async function grantDailyMissionReward(db: any, userId: string, mission: DailyMissionState) {
+  const [user] = await db.select({
+    id: schema.users.id,
+    level: schema.users.level,
+    xp: schema.users.xp,
+    coins: schema.users.coins,
+  }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+  if (!user) throw new Error("USER_NOT_FOUND");
+
+  const xpGain = Math.max(0, Number(mission.rewardXp || 0));
+  const coinGain = Math.max(0, Number(mission.rewardCoins || 0));
+  const levelState = applyLevelProgression(Number(user.level || 1), Number(user.xp || 0), xpGain);
+
+  const [updatedUser] = await db.update(schema.users)
+    .set({
+      xp: levelState.xp,
+      level: levelState.level,
+      coins: sql`${schema.users.coins} + ${coinGain}`,
+    })
+    .where(eq(schema.users.id, userId))
+    .returning({ id: schema.users.id, level: schema.users.level, xp: schema.users.xp, coins: schema.users.coins });
+
+  if (coinGain > 0) {
+    await db.insert(schema.walletTransactions).values({
+      userId,
+      type: "bonus",
+      amount: coinGain,
+      balanceAfter: Number(updatedUser?.coins || Number(user.coins || 0) + coinGain),
+      currency: "coins",
+      description: `Daily mission reward: ${mission.title}`,
+      status: "completed",
+    });
+  }
+
+  await grantDailyMissionCallBonus(userId, mission.rewardFreeCalls, mission.rewardFreeMinutesPerCall);
+
+  return updatedUser;
 }
 
 function applyLevelProgression(currentLevel: number, currentXp: number, gainedXp: number) {
@@ -3269,8 +3513,8 @@ router.get("/gamification/daily", async (req: Request, res: Response) => {
     const db = getDb();
     if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
 
-    const flags = await getLiveFeatureFlags(db);
-    if (!flags.liveGamificationEnabled) {
+    const [flags, enabled] = await Promise.all([getLiveFeatureFlags(db), isDailyMissionsEnabled(db)]);
+    if (!flags.liveGamificationEnabled || !enabled) {
       return res.json({ success: true, data: { enabled: false, missions: [], canClaim: false, streak: 0 } });
     }
 
@@ -3287,28 +3531,84 @@ router.get("/gamification/daily", async (req: Request, res: Response) => {
       .orderBy(desc(schema.userDailyMissions.missionDate))
       .limit(1);
 
-    const allDone = missions.every((m) => m.done);
-    const baseXp = missions.reduce((sum, m) => sum + m.rewardXp, 0);
-    const baseCoins = missions.reduce((sum, m) => sum + m.rewardCoins, 0);
+    const allClaimed = missions.length > 0 && missions.every((m) => m.claimed);
+    const currentStreak = Number(todayClaim?.streakCount || latestClaim?.streakCount || 0);
+    const nextStreak = todayClaim ? currentStreak : currentStreak + 1;
+    const streakXpBonus = Math.min(150, nextStreak * 10);
+    const streakCoinBonus = Math.min(100, nextStreak * 5);
 
     return res.json({
       success: true,
       data: {
         enabled: true,
-        day: new Date().toISOString().slice(0, 10),
+        day: getDailyMissionDayKey(),
         missions,
-        canClaim: allDone && !todayClaim,
+        canClaim: allClaimed && !todayClaim,
         claimed: !!todayClaim,
-        streak: Number(todayClaim?.streakCount || latestClaim?.streakCount || 0),
+        streak: currentStreak,
         rewardPreview: {
-          xp: baseXp,
-          coins: baseCoins,
+          xp: streakXpBonus,
+          coins: streakCoinBonus,
         },
       },
     });
   } catch (err: any) {
     socialLog.error({ err }, "Daily gamification state error");
     return res.status(500).json({ success: false, message: "خطأ في تحميل المهام اليومية" });
+  }
+});
+
+router.post("/gamification/claim/:missionId", async (req: Request, res: Response) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+
+  try {
+    const db = getDb();
+    if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+
+    const [flags, enabled] = await Promise.all([getLiveFeatureFlags(db), isDailyMissionsEnabled(db)]);
+    if (!flags.liveGamificationEnabled || !enabled) {
+      return res.status(403).json({ success: false, message: "نظام المهام اليومية غير مفعل" });
+    }
+
+    const missionId = String(req.params.missionId || "").trim();
+    if (!missionId) return res.status(400).json({ success: false, message: "معرف المهمة غير صالح" });
+
+    const missions = await computeDailyMissionState(db, userId);
+    const mission = missions.find((m) => m.id === missionId);
+    if (!mission) return res.status(404).json({ success: false, message: "المهمة غير موجودة" });
+    if (mission.claimed) return res.status(409).json({ success: false, message: "تم استلام هذه المهمة مسبقاً" });
+    if (!mission.done) return res.status(400).json({ success: false, message: "لم تكتمل المهمة بعد" });
+
+    const claimed = await claimDailyMission(userId, mission.id);
+    if (!claimed) return res.status(409).json({ success: false, message: "تم استلام هذه المهمة مسبقاً" });
+
+    try {
+      const updatedUser = await grantDailyMissionReward(db, userId, mission);
+      const updatedMissions = await computeDailyMissionState(db, userId);
+      io.to(`user:${userId}`).emit("daily-missions-updated", { missions: updatedMissions, day: getDailyMissionDayKey() });
+
+      return res.json({
+        success: true,
+        data: {
+          missionId: mission.id,
+          reward: {
+            xp: mission.rewardXp,
+            coins: mission.rewardCoins,
+            freeCalls: mission.rewardFreeCalls,
+            freeMinutesPerCall: mission.rewardFreeMinutesPerCall,
+          },
+          user: updatedUser,
+          missions: updatedMissions,
+        },
+      });
+    } catch (err) {
+      await unclaimDailyMission(userId, mission.id);
+      throw err;
+    }
+  } catch (err: any) {
+    socialLog.error({ err }, "Daily mission claim error");
+    return res.status(500).json({ success: false, message: "خطأ في استلام مكافأة المهمة" });
   }
 });
 
@@ -3321,8 +3621,8 @@ router.post("/gamification/claim", async (req: Request, res: Response) => {
     const db = getDb();
     if (!db) return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
 
-    const flags = await getLiveFeatureFlags(db);
-    if (!flags.liveGamificationEnabled) {
+    const [flags, enabled] = await Promise.all([getLiveFeatureFlags(db), isDailyMissionsEnabled(db)]);
+    if (!flags.liveGamificationEnabled || !enabled) {
       return res.status(403).json({ success: false, message: "نظام المهام اليومية غير مفعل" });
     }
 
@@ -3338,12 +3638,9 @@ router.post("/gamification/claim", async (req: Request, res: Response) => {
     }
 
     const missions = await computeDailyMissionState(db, userId);
-    if (!missions.every((m) => m.done)) {
-      return res.status(400).json({ success: false, message: "لم تكتمل المهام اليومية بعد" });
+    if (!missions.length || !missions.every((m) => m.claimed)) {
+      return res.status(400).json({ success: false, message: "يجب استلام جميع المهام اليومية أولاً" });
     }
-
-    const baseXp = missions.reduce((sum, m) => sum + m.rewardXp, 0);
-    const baseCoins = missions.reduce((sum, m) => sum + m.rewardCoins, 0);
 
     const [yesterdayClaim] = await db.select().from(schema.userDailyMissions)
       .where(and(
@@ -3355,8 +3652,8 @@ router.post("/gamification/claim", async (req: Request, res: Response) => {
     const nextStreak = yesterdayClaim ? Number(yesterdayClaim.streakCount || 0) + 1 : 1;
     const streakXpBonus = Math.min(150, nextStreak * 10);
     const streakCoinBonus = Math.min(100, nextStreak * 5);
-    const totalXp = baseXp + streakXpBonus;
-    const totalCoins = baseCoins + streakCoinBonus;
+    const totalXp = streakXpBonus;
+    const totalCoins = streakCoinBonus;
 
     const [user] = await db.select({
       id: schema.users.id,
@@ -3381,22 +3678,26 @@ router.post("/gamification/claim", async (req: Request, res: Response) => {
 
     await db.insert(schema.userDailyMissions).values({
       userId,
-      missionDate: new Date().toISOString().slice(0, 10),
+      missionDate: getDailyMissionDayKey(),
       streakCount: nextStreak,
       xpAwarded: totalXp,
       coinsAwarded: totalCoins,
-      metadata: JSON.stringify({ missions: missions.map((m) => ({ id: m.id, progress: m.progress })) }),
+      metadata: JSON.stringify({ missions: missions.map((m) => ({ id: m.id, progress: m.progress, claimed: m.claimed })) }),
     });
 
-    await db.insert(schema.walletTransactions).values({
-      userId,
-      type: "bonus",
-      amount: totalCoins,
-      balanceAfter: Number(updatedUser?.coins || Number(user.coins || 0) + totalCoins),
-      currency: "coins",
-      description: `Daily missions reward (streak ${nextStreak})`,
-      status: "completed",
-    });
+    if (totalCoins > 0) {
+      await db.insert(schema.walletTransactions).values({
+        userId,
+        type: "bonus",
+        amount: totalCoins,
+        balanceAfter: Number(updatedUser?.coins || Number(user.coins || 0) + totalCoins),
+        currency: "coins",
+        description: `Daily streak reward (${nextStreak})`,
+        status: "completed",
+      });
+    }
+
+    io.to(`user:${userId}`).emit("daily-missions-updated", { missions: await computeDailyMissionState(db, userId), day: getDailyMissionDayKey() });
 
     return res.json({
       success: true,

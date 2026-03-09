@@ -347,10 +347,23 @@ export function publishNotification(input: NotificationInput) {
 
   const toastTitle = entry.title || "Ablox";
   const toastBody = entry.body || "";
+  const handleToastNavigate = () => {
+    if (!entry.url) return;
+    window.location.href = entry.url;
+  };
+  const action = entry.url
+    ? {
+      label: "Open",
+      onClick: handleToastNavigate,
+    }
+    : undefined;
   if (toastBody) {
-    toast.info(toastTitle, { description: toastBody });
+    toast.info(toastTitle, {
+      description: toastBody,
+      action,
+    });
   } else {
-    toast.info(toastTitle);
+    toast.info(toastTitle, { action });
   }
 
   if (document.hidden || entry.persistent) {

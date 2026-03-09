@@ -2003,7 +2003,45 @@ const defaultAdvancedSettings: Record<string, any> = {
     admin: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
     system: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
   },
+  dailyMissions: {
+    enabled: true,
+    missions: [
+      { id: "login-task", title: "سجل دخولك اليوم", kind: "login_once", target: 1, enabled: true, order: 1, reward: { xp: 35, coins: 10, freeCalls: 1, freeMinutesPerCall: 5 } },
+      { id: "messages-10", title: "أرسل 10 رسائل", kind: "send_message", target: 10, enabled: true, order: 2, reward: { xp: 50, coins: 20 } },
+      { id: "watch-20", title: "شاهد بث 20 دقيقة", kind: "watch_minutes", target: 20, enabled: true, order: 3, reward: { xp: 80, coins: 20 } },
+      { id: "follow-1", title: "تابع مستخدمًا جديدًا", kind: "follow_user", target: 1, enabled: true, order: 4, reward: { xp: 55, coins: 15 } },
+      { id: "gift-1", title: "أرسل هدية واحدة", kind: "send_gift", target: 1, enabled: true, order: 5, reward: { xp: 100, coins: 30 } },
+      { id: "call-start-1", title: "ابدأ مكالمة واحدة", kind: "start_call", target: 1, enabled: true, order: 6, reward: { xp: 65, coins: 20 } },
+      { id: "call-mins-5", title: "أكمل 5 دقائق مكالمات", kind: "complete_call_minutes", target: 5, enabled: true, order: 7, reward: { xp: 90, coins: 35, freeCalls: 1, freeMinutesPerCall: 4 } },
+      { id: "friends-1", title: "أضف صديقًا جديدًا", kind: "add_friend", target: 1, enabled: true, order: 8, reward: { xp: 70, coins: 25 } },
+    ],
+  },
 };
+
+const DAILY_MISSIONS_SETTING_KEY = "daily_missions_config_v2";
+const DAILY_MISSIONS_ENABLED_KEY = "daily_missions_enabled";
+
+const dailyMissionRewardSchema = z.object({
+  xp: z.number().min(0),
+  coins: z.number().min(0),
+  freeCalls: z.number().min(0).optional(),
+  freeMinutesPerCall: z.number().min(0).optional(),
+});
+
+const dailyMissionSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().min(1).max(200),
+  kind: z.enum(["login_once", "watch_minutes", "send_gift", "follow_user", "send_message", "start_call", "complete_call_minutes", "add_friend"]),
+  target: z.number().int().min(1).max(100000),
+  enabled: z.boolean().optional(),
+  order: z.number().int().min(1).max(500).optional(),
+  reward: dailyMissionRewardSchema,
+});
+
+const updateDailyMissionsSchema = z.object({
+  enabled: z.boolean().optional(),
+  missions: z.array(dailyMissionSchema).min(1).max(100),
+});
 
 /** Load a settings category from DB, falling back to defaults */
 async function getAdvancedSettingsCategory(category: string): Promise<any> {
@@ -2057,6 +2095,71 @@ router.get("/settings/advanced", requireAdmin, async (_req, res) => {
     return res.json({ success: true, data: safe });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في تحميل الإعدادات المتقدمة" });
+  }
+});
+
+router.get("/settings/daily-missions", requireAdmin, async (_req, res) => {
+  try {
+    const configRow = await storage.getSetting(DAILY_MISSIONS_SETTING_KEY);
+    const enabledRow = await storage.getSetting(DAILY_MISSIONS_ENABLED_KEY);
+    const defaultCfg = defaultAdvancedSettings.dailyMissions;
+
+    let missions = defaultCfg.missions;
+    if (configRow?.value) {
+      try {
+        const parsed = JSON.parse(configRow.value);
+        if (Array.isArray(parsed) && parsed.length > 0) missions = parsed;
+      } catch {
+        missions = defaultCfg.missions;
+      }
+    }
+
+    const enabled = enabledRow?.value
+      ? !["false", "0", "off", "no"].includes(String(enabledRow.value).toLowerCase())
+      : true;
+
+    return res.json({ success: true, data: { enabled, missions } });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في تحميل المهام اليومية" });
+  }
+});
+
+router.put("/settings/daily-missions", requireAdmin, async (req, res) => {
+  try {
+    const parsed = updateDailyMissionsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات المهام اليومية غير صالحة", errors: parsed.error.flatten() });
+    }
+
+    const payload = parsed.data;
+    const missions = payload.missions
+      .map((m, i) => ({
+        ...m,
+        enabled: m.enabled !== false,
+        order: Number(m.order || i + 1),
+        reward: {
+          xp: Number(m.reward.xp || 0),
+          coins: Number(m.reward.coins || 0),
+          freeCalls: Number(m.reward.freeCalls || 0),
+          freeMinutesPerCall: Number(m.reward.freeMinutesPerCall || 0),
+        },
+      }))
+      .sort((a, b) => a.order - b.order);
+
+    await storage.upsertSetting(DAILY_MISSIONS_SETTING_KEY, JSON.stringify(missions), "gamification", "Daily missions configuration");
+    let enabledValue = true;
+    if (payload.enabled !== undefined) {
+      await storage.upsertSetting(DAILY_MISSIONS_ENABLED_KEY, payload.enabled ? "true" : "false", "gamification", "Daily missions enabled");
+      enabledValue = payload.enabled;
+    } else {
+      const existingEnabled = await storage.getSetting(DAILY_MISSIONS_ENABLED_KEY);
+      enabledValue = existingEnabled?.value ? !["false", "0", "off", "no"].includes(String(existingEnabled.value).toLowerCase()) : true;
+    }
+
+    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "daily-missions", `missions=${missions.length}, enabled=${payload.enabled ?? "unchanged"}`);
+    return res.json({ success: true, data: { enabled: enabledValue, missions } });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في حفظ المهام اليومية" });
   }
 });
 

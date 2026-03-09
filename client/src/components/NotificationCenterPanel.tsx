@@ -227,11 +227,22 @@ export function NotificationCenterPanel() {
               <div className="px-4 py-8 text-center text-white/35 text-sm">No notifications yet</div>
             ) : (
               rendered.map((n) => (
-                <div key={n.id} className={`px-3 py-2.5 border-b border-white/5 ${n.isRead ? "opacity-75" : ""}`}>
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => {
+                    markNotificationHistoryRead([n.id]);
+                    if (n.url) {
+                      window.location.href = n.url;
+                      setOpen(false);
+                    }
+                  }}
+                  className={`w-full text-start px-3 py-2.5 border-b border-white/5 hover:bg-white/5 transition-colors ${n.isRead ? "opacity-75" : ""}`}
+                >
                   <p className="text-sm font-bold text-white/85">{n.title}</p>
                   {n.body && <p className="text-xs text-white/55 mt-0.5">{n.body}</p>}
                   <p className="text-[10px] text-white/30 mt-1">{new Date(n.createdAt).toLocaleString(i18n.language)}</p>
-                </div>
+                </button>
               ))
             )}
           </div>

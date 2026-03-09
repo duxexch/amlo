@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next";
 // TYPES
 // ══════════════════════════════════════════════════════════
 
-type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds";
+type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds" | "dailyMissions";
 
 interface TabConfig {
   id: TabId;
@@ -103,7 +103,7 @@ function SaveButton({ saving, saved, onClick, label }: { saving: boolean; saved:
       onClick={onClick}
       disabled={saving}
       className={`flex items-center gap-2 px-5 h-10 text-sm font-bold rounded-xl transition-all ${saved ? "bg-green-500/20 text-green-400 border border-green-500/20" :
-          "bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20"
+        "bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20"
         }`}
     >
       {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
@@ -1132,8 +1132,8 @@ function AnnouncementPopupTab() {
                   <button
                     onClick={() => updateButton(i, "style", "primary")}
                     className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${btn.style === "primary"
-                        ? "bg-primary text-white border border-primary/50"
-                        : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
+                      ? "bg-primary text-white border border-primary/50"
+                      : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
                       }`}
                   >
                     {t("admin.settings.popup.stylePrimary")}
@@ -1141,8 +1141,8 @@ function AnnouncementPopupTab() {
                   <button
                     onClick={() => updateButton(i, "style", "secondary")}
                     className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${btn.style === "secondary"
-                        ? "bg-white/20 text-white border border-white/30"
-                        : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
+                      ? "bg-white/20 text-white border border-white/30"
+                      : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"
                       }`}
                   >
                     {t("admin.settings.popup.styleSecondary")}
@@ -1181,8 +1181,8 @@ function AnnouncementPopupTab() {
                 <div
                   key={i}
                   className={`w-full py-2.5 rounded-xl text-xs font-bold text-center ${btn.style === "primary"
-                      ? "bg-primary text-white"
-                      : "bg-white/5 text-white/60 border border-white/10"
+                    ? "bg-primary text-white"
+                    : "bg-white/5 text-white/60 border border-white/10"
                     }`}
                 >
                   {btn.label || `Button ${i + 1}`}
@@ -1980,6 +1980,59 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
   );
 }
 
+function DailyMissionsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+  const [enabled, setEnabled] = useState(true);
+  const [text, setText] = useState("[]");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setEnabled(data?.enabled !== false);
+    setText(JSON.stringify(Array.isArray(data?.missions) ? data.missions : [], null, 2));
+  }, [data]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const missions = JSON.parse(text);
+      await onSave({ enabled, missions });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch {
+      alert("صيغة JSON غير صحيحة");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <SectionCard title="المهام اليومية" icon={Check}>
+        <ToggleField
+          label="تفعيل المهام اليومية"
+          description="يمكنك من هنا تشغيل/إيقاف النظام بالكامل."
+          checked={enabled}
+          onChange={setEnabled}
+        />
+        <InputField
+          label="قائمة المهام (JSON)"
+          value={text}
+          onChange={setText}
+          multiline
+          rows={18}
+          mono
+        />
+        <p className="text-xs text-white/40">
+          كل مهمة: id, title, kind, target, enabled, order, reward: xp/coins/freeCalls/freeMinutesPerCall.
+        </p>
+      </SectionCard>
+      <div className="flex justify-end">
+        <SaveButton saving={saving} saved={saved} onClick={handleSave} label="حفظ المهام اليومية" />
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════
 // MAIN SETTINGS PAGE
 // ══════════════════════════════════════════════════════════
@@ -1999,6 +2052,7 @@ const TABS: TabConfig[] = [
   { id: "worldPricing", icon: Globe, labelKey: "admin.settings.tabs.worldPricing", fallbackLabel: "World Pricing" },
   { id: "appDownload", icon: Download, labelKey: "admin.settings.tabs.appDownload", fallbackLabel: "App Download" },
   { id: "notificationSounds", icon: Phone, labelKey: "admin.settings.tabs.notificationSounds", fallbackLabel: "النغمات" },
+  { id: "dailyMissions", icon: Check, labelKey: "admin.settings.tabs.dailyMissions", fallbackLabel: "المهام اليومية" },
 ];
 
 export function SettingsPage() {
@@ -2010,8 +2064,13 @@ export function SettingsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await adminSettings.getAdvanced();
-      if (res.success) setData(res.data);
+      const [res, dailyRes] = await Promise.all([
+        adminSettings.getAdvanced(),
+        adminSettings.getDailyMissions(),
+      ]);
+      if (res.success) {
+        setData({ ...res.data, dailyMissions: dailyRes.success ? dailyRes.data : null });
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -2027,6 +2086,7 @@ export function SettingsPage() {
   const handleSavePolicies = async (docKey: string, d: any) => { const res = await adminSettings.updatePolicies(docKey, d); if (res.success) setData((prev: any) => ({ ...prev, policies: res.data })); };
   const handleSaveAppDownload = async (d: any) => { const res = await adminSettings.updateAppDownload(d); if (res.success) setData((prev: any) => ({ ...prev, appDownload: res.data })); };
   const handleSaveNotificationSounds = async (d: any) => { const res = await adminSettings.updateNotificationSounds(d); if (res.success) setData((prev: any) => ({ ...prev, notificationSounds: res.data })); };
+  const handleSaveDailyMissions = async (d: any) => { const res = await adminSettings.updateDailyMissions(d); if (res.success) setData((prev: any) => ({ ...prev, dailyMissions: res.data })); };
 
   return (
     <div className="space-y-6">
@@ -2053,8 +2113,8 @@ export function SettingsPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 h-10 text-sm font-bold rounded-xl whitespace-nowrap transition-all shrink-0 ${isActive
-                  ? "bg-primary/20 text-primary border border-primary/20"
-                  : "bg-white/5 text-white/40 border border-white/5 hover:bg-white/10 hover:text-white/60"
+                ? "bg-primary/20 text-primary border border-primary/20"
+                : "bg-white/5 text-white/40 border border-white/5 hover:bg-white/10 hover:text-white/60"
                 }`}
             >
               <tab.icon className="w-4 h-4" />
@@ -2094,6 +2154,7 @@ export function SettingsPage() {
             {activeTab === "worldPricing" && <WorldPricingTab />}
             {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} />}
             {activeTab === "notificationSounds" && <NotificationSoundsTab data={data?.notificationSounds} onSave={handleSaveNotificationSounds} />}
+            {activeTab === "dailyMissions" && <DailyMissionsTab data={data?.dailyMissions} onSave={handleSaveDailyMissions} />}
           </motion.div>
         </AnimatePresence>
       )}

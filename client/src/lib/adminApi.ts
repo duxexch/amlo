@@ -445,6 +445,11 @@ export const adminSettings = {
   updateNotificationSounds: (data: Record<string, any>) =>
     request("/settings/notification-sounds", { method: "PUT", body: JSON.stringify(data) }),
 
+  getDailyMissions: () => request<{ enabled: boolean; missions: any[] }>("/settings/daily-missions"),
+
+  updateDailyMissions: (data: { enabled?: boolean; missions: any[] }) =>
+    request<{ enabled: boolean; missions: any[] }>("/settings/daily-missions", { method: "PUT", body: JSON.stringify(data) }),
+
   uploadNotificationTone: (file: File) => {
     const formData = new FormData();
     formData.append("file", file, file.name);
