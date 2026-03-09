@@ -498,6 +498,35 @@ const strictAuthLimiter = rateLimit({
 // ════════════════════════════════════════════════════════════
 
 /**
+ * POST /auth/check-email — Check whether an email is already registered
+ */
+router.post("/check-email", authLimiter, async (req: Request, res: Response) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return respondAuthError(res, "/auth/check-email", {
+        status: 400,
+        message: "يرجى إدخال بريد إلكتروني صالح",
+        code: "AUTH_VALIDATION_ERROR",
+        fieldErrors: { email: "يرجى إدخال بريد إلكتروني صالح" },
+      });
+    }
+
+    const user = await storage.getUserByEmail(email);
+    return res.json({
+      success: true,
+      data: {
+        exists: Boolean(user),
+      },
+    });
+  } catch (err: any) {
+    authLog.error({ err }, "Check email error");
+    return res.status(500).json({ success: false, message: "حدث خطأ أثناء التحقق من البريد الإلكتروني" });
+  }
+});
+
+/**
  * POST /auth/register — Create a new user account
  */
 router.post("/register", authLimiter, async (req: Request, res: Response) => {

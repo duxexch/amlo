@@ -75,6 +75,19 @@ export function UserAuth() {
   const [password, setPassword] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
 
+  const passwordRules = [
+    {
+      key: "min",
+      label: t("auth.passwordRuleMin", "6 أحرف على الأقل"),
+      valid: password.length >= 6,
+    },
+    {
+      key: "max",
+      label: t("auth.passwordRuleMax", "لا تتجاوز 200 حرف"),
+      valid: password.length <= 200,
+    },
+  ];
+
   useEffect(() => {
     if (otpTimer > 0) {
       const timer = setTimeout(() => setOtpTimer(otpTimer - 1), 1000);
@@ -154,6 +167,21 @@ export function UserAuth() {
     setAuthLoading(true);
     try {
       if (isLogin) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const isEmailLogin = normalizedEmail.includes("@");
+        if (isEmailLogin) {
+          const emailStatus = await authApi.checkEmailExists(normalizedEmail);
+          if (!emailStatus.data.exists) {
+            setIsLogin(false);
+            setAuthSuccess(t("auth.redirectedToRegister", "لا يوجد حساب مرتبط بهذا البريد. أكمل البيانات لإنشاء حساب جديد."));
+            setAuthError(null);
+            setAuthErrorHint(null);
+            setAuthFieldErrors({});
+            setAuthLoading(false);
+            return;
+          }
+        }
+
         // Login
         const result = await authApi.login({ login: email, password });
         setAuthCooldownSeconds(0);
@@ -726,6 +754,16 @@ export function UserAuth() {
                           {showPassword ? <EyeOff className="w-5 h-5 text-white/30" /> : <Eye className="w-5 h-5 text-white/30" />}
                         </button>
                       </div>
+                      {!isLogin && password.length > 0 && (
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 space-y-1.5">
+                          {passwordRules.map((rule) => (
+                            <div key={rule.key} className={`flex items-center gap-2 text-xs ${rule.valid ? "text-emerald-300" : "text-white/45"}`}>
+                              {rule.valid ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0" />}
+                              <span>{rule.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {authFieldErrors.password && <p className="text-xs text-destructive px-1">{authFieldErrors.password}</p>}
                     </motion.div>
                   ) : (
@@ -801,6 +839,15 @@ export function UserAuth() {
                         {String(t("auth.retryAfter" as any, { seconds: authCooldownSeconds } as any))}
                       </p>
                     )}
+                  </motion.div>
+                )}
+
+                {authSuccess && (
+                  <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <p className="text-xs text-emerald-300 font-medium">{authSuccess}</p>
+                    </div>
                   </motion.div>
                 )}
 

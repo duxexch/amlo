@@ -61,6 +61,12 @@ async function request<T = unknown>(path: string, init?: RequestInit): Promise<T
 
 // ── Auth ──
 export const authApi = {
+  checkEmailExists: (email: string) =>
+    request<{ success: boolean; data: { exists: boolean } }>("/check-email", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
   register: (data: { username: string; email: string; password: string; displayName?: string; referralCode?: string }) =>
     request<{ success: boolean; data: any }>("/register", { method: "POST", body: JSON.stringify(data) }),
 
