@@ -259,7 +259,7 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
                 initial={{ opacity: 0, scale: 0.9, y: -4 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                className="absolute top-full right-0 rtl:right-auto rtl:left-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[140px]"
+                className="absolute top-full right-0 rtl:right-auto rtl:left-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(15rem,calc(100vw-1rem))] max-h-[50vh] overflow-y-auto"
               >
                 <button
                   onClick={() => handleSetVisibility(1)}
@@ -514,18 +514,46 @@ export function Friends() {
       );
     };
 
-    const onFriendAccepted = async () => {
-      try {
-        const updated = await friendsApi.list();
-        setFriends(updated || []);
-      } catch { }
+    const onFriendAccepted = (payload: any) => {
+      const friendship = payload?.friendship;
+      const friend = payload?.friend;
+
+      if (friend?.id) {
+        setFriends((prev) => {
+          if (prev.some((f) => f.id === friend.id)) return prev;
+          return [{ ...friend, isOnline: Boolean(friend.isOnline), friendshipId: friendship?.id || payload?.friendshipId }, ...prev];
+        });
+      }
+
+      if (friendship?.id || payload?.friendshipId) {
+        const targetId = friendship?.id || payload?.friendshipId;
+        setRequests((prev) => prev.filter((r) => r.id !== targetId));
+      }
+
       if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
       toast.success(t("social.friendRequestAccepted", "تم قبول طلب الصداقة"));
     };
 
-    const onFriendRejected = () => {
+    const onFriendRejected = (payload: any) => {
+      if (payload?.friendshipId) {
+        setRequests((prev) => prev.filter((r) => r.id !== payload.friendshipId));
+      }
       if (shouldPlayChatSound(notifyMode)) playFriendsNotificationSound();
       toast.info(t("social.friendRequestRejected", "تم رفض طلب الصداقة"));
+    };
+
+    const onFriendRequestRemoved = (payload: any) => {
+      if (payload?.friendshipId) {
+        setRequests((prev) => prev.filter((r) => r.id !== payload.friendshipId));
+      }
+    };
+
+    const onFriendRemoved = (payload: any) => {
+      const otherId = payload?.otherId;
+      const friendshipId = payload?.friendshipId;
+      setFriends((prev) => prev.filter((f) => (
+        (otherId ? f.id !== otherId : true) && (friendshipId ? f.friendshipId !== friendshipId : true)
+      )));
     };
 
     const onNewMessage = (data: NewMessagePayload) => {
@@ -534,7 +562,25 @@ export function Friends() {
 
       setConversations((prev) => {
         const idx = prev.findIndex((c) => c.id === data.conversationId);
-        if (idx === -1) return prev;
+        if (idx === -1) {
+          const sender = data.sender || {};
+          const otherUser = {
+            id: sender.id || data.message.senderId,
+            username: sender.username || "user",
+            displayName: sender.displayName || sender.username || "User",
+            avatar: sender.avatar || null,
+            level: sender.level,
+            isVerified: sender.isVerified,
+            isOnline: true,
+          };
+          return [{
+            id: data.conversationId,
+            otherUser,
+            unreadCount: 1,
+            lastMessage: data.message,
+            lastMessageAt: data.message.createdAt,
+          } as Conversation, ...prev];
+        }
         const next = [...prev];
         const current = next[idx];
         next[idx] = {
@@ -563,12 +609,16 @@ export function Friends() {
     s.on("friend-request", onFriendRequest);
     s.on("friend-accepted", onFriendAccepted);
     s.on("friend-rejected", onFriendRejected);
+    s.on("friend-request-removed", onFriendRequestRemoved);
+    s.on("friend-removed", onFriendRemoved);
     s.on("new-message", onNewMessage);
 
     return () => {
       s.off("friend-request", onFriendRequest);
       s.off("friend-accepted", onFriendAccepted);
       s.off("friend-rejected", onFriendRejected);
+      s.off("friend-request-removed", onFriendRequestRemoved);
+      s.off("friend-removed", onFriendRemoved);
       s.off("new-message", onNewMessage);
     };
   }, [activeConv?.id, notifyMode, setConversations, t]);
@@ -703,7 +753,7 @@ export function Friends() {
   // RENDER
   // ═══════════════════════════════════
   return (
-    <div className="max-w-2xl mx-auto h-[calc(100dvh-5rem)] flex flex-col">
+    <div className="w-full max-w-2xl mx-auto px-2 sm:px-3 h-[calc(100dvh-5rem)] flex flex-col">
       {/* ═══ HUB (always visible) ═══ */}
       <div className="flex flex-col h-full">
         {/* Header */}
@@ -737,7 +787,7 @@ export function Friends() {
                       initial={{ opacity: 0, y: -6, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                      className="absolute top-10 right-0 rtl:right-auto rtl:left-0 w-44 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl p-1 z-50"
+                      className="absolute top-10 right-0 rtl:right-auto rtl:left-0 w-[min(11rem,calc(100vw-1rem))] bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl p-1 z-50 max-h-[55vh] overflow-y-auto"
                     >
                       {[{ key: "all", label: t("social.notifyAll", "الكل") }, { key: "sound", label: t("social.notifySound", "صوت فقط") }, { key: "push", label: t("social.notifyPush", "إشعار فقط") }, { key: "off", label: t("social.notifyOff", "إيقاف") }].map((opt) => (
                         <button
@@ -871,7 +921,7 @@ export function Friends() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.98 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute top-full left-0 right-0 mt-1.5 glass rounded-2xl border border-white/10 shadow-2xl shadow-black/40 max-h-[min(350px,50vh)] overflow-y-auto z-50"
+                  className="absolute top-full left-0 right-0 mt-1.5 glass rounded-2xl border border-white/10 shadow-2xl shadow-black/40 max-h-[min(350px,50vh)] overflow-y-auto z-50 max-w-[calc(100vw-1rem)]"
                 >
                   <div className="p-2.5 border-b border-white/5 flex items-center gap-2">
                     <Globe className="w-3.5 h-3.5 text-primary" />

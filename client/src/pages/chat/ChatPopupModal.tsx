@@ -243,17 +243,17 @@ const MessageBubble = memo(function MessageBubble({
       <div className={`w-7 h-7 shrink-0 ${showAvatar ? "" : "invisible"}`}>
         {showAvatar && !isMe && <UserAvatar user={otherUser} size="xs" />}
       </div>
-      <div className="relative max-w-[75%]">
+      <div className="relative max-w-[88%] sm:max-w-[82%]">
         {/* Reply reference */}
         {msg.replyToContent && (
-          <div className={`mb-1 px-3 py-1.5 rounded-t-xl border-s-2 border-primary/50 bg-white/5 ${isMe ? "text-end" : "text-start"}`}>
+          <div className={`mb-1 px-2.5 py-1 rounded-t-xl border-s-2 border-primary/50 bg-white/5 ${isMe ? "text-end" : "text-start"}`}>
             <p className="text-[10px] text-primary/70 font-medium">{msg.replyToSenderName || t("chat.reply", "رد")}</p>
             <p className="text-[11px] text-white/40 truncate">{msg.replyToContent}</p>
           </div>
         )}
 
         <div
-          className={`rounded-2xl px-4 py-2.5 cursor-pointer ${isMe ? "bg-primary text-white rounded-bl-md" : "bg-white/8 text-white rounded-br-md"
+          className={`rounded-2xl px-3.5 py-2 cursor-pointer ${isMe ? "bg-primary text-white rounded-bl-md" : "bg-white/8 text-white rounded-br-md"
             }`}
           onContextMenu={e => { e.preventDefault(); setShowMenu(true); }}
         >
@@ -270,14 +270,14 @@ const MessageBubble = memo(function MessageBubble({
             />
           )}
           {msg.content && (showOriginalText || !hasTranslated) && (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap" dir="auto">{msg.content}</p>
+            <p className="text-sm leading-snug whitespace-pre-wrap" dir="auto">{msg.content}</p>
           )}
           {hasTranslated && (
             <div className="mt-1.5 pt-1.5 border-t border-white/10">
               <p className="text-[10px] opacity-60 mb-1" dir="ltr">
                 {`${(detectedLang || "auto").toUpperCase()} -> ${targetLang.toUpperCase()}`}
               </p>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-90" dir="auto">{translationText}</p>
+              <p className="text-sm leading-snug whitespace-pre-wrap opacity-90" dir="auto">{translationText}</p>
             </div>
           )}
           {!hasTranslated && translationLoading && msg.content && (
@@ -373,7 +373,7 @@ const MessageBubble = memo(function MessageBubble({
               initial={{ opacity: 0, scale: 0.9, y: -5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="absolute top-full left-0 rtl:left-auto rtl:right-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[160px]"
+              className="absolute top-full left-0 rtl:left-auto rtl:right-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
             >
               <button onClick={() => { onReply(msg); setShowMenu(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/5 transition-colors">
@@ -414,7 +414,7 @@ const MessageBubble = memo(function MessageBubble({
               initial={{ opacity: 0, scale: 0.8, y: 5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              className="absolute bottom-full left-0 rtl:left-auto rtl:right-0 mb-1 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl p-2 flex flex-wrap gap-1 max-w-[200px] z-50"
+              className="absolute bottom-full left-0 rtl:left-auto rtl:right-0 mb-1 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl p-2 flex flex-wrap gap-1 w-[min(14rem,calc(100vw-1rem))] z-50"
             >
               {["👍", "❤️", "😂", "😢", "😡", "🔥", "🎉", "👏"].map(emoji => (
                 <button key={emoji} onClick={() => handleReaction(emoji)}
@@ -885,7 +885,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 md:p-6"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 sm:p-3 md:p-6"
         onClick={onClose}
       >
         <motion.div
@@ -894,7 +894,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           exit={{ opacity: 0, scale: 0.92, y: 30 }}
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
           onClick={e => e.stopPropagation()}
-          className="w-full max-w-lg h-[85vh] max-h-[700px] flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)] overflow-hidden"
+          className="w-full max-w-lg h-[90vh] sm:h-[85vh] max-h-[700px] flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)] overflow-hidden"
         >
           {/* ── Header ── */}
           <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3 bg-white/[0.02]">
@@ -936,7 +936,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                           initial={{ opacity: 0, scale: 0.9, y: -4 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50 w-64 p-2"
+                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[60vh] overflow-y-auto p-2"
                         >
                           <div className="flex items-center justify-between mb-2 px-1">
                             <span className="text-[11px] text-white/70 font-semibold">{t("chat.autoTranslate", "الترجمة التلقائية")}</span>
@@ -1001,7 +1001,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                           initial={{ opacity: 0, scale: 0.9, y: -4 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[150px]"
+                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(10rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
                         >
                           {[
                             { key: "all", label: t("social.notifyAll", "الكل") },
@@ -1054,7 +1054,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                     <AnimatePresence>
                       {chat.showBlockMenu && (
                         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[170px]">
+                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(11rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto">
                           <button onClick={chat.handleToggleBlock}
                             className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm ${chat.blockStatus?.blockedByMe ? "text-emerald-400 hover:bg-emerald-500/10" : "text-red-400 hover:bg-red-500/10"
                               } transition-colors`}>
@@ -1110,7 +1110,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           </AnimatePresence>
 
           {/* ── Messages Area (with infinite scroll) ── */}
-          <div ref={chat.messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 scrollbar-thin relative" onScroll={handleMessagesScroll}>
+          <div ref={chat.messagesContainerRef} className="flex-1 overflow-y-auto px-2.5 sm:px-3.5 py-3 space-y-1.5 scrollbar-thin relative" onScroll={handleMessagesScroll}>
             {/* Load older indicator */}
             {chat.loadingMore && (
               <div className="flex justify-center py-2">

@@ -62,9 +62,11 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function CoinCounter({ rate, duration }: { rate: number; duration: number }) {
+function CoinCounter({ rate, duration, freeMinutesCap = 0 }: { rate: number; duration: number; freeMinutesCap?: number }) {
   const { t } = useTranslation();
-  const totalCoins = Math.ceil((duration / 60) * rate);
+  const totalMinutes = Math.ceil(duration / 60);
+  const billableMinutes = Math.max(0, totalMinutes - Math.max(0, freeMinutesCap));
+  const totalCoins = billableMinutes * rate;
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -74,6 +76,9 @@ function CoinCounter({ rate, duration }: { rate: number; duration: number }) {
       <Coins className="w-4 h-4 text-amber-400" />
       <span className="text-amber-400 text-sm font-bold">{totalCoins}</span>
       <span className="text-amber-400/50 text-[10px] font-medium">({rate}/ {t("common.perMinute", "دقيقة")})</span>
+      {freeMinutesCap > 0 && (
+        <span className="text-emerald-300/70 text-[10px] font-semibold">-{freeMinutesCap}m free</span>
+      )}
     </motion.div>
   );
 }
@@ -127,6 +132,9 @@ export function CallScreen() {
   const [pricing, setPricing] = useState<any>(null);
   const [callStats, setCallStats] = useState<CallStats | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [chargedCoins, setChargedCoins] = useState<number | null>(null);
+  const [freeMinutesCap, setFreeMinutesCap] = useState(0);
+  const [freeCallApplied, setFreeCallApplied] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState(conn.quality);
   const [otherUser, setOtherUser] = useState<{
     id: string; username: string; displayName: string;
@@ -195,7 +203,7 @@ export function CallScreen() {
     : (pricing?.voice_call_rate || 5);
 
   useEffect(() => {
-    callsApi.pricing().then(setPricing).catch(() => {});
+    callsApi.pricing().then(setPricing).catch(() => { });
   }, []);
 
   // Ensure outgoing calls are created on server to trigger incoming-call notification.
@@ -207,6 +215,8 @@ export function CallScreen() {
       .then((call: any) => {
         if (cancelled) return;
         if (call?.id) setCallId(call.id);
+        setFreeCallApplied(Boolean(call?.freeCallApplied));
+        setFreeMinutesCap(Number(call?.freeMinutesCap || 0));
         if (call?.status === "missed") {
           setErrorMsg(t("social.userOffline", "المستخدم غير متصل حالياً"));
           setStatus("failed");
@@ -286,8 +296,9 @@ export function CallScreen() {
       setTimeout(() => navigate("/chat"), 1500);
     };
 
-    const onCallEnded = (data: { callId: string }) => {
+    const onCallEnded = (data: { callId: string; coinsCharged?: number }) => {
       if (data?.callId !== callId) return;
+      if (typeof data?.coinsCharged === "number") setChargedCoins(data.coinsCharged);
       webrtcManager.endCall();
       setStatus("ended");
       setTimeout(() => navigate("/chat"), 1200);
@@ -324,7 +335,11 @@ export function CallScreen() {
       socket.emit("random-match-end");
     }
     if (callId) {
-      try { await callsApi.end(callId); } catch {}
+      try {
+        const ended: any = await callsApi.end(callId);
+        const serverCoins = Number(ended?.coinsCharged);
+        if (Number.isFinite(serverCoins)) setChargedCoins(serverCoins);
+      } catch { }
     }
   };
 
@@ -437,7 +452,7 @@ export function CallScreen() {
                   <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
                   <span className="text-2xl font-mono font-bold">{formatDuration(duration)}</span>
                 </div>
-                <CoinCounter rate={coinRate} duration={duration} />
+                <CoinCounter rate={coinRate} duration={duration} freeMinutesCap={freeCallApplied ? freeMinutesCap : 0} />
               </div>
             )}
             {(status === "ended" || status === "failed") && (
@@ -446,9 +461,12 @@ export function CallScreen() {
                 <p className="text-white/60 text-lg font-bold mt-1">{formatDuration(duration)}</p>
                 <div className="flex items-center justify-center gap-1 text-amber-400 text-sm mt-2">
                   <Coins className="w-4 h-4" />
-                  <span className="font-bold">{Math.ceil((duration / 60) * coinRate)}</span>
+                  <span className="font-bold">{chargedCoins ?? (Math.max(0, Math.ceil(duration / 60) - (freeCallApplied ? freeMinutesCap : 0)) * coinRate)}</span>
                   <span className="text-amber-400/50">{t("social.coinsCharged")}</span>
                 </div>
+                {freeCallApplied && (
+                  <p className="text-emerald-300/60 text-[11px] mt-1">{t("social.freeCallApplied", "تم تطبيق المكالمة المجانية")}</p>
+                )}
               </div>
             )}
           </motion.div>
@@ -461,9 +479,8 @@ export function CallScreen() {
           <div className="flex items-center justify-center gap-5">
             <button
               onClick={toggleMute}
-              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${
-                isMuted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
-              }`}
+              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${isMuted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
+                }`}
             >
               {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
             </button>
@@ -471,9 +488,8 @@ export function CallScreen() {
             {callType === "video" && (
               <button
                 onClick={toggleVideo}
-                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${
-                  !isVideoOn ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
-                }`}
+                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${!isVideoOn ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
+                  }`}
               >
                 {isVideoOn ? <Video className="w-6 h-6" /> : <VideoOff className="w-6 h-6" />}
               </button>
@@ -481,9 +497,8 @@ export function CallScreen() {
 
             <button
               onClick={toggleSpeaker}
-              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${
-                isSpeaker ? "bg-primary/20 text-primary border border-primary/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
-              }`}
+              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${isSpeaker ? "bg-primary/20 text-primary border border-primary/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
+                }`}
             >
               {isSpeaker ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
             </button>

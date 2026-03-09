@@ -297,10 +297,24 @@ export function useActiveChat(
         });
 
         if (!found) {
-          // Conversation may be newly created by the other side; resync list.
-          void chatApi.conversations().then((convs) => {
-            setConversations(Array.isArray(convs) ? (convs as Conversation[]) : []);
-          }).catch(() => { });
+          const sender = data.sender || {};
+          const previewConv: Conversation = {
+            id: data.conversationId,
+            otherUser: {
+              id: sender.id || data.message.senderId,
+              username: sender.username || "user",
+              displayName: sender.displayName || sender.username || "User",
+              avatar: sender.avatar || null,
+              level: sender.level,
+              isVerified: sender.isVerified,
+              status: sender.status,
+              isOnline: true,
+            },
+            unreadCount: activeConvRef.current?.id === data.conversationId ? 0 : 1,
+            lastMessage: data.message,
+            lastMessageAt: data.message.createdAt,
+          };
+          return [previewConv, ...next];
         }
 
         return next;

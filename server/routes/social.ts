@@ -92,6 +92,99 @@ function queueLocalizedPush(job: LocalizedPushJob) {
   });
 }
 
+const FREE_CALLS_PER_24H = 2;
+const FREE_CALL_MINUTES_PER_CALL = 4;
+const FREE_CALL_WINDOW_SECONDS = 24 * 60 * 60;
+
+type FreeCallQuota = {
+  applied: boolean;
+  remaining: number;
+  counterKey?: string;
+};
+
+function emitToUser(userId: string, event: string, payload: unknown) {
+  io.to(`user:${userId}`).emit(event, payload);
+}
+
+async function reserveFreeCallQuota(userId: string, enabled: boolean): Promise<FreeCallQuota> {
+  if (!enabled) return { applied: false, remaining: 0 };
+  const redis = getRedis();
+  if (!redis) return { applied: false, remaining: 0 };
+
+  const counterKey = `calls:free24h:count:${userId}`;
+  const script = `
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local ttl = tonumber(ARGV[2])
+    local current = tonumber(redis.call('GET', key) or '0')
+    if current >= limit then
+      return {0, current}
+    end
+    current = redis.call('INCR', key)
+    if current == 1 then
+      redis.call('EXPIRE', key, ttl)
+    end
+    return {1, current}
+  `;
+
+  try {
+    const raw = await redis.eval(script, 1, counterKey, String(FREE_CALLS_PER_24H), String(FREE_CALL_WINDOW_SECONDS));
+    const tuple = Array.isArray(raw) ? raw : [0, 0];
+    const applied = Number(tuple[0] || 0) === 1;
+    const used = Number(tuple[1] || 0);
+    return {
+      applied,
+      remaining: Math.max(0, FREE_CALLS_PER_24H - used),
+      counterKey,
+    };
+  } catch {
+    return { applied: false, remaining: 0 };
+  }
+}
+
+async function rollbackFreeCallQuota(counterKey?: string) {
+  if (!counterKey) return;
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.decr(counterKey);
+  } catch {
+    // best-effort rollback only
+  }
+}
+
+async function markCallFreeMinutes(callId: string, minutes: number) {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.set(`calls:free24h:call:${callId}`, String(minutes), "EX", FREE_CALL_WINDOW_SECONDS + 7200);
+  } catch {
+    // no-op
+  }
+}
+
+async function readCallFreeMinutes(callId: string): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
+  try {
+    const raw = await redis.get(`calls:free24h:call:${callId}`);
+    const parsed = Number(raw || 0);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function clearCallFreeMinutes(callId: string) {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.del(`calls:free24h:call:${callId}`);
+  } catch {
+    // no-op
+  }
+}
+
 const WITHDRAW_ACCESS_USERS_SETTING_KEY = "wallet_withdraw_access_user_ids";
 
 async function isWithdrawAccessEnabledForUser(userId: string): Promise<boolean> {
@@ -295,18 +388,24 @@ router.post("/friends/request", async (req, res) => {
       status: "pending",
     }).returning();
 
-    // Send real-time notification
-    const receiverSocketId = await getUserSocketId(receiverId);
-    if (receiverSocketId) {
-      const [sender] = await db.select({
-        id: schema.users.id,
-        username: schema.users.username,
-        displayName: schema.users.displayName,
-        avatar: schema.users.avatar,
-        level: schema.users.level,
-      }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-      io.to(`user:${receiverId}`).emit("friend-request", { friendship, sender });
-    }
+    const [sender] = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+    }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+
+    const [receiver] = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+    }).from(schema.users).where(eq(schema.users.id, receiverId)).limit(1);
+
+    emitToUser(receiverId, "friend-request", { friendship, sender });
+    emitToUser(userId, "friend-request-sent", { friendship, receiver });
 
     const [senderForPush] = await db.select({
       username: schema.users.username,
@@ -351,11 +450,32 @@ router.post("/friends/:id/accept", async (req, res) => {
       .where(eq(schema.friendships.id, friendship.id))
       .returning();
 
-    // Notify sender
-    const senderSocketId = await getUserSocketId(friendship.senderId);
-    if (senderSocketId) {
-      io.to(`user:${friendship.senderId}`).emit("friend-accepted", { friendshipId: updated.id, userId });
-    }
+    const users = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+      isVerified: schema.users.isVerified,
+      country: schema.users.country,
+      status: schema.users.status,
+    }).from(schema.users).where(inArray(schema.users.id, [friendship.senderId, friendship.receiverId]));
+
+    const sender = users.find((u) => u.id === friendship.senderId) || null;
+    const receiver = users.find((u) => u.id === friendship.receiverId) || null;
+
+    emitToUser(friendship.senderId, "friend-accepted", {
+      friendship: updated,
+      friendshipId: updated.id,
+      friend: receiver,
+      userId,
+    });
+    emitToUser(friendship.receiverId, "friend-accepted", {
+      friendship: updated,
+      friendshipId: updated.id,
+      friend: sender,
+      userId,
+    });
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
@@ -384,14 +504,14 @@ router.post("/friends/:id/reject", async (req, res) => {
 
     await db.delete(schema.friendships).where(eq(schema.friendships.id, friendship.id));
 
-    // Notify sender that request was rejected
-    const senderSocketId = await getUserSocketId(friendship.senderId);
-    if (senderSocketId) {
-      io.to(`user:${friendship.senderId}`).emit("friend-rejected", {
-        friendshipId: friendship.id,
-        rejectedBy: userId,
-      });
-    }
+    emitToUser(friendship.senderId, "friend-rejected", {
+      friendshipId: friendship.id,
+      rejectedBy: userId,
+    });
+    emitToUser(friendship.receiverId, "friend-request-removed", {
+      friendshipId: friendship.id,
+      rejectedBy: userId,
+    });
 
     return res.json({ success: true, message: "تم رفض الطلب" });
   } catch (err: any) {
@@ -422,6 +542,10 @@ router.delete("/friends/:id", async (req, res) => {
     if (!friendship) return res.status(404).json({ success: false, message: "الصداقة غير موجودة" });
 
     await db.delete(schema.friendships).where(eq(schema.friendships.id, friendship.id));
+
+    const otherId = friendship.senderId === userId ? friendship.receiverId : friendship.senderId;
+    emitToUser(userId, "friend-removed", { friendshipId: friendship.id, removedBy: userId, otherId });
+    emitToUser(otherId, "friend-removed", { friendshipId: friendship.id, removedBy: userId, otherId: userId });
     return res.json({ success: true, message: "تم إزالة الصديق" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -1377,19 +1501,38 @@ router.post("/calls", async (req, res) => {
     // Get coin rate (from cached pricing)
     const coinRate = type === "video" ? callPricing.calls.video_call_rate : callPricing.calls.voice_call_rate;
 
-    // Check coins (minimum 1 minute charge)
+    const freeQuota = await reserveFreeCallQuota(userId, receiverOnline);
+
+    // Check coins (minimum 1 minute charge unless free call slot was reserved)
     const [caller] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-    if (!caller || caller.coins < coinRate) {
+    const requiredCoins = freeQuota.applied ? 0 : coinRate;
+    if (!caller || caller.coins < requiredCoins) {
+      if (freeQuota.applied) {
+        await rollbackFreeCallQuota(freeQuota.counterKey);
+      }
       return res.status(402).json({ success: false, message: "رصيدك غير كافٍ للمكالمة", coinRate });
     }
 
-    const [call] = await db.insert(schema.calls).values({
-      callerId: userId,
-      receiverId,
-      type,
-      status: receiverOnline ? "ringing" : "missed",
-      coinRate,
-    }).returning();
+    let call: any;
+    try {
+      const [inserted] = await db.insert(schema.calls).values({
+        callerId: userId,
+        receiverId,
+        type,
+        status: receiverOnline ? "ringing" : "missed",
+        coinRate,
+      }).returning();
+      call = inserted;
+    } catch (err) {
+      if (freeQuota.applied) {
+        await rollbackFreeCallQuota(freeQuota.counterKey);
+      }
+      throw err;
+    }
+
+    if (freeQuota.applied && call?.id) {
+      await markCallFreeMinutes(call.id, FREE_CALL_MINUTES_PER_CALL);
+    }
 
     if (receiverOnline) {
       // Get caller info for notification
@@ -1421,8 +1564,24 @@ router.post("/calls", async (req, res) => {
       socialLog.info({ callId: call.id, callerId: userId, receiverId, type: "missed" }, "Call missed — receiver offline");
     }
 
-    socialLog.info({ callId: call.id, callerId: userId, receiverId, type, coinRate }, "Call initiated");
-    return res.status(201).json({ success: true, data: call });
+    socialLog.info({
+      callId: call.id,
+      callerId: userId,
+      receiverId,
+      type,
+      coinRate,
+      freeCallApplied: freeQuota.applied,
+      freeCallsRemaining: freeQuota.remaining,
+    }, "Call initiated");
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...call,
+        freeCallApplied: freeQuota.applied,
+        freeCallsRemaining: freeQuota.remaining,
+        freeMinutesCap: freeQuota.applied ? FREE_CALL_MINUTES_PER_CALL : 0,
+      },
+    });
   } catch (err: any) {
     log(`Call initiate error: ${err.message}`, "social");
     return res.status(500).json({ success: false, message: "خطأ في بدء المكالمة" });
@@ -1524,11 +1683,17 @@ router.post("/calls/:id/end", async (req, res) => {
 
     let durationSeconds = 0;
     let coinsCharged = 0;
+    const payerUserId = call.callerId;
+
+    let freeMinutesUsed = 0;
 
     if (call.status === "active" && call.startedAt) {
       durationSeconds = Math.ceil((endedAt.getTime() - call.startedAt.getTime()) / 1000);
-      const minutes = Math.ceil(durationSeconds / 60);
-      coinsCharged = minutes * call.coinRate;
+      const totalMinutes = Math.ceil(durationSeconds / 60);
+      const freeMinutesCap = await readCallFreeMinutes(call.id);
+      freeMinutesUsed = Math.min(totalMinutes, Math.max(0, freeMinutesCap));
+      const billableMinutes = Math.max(0, totalMinutes - freeMinutesUsed);
+      coinsCharged = billableMinutes * call.coinRate;
     }
 
     // Wrap status update + charge in a transaction for atomicity
@@ -1550,7 +1715,7 @@ router.post("/calls/:id/end", async (req, res) => {
 
       // Charge within same transaction — if charge fails, status update rolls back too
       if (coinsCharged > 0) {
-        await chargeCoins(call.callerId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id, tx);
+        await chargeCoins(payerUserId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id, tx);
       }
 
       return ended;
@@ -1560,16 +1725,18 @@ router.post("/calls/:id/end", async (req, res) => {
       return res.json({ success: true, message: "المكالمة منتهية بالفعل" });
     }
 
-    socialLog.info({ callId: call.id, userId, durationSeconds, coinsCharged, type: call.type }, "Call ended");
+    await clearCallFreeMinutes(call.id);
+
+    socialLog.info({ callId: call.id, userId, payerUserId, durationSeconds, coinsCharged, freeMinutesUsed, type: call.type }, "Call ended");
 
     // Notify other party
     const otherId = call.callerId === userId ? call.receiverId : call.callerId;
     const otherSocketId = await getUserSocketId(otherId);
     if (otherSocketId) {
-      io.to(`user:${otherId}`).emit("call-ended", { callId: call.id, durationSeconds, coinsCharged });
+      io.to(`user:${otherId}`).emit("call-ended", { callId: call.id, payerUserId, durationSeconds, coinsCharged, freeMinutesUsed });
     }
 
-    return res.json({ success: true, data: updated });
+    return res.json({ success: true, data: { ...updated, payerUserId, freeMinutesUsed } });
   } catch (err: any) {
     socialLog.error({ err, callId: req.params.id }, "Call end error");
     return res.status(500).json({ success: false, message: "خطأ" });
