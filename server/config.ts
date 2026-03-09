@@ -29,6 +29,10 @@ const envSchema = z.object({
   // ── CORS ──
   CORS_ORIGIN: z.string().url().optional(),
 
+  // ── TURN/STUN (Coturn) ──
+  TURN_SECRET: z.string().optional(),
+  TURN_EXTERNAL_IP: z.string().optional(),
+
   // ── Admin defaults ──
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),

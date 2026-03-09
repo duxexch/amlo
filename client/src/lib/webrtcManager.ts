@@ -21,6 +21,8 @@ export interface CallStats {
   frameRate?: number;
   resolution?: { width: number; height: number };
   audioLevel: number;
+  mos: number;
+  usingRelay: boolean;
 }
 
 export interface CallEventHandlers {
@@ -33,13 +35,55 @@ export interface CallEventHandlers {
   onDurationTick: (seconds: number) => void;
 }
 
-// ── ICE Servers (STUN + optional TURN) ──
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+// ── ICE Servers (STUN + optional TURN — fetched from server) ──
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun.cloudflare.com:3478" },
 ];
+
+let cachedIceServers: RTCIceServer[] | null = null;
+let iceServersFetchedAt = 0;
+const ICE_CACHE_TTL = 3600_000; // 1 hour
+
+async function getIceServers(): Promise<RTCIceServer[]> {
+  const now = Date.now();
+  if (cachedIceServers && now - iceServersFetchedAt < ICE_CACHE_TTL) {
+    return cachedIceServers;
+  }
+  try {
+    const res = await fetch("/api/social/ice-servers", { credentials: "include" });
+    const json = await res.json();
+    if (res.ok && json?.success && Array.isArray(json.data)) {
+      cachedIceServers = json.data;
+      iceServersFetchedAt = now;
+      return cachedIceServers;
+    }
+  } catch {
+    // Fall through to fallback
+  }
+  return FALLBACK_ICE_SERVERS;
+}
+
+/** Approximate MOS (Mean Opinion Score) from network stats — 1.0 (bad) to 4.5 (excellent) */
+function calculateMOS(rtt: number, jitter: number, packetLossPercent: number): number {
+  // E-model simplified: R = 93.2 - Id - Ie
+  const effectiveLatency = rtt + jitter * 2 + 10; // +10ms processing
+  const Id = effectiveLatency > 177.3
+    ? 0.024 * effectiveLatency + 0.11 * (effectiveLatency - 177.3)
+    : 0.024 * effectiveLatency;
+  const Ie = 7 + 30 * Math.log(1 + 15 * packetLossPercent);
+  const R = Math.max(0, Math.min(100, 93.2 - Id - Ie));
+  return 1 + 0.035 * R + 7e-6 * R * (R - 60) * (100 - R);
+}
+
+/** Enable Opus DTX (discontinuous transmission) to save bandwidth on voice calls */
+function enableOpusDTX(sdp: string): string {
+  return sdp.replace(
+    /a=fmtp:111 (.*)/g,
+    "a=fmtp:111 $1;usedtx=1;stereo=0;sprop-stereo=0"
+  );
+}
 
 class WebRTCManager {
   private pc: RTCPeerConnection | null = null;
@@ -57,6 +101,12 @@ class WebRTCManager {
   private iceCandidateQueue: RTCIceCandidate[] = [];
   private isNegotiating = false;
   private makingOffer = false;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 3;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private networkChangeHandler: (() => void) | null = null;
+  private usingRelay = false;
+  private lastPacketsReceived = 0;
 
   /**
    * Initialize a call (outgoing)
@@ -75,8 +125,8 @@ class WebRTCManager {
     try {
       // Get media based on connection quality
       await this.acquireMedia();
-      this.createPeerConnection();
-      
+      await this.createPeerConnection();
+
       // Add local tracks to peer connection
       if (this.localStream && this.pc) {
         for (const track of this.localStream.getTracks()) {
@@ -90,6 +140,8 @@ class WebRTCManager {
         offerToReceiveAudio: true,
         offerToReceiveVideo: callType === "video",
       });
+      // Enable Opus DTX for bandwidth savings on voice
+      if (offer.sdp) offer.sdp = enableOpusDTX(offer.sdp);
       await this.pc!.setLocalDescription(offer);
       this.makingOffer = false;
 
@@ -126,7 +178,7 @@ class WebRTCManager {
 
     try {
       await this.acquireMedia();
-      this.createPeerConnection();
+      await this.createPeerConnection();
 
       // Add local tracks
       if (this.localStream && this.pc) {
@@ -140,12 +192,14 @@ class WebRTCManager {
 
       // Drain queued ICE candidates
       for (const candidate of this.iceCandidateQueue) {
-        await this.pc!.addIceCandidate(candidate).catch(() => {});
+        await this.pc!.addIceCandidate(candidate).catch(() => { });
       }
       this.iceCandidateQueue = [];
 
       // Create answer
       const answer = await this.pc!.createAnswer();
+      // Enable Opus DTX for bandwidth savings on voice
+      if (answer.sdp) answer.sdp = enableOpusDTX(answer.sdp);
       await this.pc!.setLocalDescription(answer);
 
       // Send answer via signaling
@@ -165,8 +219,8 @@ class WebRTCManager {
    */
   async handleSignal(signal: any): Promise<void> {
     if (!this.pc) {
-      // Queue ICE candidates if PC not ready yet
-      if (signal.type === "candidate" && signal.candidate) {
+      // Queue ICE candidates if PC not ready yet (cap at 50 to prevent memory leak)
+      if (signal.type === "candidate" && signal.candidate && this.iceCandidateQueue.length < 50) {
         this.iceCandidateQueue.push(new RTCIceCandidate(signal.candidate));
       }
       return;
@@ -192,13 +246,13 @@ class WebRTCManager {
         await this.pc.setRemoteDescription(new RTCSessionDescription(signal));
         // Drain queued candidates
         for (const candidate of this.iceCandidateQueue) {
-          await this.pc.addIceCandidate(candidate).catch(() => {});
+          await this.pc.addIceCandidate(candidate).catch(() => { });
         }
         this.iceCandidateQueue = [];
       } else if (signal.type === "candidate" && signal.candidate) {
         if (this.pc.remoteDescription) {
           await this.pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-        } else {
+        } else if (this.iceCandidateQueue.length < 50) {
           this.iceCandidateQueue.push(new RTCIceCandidate(signal.candidate));
         }
       }
@@ -233,16 +287,15 @@ class WebRTCManager {
   /**
    * Create RTCPeerConnection with event handlers
    */
-  private createPeerConnection(): void {
-    // Get TURN servers from env or use defaults
-    const iceServers = [...DEFAULT_ICE_SERVERS];
-    
+  private async createPeerConnection(): Promise<void> {
+    // Fetch TURN credentials from server (with fallback)
+    const iceServers = await getIceServers();
+
     this.pc = new RTCPeerConnection({
       iceServers,
-      // Balanced: quality vs latency
       iceCandidatePoolSize: 2,
-      bundlePolicy: "max-bundle",    // all media on one connection
-      rtcpMuxPolicy: "require",      // reduce port usage
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require",
     });
 
     // ── ICE Candidates ──
@@ -257,12 +310,29 @@ class WebRTCManager {
       }
     };
 
-    // ── ICE Connection State ──
+    // ── ICE Gathering Timeout — stop waiting after 10s ──
+    let gatheringTimer: ReturnType<typeof setTimeout> | null = null;
+    this.pc.onicegatheringstatechange = () => {
+      if (this.pc?.iceGatheringState === "gathering") {
+        gatheringTimer = setTimeout(() => {
+          if (this.pc?.iceGatheringState === "gathering") {
+            console.warn("[WebRTC] ICE gathering stuck >10s, proceeding with available candidates");
+          }
+        }, 10_000);
+      } else if (gatheringTimer) {
+        clearTimeout(gatheringTimer);
+        gatheringTimer = null;
+      }
+    };
+
+    // ── ICE Connection State — with exponential backoff reconnection ──
     this.pc.oniceconnectionstatechange = () => {
       const iceState = this.pc?.iceConnectionState;
       switch (iceState) {
         case "connected":
         case "completed":
+          this.reconnectAttempts = 0;
+          if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
           this.setState("active");
           this.startDurationTimer();
           this.startStatsMonitoring();
@@ -270,20 +340,27 @@ class WebRTCManager {
           break;
         case "disconnected":
           this.setState("reconnecting");
-          // Give it 10s to recover
-          setTimeout(() => {
-            if (this.pc?.iceConnectionState === "disconnected") {
-              this.handleError("انقطع الاتصال");
-            }
-          }, 10_000);
+          this.scheduleReconnect();
           break;
         case "failed":
-          // Try ICE restart
-          this.restartICE();
+          this.scheduleReconnect();
           break;
         case "closed":
           this.endCall();
           break;
+      }
+    };
+
+    // ── Connection State — verify DTLS ──
+    this.pc.onconnectionstatechange = () => {
+      if (this.pc?.connectionState === "connected") {
+        this.pc.getStats().then(stats => {
+          stats.forEach(report => {
+            if (report.type === "transport") {
+              console.log("[WebRTC] DTLS:", report.dtlsState, "| SRTP:", report.srtpCipher);
+            }
+          });
+        }).catch(() => { });
       }
     };
 
@@ -332,6 +409,15 @@ class WebRTCManager {
         }
       }
     });
+
+    // ── Network Change Detection — restart ICE on WiFi↔Cellular switch ──
+    this.networkChangeHandler = () => {
+      if (this.pc && this.state === "active") {
+        console.log("[WebRTC] Network changed, restarting ICE");
+        this.restartICE();
+      }
+    };
+    (navigator as any).connection?.addEventListener("change", this.networkChangeHandler);
   }
 
   /**
@@ -363,8 +449,27 @@ class WebRTCManager {
 
       try {
         await sender.setParameters(params);
-      } catch {}
+      } catch { }
     }
+  }
+
+  /**
+   * Exponential backoff reconnection — up to maxReconnectAttempts
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.handleError("فشل إعادة الاتصال بعد عدة محاولات");
+      return;
+    }
+    const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 15_000);
+    this.reconnectAttempts++;
+    console.log(`[WebRTC] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (this.pc && (this.pc.iceConnectionState === "disconnected" || this.pc.iceConnectionState === "failed")) {
+        this.restartICE();
+      }
+    }, delay);
   }
 
   /**
@@ -395,15 +500,18 @@ class WebRTCManager {
       try {
         const stats = await this.pc.getStats();
         let totalPacketsLost = 0;
+        let totalPacketsReceived = 0;
         let totalJitter = 0;
         let currentBitrate = 0;
         let audioLevel = 0;
+        let rtt = 0;
         let frameRate: number | undefined;
         let resolution: { width: number; height: number } | undefined;
 
         stats.forEach((report) => {
           if (report.type === "inbound-rtp") {
             totalPacketsLost += report.packetsLost || 0;
+            totalPacketsReceived += report.packetsReceived || 0;
             totalJitter = Math.max(totalJitter, (report.jitter || 0) * 1000);
             if (report.kind === "video") {
               frameRate = report.framesPerSecond;
@@ -414,27 +522,41 @@ class WebRTCManager {
           }
           if (report.type === "candidate-pair" && report.state === "succeeded") {
             currentBitrate = (report.availableOutgoingBitrate || 0) / 1000;
+            rtt = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : 0;
           }
           if (report.type === "media-source" && report.kind === "audio") {
             audioLevel = report.audioLevel || 0;
           }
+          // Detect TURN relay usage
+          if (report.type === "local-candidate" && report.candidateType === "relay") {
+            this.usingRelay = true;
+          }
         });
 
+        // Calculate MOS from live stats
+        const totalPackets = totalPacketsReceived + totalPacketsLost;
+        const lossPercent = totalPackets > 0 ? (totalPacketsLost / totalPackets) * 100 : 0;
+        const mos = calculateMOS(rtt || socketManager.getConnectionInfo().rtt, totalJitter, lossPercent);
+
+        this.lastPacketsReceived = totalPacketsReceived;
+
         this.handlers.onStats?.({
-          rtt: socketManager.getConnectionInfo().rtt,
+          rtt: rtt || socketManager.getConnectionInfo().rtt,
           packetsLost: totalPacketsLost,
           jitter: totalJitter,
           bitrate: currentBitrate,
           frameRate,
           resolution,
           audioLevel,
+          mos,
+          usingRelay: this.usingRelay,
         });
 
         // Auto-degrade if packet loss is high
         if (totalPacketsLost > 50 && this.callType === "video") {
           this.applyBitrateConstraints();
         }
-      } catch {}
+      } catch { }
     }, 5_000); // every 5 seconds
   }
 
@@ -501,6 +623,13 @@ class WebRTCManager {
     if (this.statsInterval) clearInterval(this.statsInterval);
     if (this.durationInterval) clearInterval(this.durationInterval);
     if (this.qualityUnsub) this.qualityUnsub();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+    // Remove network change listener
+    if (this.networkChangeHandler) {
+      (navigator as any).connection?.removeEventListener("change", this.networkChangeHandler);
+      this.networkChangeHandler = null;
+    }
 
     // Stop local media tracks
     this.localStream?.getTracks().forEach(t => t.stop());
@@ -514,6 +643,10 @@ class WebRTCManager {
     this.iceCandidateQueue = [];
     this.isNegotiating = false;
     this.makingOffer = false;
+    this.reconnectAttempts = 0;
+    this.reconnectTimer = null;
+    this.usingRelay = false;
+    this.lastPacketsReceived = 0;
     this.statsInterval = null;
     this.durationInterval = null;
     this.qualityUnsub = null;

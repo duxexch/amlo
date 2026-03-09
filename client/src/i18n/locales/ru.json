@@ -1504,7 +1504,19 @@
     "coinsCharged": "монет списано",
     "incomingVoiceCall": "Входящий голосовой звонок",
     "incomingVideoCall": "Входящий видеозвонок",
-    "startConversation": "Начните новый разговор"
+    "startConversation": "Начните новый разговор",
+    "callRejected": "Звонок отклонён",
+    "noReply": "Нет ответа",
+    "callStartFailed": "Не удалось начать звонок",
+    "callFailed": "Звонок не удался",
+    "userOffline": "Пользователь сейчас оффлайн",
+    "friendRequestAccepted": "Запрос в друзья принят",
+    "friendRequestRejected": "Запрос в друзья отклонён",
+    "actionFailed": "Операция не удалась",
+    "freeCallApplied": "Бесплатный звонок применён",
+    "profileVisibility": "Видимость профиля",
+    "profile1": "Профиль 1",
+    "profile2": "Профиль 2"
   },
   "world": {
     "title": "Вокруг света",

@@ -14,6 +14,20 @@ type QueuedNotificationJob = {
     queuedAt: number;
 };
 
+function dedupPart(value: unknown, max = 80): string {
+    return String(value || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .slice(0, max);
+}
+
+function buildDedupKey(payload: LocalizedPushJob): string {
+    const actor = dedupPart(payload.actorName, 40);
+    const preview = dedupPart(payload.bodyPreview, 80);
+    const target = dedupPart(payload.url, 120);
+    return `ablox:notif:dedup:${payload.userId}:${payload.kind}:${payload.preferenceKey}:${actor}:${preview}:${target}`;
+}
+
 function getQueueClient(): Redis | null {
     return createRedisDuplicate("notifications-queue") || getRedis();
 }
@@ -21,6 +35,11 @@ function getQueueClient(): Redis | null {
 export async function enqueueNotificationJob(payload: LocalizedPushJob): Promise<boolean> {
     const redis = getRedis();
     if (!redis) return false;
+
+    // Dedup: prevent identical notifications within a short window
+    const dedupKey = buildDedupKey(payload);
+    const isNew = await redis.set(dedupKey, "1", "EX", 60, "NX");
+    if (!isNew) return true; // Duplicate already handled, do not fallback to direct push
 
     const job: QueuedNotificationJob = {
         payload,
@@ -58,13 +77,20 @@ function scheduleRetry(redis: Redis, job: QueuedNotificationJob) {
 }
 
 export async function startNotificationWorker() {
+    const WORKER_CONCURRENCY = 4;
+
+    const workers = Array.from({ length: WORKER_CONCURRENCY }, (_, i) => runWorkerLoop(i));
+    await Promise.all(workers);
+}
+
+async function runWorkerLoop(workerId: number) {
     const redis = getQueueClient();
     if (!redis) {
-        queueLog.warn("Notification worker started without Redis - idle mode");
+        queueLog.warn(`Notification worker ${workerId} started without Redis - idle mode`);
         return;
     }
 
-    queueLog.info("Notification worker started");
+    queueLog.info(`Notification worker ${workerId} started`);
 
     while (true) {
         try {
@@ -76,23 +102,23 @@ export async function startNotificationWorker() {
             try {
                 job = JSON.parse(raw) as QueuedNotificationJob;
             } catch {
-                queueLog.warn("Skipping malformed notification job payload");
+                queueLog.warn(`Worker ${workerId}: Skipping malformed notification job payload`);
                 continue;
             }
 
             if (!job?.payload?.userId || !job.payload.kind || !job.payload.preferenceKey) {
-                queueLog.warn("Skipping invalid notification job structure");
+                queueLog.warn(`Worker ${workerId}: Skipping invalid notification job structure`);
                 continue;
             }
 
             try {
                 await sendLocalizedPush(job.payload);
             } catch (err: any) {
-                queueLog.warn(`Notification dispatch failed: ${err?.message || "unknown error"}`);
+                queueLog.warn(`Worker ${workerId}: Notification dispatch failed: ${err?.message || "unknown error"}`);
                 scheduleRetry(redis, job);
             }
         } catch (err: any) {
-            queueLog.warn(`Notification worker loop error: ${err?.message || "unknown error"}`);
+            queueLog.warn(`Worker ${workerId}: loop error: ${err?.message || "unknown error"}`);
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
     }

@@ -1496,7 +1496,19 @@
     "coinsCharged": "Münzen berechnet",
     "incomingVoiceCall": "Eingehender Sprachanruf",
     "incomingVideoCall": "Eingehender Videoanruf",
-    "startConversation": "Starte ein neues Gespräch"
+    "startConversation": "Starte ein neues Gespräch",
+    "callRejected": "Anruf abgelehnt",
+    "noReply": "Keine Antwort",
+    "callStartFailed": "Anruf konnte nicht gestartet werden",
+    "callFailed": "Anruf fehlgeschlagen",
+    "userOffline": "Benutzer ist derzeit offline",
+    "friendRequestAccepted": "Freundschaftsanfrage akzeptiert",
+    "friendRequestRejected": "Freundschaftsanfrage abgelehnt",
+    "actionFailed": "Aktion fehlgeschlagen",
+    "freeCallApplied": "Gratis-Anruf angewendet",
+    "profileVisibility": "Profilsichtbarkeit",
+    "profile1": "Profil 1",
+    "profile2": "Profil 2"
   },
   "world": {
     "title": "Rund um die Welt",

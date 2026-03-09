@@ -1574,7 +1574,19 @@
     "callEnded": "Call Ended",
     "coinsCharged": "coins charged",
     "incomingVoiceCall": "Incoming voice call",
-    "incomingVideoCall": "Incoming video call"
+    "incomingVideoCall": "Incoming video call",
+    "callRejected": "Call Rejected",
+    "noReply": "No Reply",
+    "callStartFailed": "Failed to Start Call",
+    "callFailed": "Call Failed",
+    "userOffline": "User is Currently Offline",
+    "friendRequestAccepted": "Friend Request Accepted",
+    "friendRequestRejected": "Friend Request Rejected",
+    "actionFailed": "Action Failed",
+    "freeCallApplied": "Free Call Applied",
+    "profileVisibility": "Profile Visibility",
+    "profile1": "Profile 1",
+    "profile2": "Profile 2"
   },
   "world": {
     "title": "Around the World",

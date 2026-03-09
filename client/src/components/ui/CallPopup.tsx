@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Phone, Video, X } from "lucide-react";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import { useTranslation } from "react-i18next";
+import { useEffect, useRef } from "react";
 
 interface CallPopupProps {
   isOpen: boolean;
@@ -11,15 +12,66 @@ interface CallPopupProps {
   isVideo?: boolean;
 }
 
+/** Generates a repeating ringtone using Web Audio API */
+function useRingtone(isOpen: boolean) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (ctxRef.current) ctxRef.current.close().catch(() => { });
+      ctxRef.current = null;
+      intervalRef.current = null;
+      return;
+    }
+
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    ctxRef.current = ctx;
+
+    const playRingBurst = () => {
+      const now = ctx.currentTime;
+      // Two-tone burst: 440Hz + 480Hz (standard phone ring)
+      for (const freq of [440, 480]) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.07, now + 0.05);
+        gain.gain.setValueAtTime(0.07, now + 0.8);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 1.05);
+      }
+    };
+
+    playRingBurst();
+    intervalRef.current = setInterval(playRingBurst, 3000); // ring every 3s
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      ctx.close().catch(() => { });
+      ctxRef.current = null;
+      intervalRef.current = null;
+    };
+  }, [isOpen]);
+}
+
 export function CallPopup({ isOpen, onAccept, onDecline, callerName, isVideo = true }: CallPopupProps) {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const displayName = callerName || t("callPopup.defaultCaller");
+  useRingtone(isOpen);
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" dir={dir}>
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -34,7 +86,7 @@ export function CallPopup({ isOpen, onAccept, onDecline, callerName, isVideo = t
           >
             {/* Pulsing background effect */}
             <div className="absolute inset-0 bg-primary/10 animate-pulse pointer-events-none" />
-            
+
             <div className="flex flex-col items-center text-center relative z-10">
               <div className="relative mb-6">
                 <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary neon-border relative z-10">
@@ -42,20 +94,20 @@ export function CallPopup({ isOpen, onAccept, onDecline, callerName, isVideo = t
                 </div>
                 <div className="absolute inset-0 rounded-full animate-pulse-ring pointer-events-none" />
               </div>
-              
+
               <h3 className="text-2xl font-bold text-white mb-2">{displayName}</h3>
               <p className="text-primary font-medium animate-pulse mb-8 text-lg">
                 {isVideo ? t("callPopup.incomingVideo") : t("callPopup.incomingAudio")}
               </p>
-              
+
               <div className="flex gap-6 w-full justify-center">
-                <button 
+                <button
                   onClick={onDecline}
                   className="w-16 h-16 rounded-full bg-destructive flex items-center justify-center hover:bg-destructive/80 transition-colors shadow-[0_0_15px_rgba(220,38,38,0.5)]"
                 >
                   <X className="w-8 h-8 text-white" />
                 </button>
-                <button 
+                <button
                   onClick={onAccept}
                   className="w-16 h-16 rounded-full bg-accent flex items-center justify-center hover:bg-accent/80 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.5)] animate-pulse-ring-accent relative"
                 >

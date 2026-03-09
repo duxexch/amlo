@@ -1504,7 +1504,19 @@
     "coinsCharged": "سکے کاٹے گئے",
     "incomingVoiceCall": "آنے والی آواز کال",
     "incomingVideoCall": "آنے والی ویڈیو کال",
-    "startConversation": "نئی بات چیت شروع کریں"
+    "startConversation": "نئی بات چیت شروع کریں",
+    "callRejected": "کال مسترد کر دی گئی",
+    "noReply": "کوئی جواب نہیں",
+    "callStartFailed": "کال شروع کرنے میں ناکامی",
+    "callFailed": "کال ناکام",
+    "userOffline": "صارف اس وقت آف لائن ہے",
+    "friendRequestAccepted": "دوستی کی درخواست قبول کر لی گئی",
+    "friendRequestRejected": "دوستی کی درخواست مسترد کر دی گئی",
+    "actionFailed": "عمل ناکام",
+    "freeCallApplied": "مفت کال لاگو کی گئی",
+    "profileVisibility": "پروفائل کی نمائش",
+    "profile1": "پروفائل 1",
+    "profile2": "پروفائل 2"
   },
   "world": {
     "title": "دنیا کے گرد",

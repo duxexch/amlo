@@ -1504,7 +1504,19 @@
     "coinsCharged": "koin dikenakan",
     "incomingVoiceCall": "Panggilan suara masuk",
     "incomingVideoCall": "Panggilan video masuk",
-    "startConversation": "Mulai percakapan baru"
+    "startConversation": "Mulai percakapan baru",
+    "callRejected": "Panggilan ditolak",
+    "noReply": "Tidak ada jawaban",
+    "callStartFailed": "Gagal memulai panggilan",
+    "callFailed": "Panggilan gagal",
+    "userOffline": "Pengguna sedang offline",
+    "friendRequestAccepted": "Permintaan pertemanan diterima",
+    "friendRequestRejected": "Permintaan pertemanan ditolak",
+    "actionFailed": "Tindakan gagal",
+    "freeCallApplied": "Panggilan gratis diterapkan",
+    "profileVisibility": "Visibilitas profil",
+    "profile1": "Profil 1",
+    "profile2": "Profil 2"
   },
   "world": {
     "title": "Keliling Dunia",

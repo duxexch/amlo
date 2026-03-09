@@ -1504,7 +1504,19 @@
     "coinsCharged": "pièces débitées",
     "incomingVoiceCall": "Appel vocal entrant",
     "incomingVideoCall": "Appel vidéo entrant",
-    "startConversation": "Démarrer une nouvelle conversation"
+    "startConversation": "Démarrer une nouvelle conversation",
+    "callRejected": "Appel rejeté",
+    "noReply": "Pas de réponse",
+    "callStartFailed": "Échec du démarrage de l'appel",
+    "callFailed": "Échec de l'appel",
+    "userOffline": "L'utilisateur est actuellement hors ligne",
+    "friendRequestAccepted": "Demande d'ami acceptée",
+    "friendRequestRejected": "Demande d'ami refusée",
+    "actionFailed": "Échec de l'action",
+    "freeCallApplied": "Appel gratuit appliqué",
+    "profileVisibility": "Visibilité du profil",
+    "profile1": "Profil 1",
+    "profile2": "Profil 2"
   },
   "world": {
     "title": "Autour du monde",

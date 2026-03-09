@@ -19,6 +19,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { initRedis, createRedisSessionStore, getRedis, createRedisDuplicate } from "./redis";
 import { isDatabaseConnected, getPool, getDb } from "./db";
 import { logger, createLogger } from "./logger";
+import { socialStabilityMetrics } from "./services/socialMetrics";
 import { and, eq, or, sql } from "drizzle-orm";
 import * as schema from "../shared/schema";
 
@@ -36,6 +37,7 @@ if (process.env.NODE_ENV === "production") {
 const socketOrigin = process.env.NODE_ENV === "production"
   ? process.env.CORS_ORIGIN || "https://mrco.live"
   : "*";
+const websocketOnlyMode = String(process.env.SOCKET_WEBSOCKET_ONLY || "").toLowerCase() === "true";
 
 export const io = new SocketIOServer(httpServer, {
   cors: {
@@ -43,8 +45,8 @@ export const io = new SocketIOServer(httpServer, {
     methods: ["GET", "POST"],
     credentials: true,
   },
-  // ── Transport: prefer websocket, fall back to polling for restricted networks ──
-  transports: ["websocket", "polling"],
+  // ── Transport: optional websocket-only mode for non-sticky cluster environments ──
+  transports: websocketOnlyMode ? ["websocket"] : ["websocket", "polling"],
   // ── Adaptive heartbeat: balanced for scale ──
   pingTimeout: 30000,       // 30s — faster disconnect detection
   pingInterval: 25000,      // 25s — lighter than 30s
@@ -158,8 +160,11 @@ io.use((socket, next) => {
 
 // ── Socket.io connection rate limiting ──
 const socketConnectionCounts = new Map<string, { count: number; resetAt: number }>();
-const SOCKET_MAX_CONNECTIONS_PER_IP = process.env.NODE_ENV === "production" ? 20 : 10000;  // High limit for dev/testing
-const SOCKET_WINDOW_MS = 60_000; // 1 minute
+const SOCKET_MAX_CONNECTIONS_PER_IP = parseInt(
+  process.env.SOCKET_MAX_CONNECTIONS_PER_IP || (process.env.NODE_ENV === "production" ? "200" : "10000"),
+  10,
+);
+const SOCKET_WINDOW_MS = parseInt(process.env.SOCKET_CONNECTION_WINDOW_MS || "60000", 10); // 1 minute
 
 io.use((socket, next) => {
   const ip = socket.handshake.address || "unknown";
@@ -214,6 +219,11 @@ function scheduleViewerCountBroadcast(roomId: string) {
 const chatThrottle = new Map<string, { count: number; windowStart: number }>();
 const CHAT_MAX_MSGS = 20; // max messages
 const CHAT_WINDOW_MS = 10_000; // per 10 seconds
+
+// ── Call-signal throttle (prevents SDP/ICE flooding) ──
+const signalThrottle = new Map<string, { count: number; windowStart: number }>();
+const SIGNAL_MAX_EVENTS = 30; // max signal events (offers + answers + candidates)
+const SIGNAL_WINDOW_MS = 10_000; // per 10 seconds
 
 // ── Gift throttle (separate from chat to stop gift flooding) ──
 const giftThrottle = new Map<string, { count: number; windowStart: number }>();
@@ -279,6 +289,18 @@ function isChatRateLimited(userId: string): boolean {
   return false;
 }
 
+function isSignalRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const entry = signalThrottle.get(userId);
+  if (!entry || now - entry.windowStart > SIGNAL_WINDOW_MS) {
+    signalThrottle.set(userId, { count: 1, windowStart: now });
+    return false;
+  }
+  if (entry.count >= SIGNAL_MAX_EVENTS) return true;
+  entry.count++;
+  return false;
+}
+
 function isGiftRateLimited(userId: string): boolean {
   const now = Date.now();
   const entry = giftThrottle.get(userId);
@@ -303,6 +325,10 @@ setInterval(() => {
   }
   // Step 29: Memory leak protection — cap Map sizes
   if (chatThrottle.size > 50_000) chatThrottle.clear();
+  for (const [userId, entry] of signalThrottle) {
+    if (now - entry.windowStart > SIGNAL_WINDOW_MS) signalThrottle.delete(userId);
+  }
+  if (signalThrottle.size > 50_000) signalThrottle.clear();
   for (const [userId, entry] of giftThrottle) {
     if (now - entry.windowStart > GIFT_WINDOW_MS) giftThrottle.delete(userId);
   }
@@ -737,14 +763,16 @@ io.on("connection", (socket) => {
     if (!data || typeof data !== "object") return;
     const { callId, targetId, signal } = data as Record<string, unknown>;
     if (!isStr(callId, 100) || !isStr(targetId, 100)) return;
-    const targetSocketId = await getUserSocketId(targetId);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit("call-signal", {
-        callId,
-        senderId: socket.data.userId,
-        signal,
-      });
-    }
+    const currentUserId = socket.data.userId;
+    if (!currentUserId) return;
+    // Throttle call signaling to prevent SDP/ICE flooding
+    if (isSignalRateLimited(currentUserId)) return;
+    // Use room-based emit for consistency and reconnect resilience
+    io.to(`user:${targetId}`).emit("call-signal", {
+      callId,
+      senderId: currentUserId,
+      signal,
+    });
   });
 
   // ── Random Chat Matching ──
@@ -1207,7 +1235,8 @@ const globalLimiter = rateLimit({
       p === "/api/announcement-popup" ||
       p === "/api/app-download" ||
       p === "/api/social/gifts" ||
-      p === "/api/social/streams/active"
+      p === "/api/social/streams/active" ||
+      p === "/api/social/streams/recommended"
     )) return true;
     return false;
   },
@@ -1227,13 +1256,16 @@ app.use("/api/agent/auth", authLimiter);
 app.use("/api/social/auth", authLimiter);
 
 // ── Write-operation rate limiting ──
+const writeLimiterWindowMs = parseInt(process.env.SOCIAL_WRITE_LIMIT_WINDOW_MS || "60000", 10);
+const writeLimiterMax = parseInt(process.env.SOCIAL_WRITE_LIMIT_MAX || "60", 10);
+const disableWriteLimiter = String(process.env.SOCIAL_WRITE_LIMIT_DISABLED || "").toLowerCase() === "true";
 const writeLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 60, // 60 writes per minute
+  windowMs: Number.isFinite(writeLimiterWindowMs) && writeLimiterWindowMs > 0 ? writeLimiterWindowMs : 60 * 1000,
+  max: Number.isFinite(writeLimiterMax) && writeLimiterMax > 0 ? writeLimiterMax : 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: "طلبات كثيرة جداً. حاول بعد دقيقة" },
-  skip: (req) => req.method === "GET",
+  skip: (req) => disableWriteLimiter || req.method === "GET",
 });
 app.use("/api/social", writeLimiter);
 
@@ -1502,6 +1534,25 @@ app.use((req, res, next) => {
     const pool = getPool();
     const onlineCount = await getOnlineUsersCount();
 
+    const ratioPercent = (hits: number, misses: number): number => {
+      const total = hits + misses;
+      if (total <= 0) return 0;
+      return Math.round((hits / total) * 10000) / 100;
+    };
+
+    const decryptCacheHitRatePct = ratioPercent(
+      socialStabilityMetrics.decryptCacheHits,
+      socialStabilityMetrics.decryptCacheMisses,
+    );
+    const liveFlagsCacheHitRatePct = ratioPercent(
+      socialStabilityMetrics.liveFlagsCacheHits,
+      socialStabilityMetrics.liveFlagsCacheMisses,
+    );
+    const dailyMissionsFlagCacheHitRatePct = ratioPercent(
+      socialStabilityMetrics.dailyMissionsFlagCacheHits,
+      socialStabilityMetrics.dailyMissionsFlagCacheMisses,
+    );
+
     const lines = [
       `# HELP ablox_uptime_seconds Server uptime in seconds`,
       `# TYPE ablox_uptime_seconds gauge`,
@@ -1530,6 +1581,45 @@ app.use((req, res, next) => {
       `# HELP ablox_socket_connections Active socket connections`,
       `# TYPE ablox_socket_connections gauge`,
       `ablox_socket_connections ${io.engine.clientsCount}`,
+      `# HELP ablox_social_decrypt_cache_hits Total decrypt cache hits`,
+      `# TYPE ablox_social_decrypt_cache_hits counter`,
+      `ablox_social_decrypt_cache_hits ${socialStabilityMetrics.decryptCacheHits}`,
+      `# HELP ablox_social_decrypt_cache_misses Total decrypt cache misses`,
+      `# TYPE ablox_social_decrypt_cache_misses counter`,
+      `ablox_social_decrypt_cache_misses ${socialStabilityMetrics.decryptCacheMisses}`,
+      `# HELP ablox_social_decrypt_cache_hit_rate_pct Decrypt cache hit rate percentage`,
+      `# TYPE ablox_social_decrypt_cache_hit_rate_pct gauge`,
+      `ablox_social_decrypt_cache_hit_rate_pct ${decryptCacheHitRatePct}`,
+      `# HELP ablox_social_live_flags_cache_hits Total live flags cache hits`,
+      `# TYPE ablox_social_live_flags_cache_hits counter`,
+      `ablox_social_live_flags_cache_hits ${socialStabilityMetrics.liveFlagsCacheHits}`,
+      `# HELP ablox_social_live_flags_cache_misses Total live flags cache misses`,
+      `# TYPE ablox_social_live_flags_cache_misses counter`,
+      `ablox_social_live_flags_cache_misses ${socialStabilityMetrics.liveFlagsCacheMisses}`,
+      `# HELP ablox_social_live_flags_cache_hit_rate_pct Live flags cache hit rate percentage`,
+      `# TYPE ablox_social_live_flags_cache_hit_rate_pct gauge`,
+      `ablox_social_live_flags_cache_hit_rate_pct ${liveFlagsCacheHitRatePct}`,
+      `# HELP ablox_social_daily_missions_flag_cache_hits Total daily missions flag cache hits`,
+      `# TYPE ablox_social_daily_missions_flag_cache_hits counter`,
+      `ablox_social_daily_missions_flag_cache_hits ${socialStabilityMetrics.dailyMissionsFlagCacheHits}`,
+      `# HELP ablox_social_daily_missions_flag_cache_misses Total daily missions flag cache misses`,
+      `# TYPE ablox_social_daily_missions_flag_cache_misses counter`,
+      `ablox_social_daily_missions_flag_cache_misses ${socialStabilityMetrics.dailyMissionsFlagCacheMisses}`,
+      `# HELP ablox_social_daily_missions_flag_cache_hit_rate_pct Daily missions flag cache hit rate percentage`,
+      `# TYPE ablox_social_daily_missions_flag_cache_hit_rate_pct gauge`,
+      `ablox_social_daily_missions_flag_cache_hit_rate_pct ${dailyMissionsFlagCacheHitRatePct}`,
+      `# HELP ablox_social_scheduled_lock_acquired Total scheduled job lock acquisitions`,
+      `# TYPE ablox_social_scheduled_lock_acquired counter`,
+      `ablox_social_scheduled_lock_acquired ${socialStabilityMetrics.scheduledLockAcquired}`,
+      `# HELP ablox_social_scheduled_lock_skipped Total scheduled job lock skips`,
+      `# TYPE ablox_social_scheduled_lock_skipped counter`,
+      `ablox_social_scheduled_lock_skipped ${socialStabilityMetrics.scheduledLockSkipped}`,
+      `# HELP ablox_social_friend_expiry_lock_acquired Total friend expiry lock acquisitions`,
+      `# TYPE ablox_social_friend_expiry_lock_acquired counter`,
+      `ablox_social_friend_expiry_lock_acquired ${socialStabilityMetrics.friendExpiryLockAcquired}`,
+      `# HELP ablox_social_friend_expiry_lock_skipped Total friend expiry lock skips`,
+      `# TYPE ablox_social_friend_expiry_lock_skipped counter`,
+      `ablox_social_friend_expiry_lock_skipped ${socialStabilityMetrics.friendExpiryLockSkipped}`,
     ];
 
     // DB pool metrics

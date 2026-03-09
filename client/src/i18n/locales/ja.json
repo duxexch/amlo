@@ -1504,7 +1504,19 @@
     "coinsCharged": "コインが課金されました",
     "incomingVoiceCall": "音声通話着信",
     "incomingVideoCall": "ビデオ通話着信",
-    "startConversation": "新しい会話を始める"
+    "startConversation": "新しい会話を始める",
+    "callRejected": "通話が拒否されました",
+    "noReply": "応答なし",
+    "callStartFailed": "通話の開始に失敗",
+    "callFailed": "通話失敗",
+    "userOffline": "ユーザーは現在オフラインです",
+    "friendRequestAccepted": "友達リクエストが承認されました",
+    "friendRequestRejected": "友達リクエストが拒否されました",
+    "actionFailed": "操作に失敗しました",
+    "freeCallApplied": "無料通話が適用されました",
+    "profileVisibility": "プロフィールの表示",
+    "profile1": "プロフィール 1",
+    "profile2": "プロフィール 2"
   },
   "world": {
     "title": "世界一周",

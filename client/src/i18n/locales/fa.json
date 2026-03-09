@@ -1496,7 +1496,19 @@
     "coinsCharged": "سکه کسر شد",
     "incomingVoiceCall": "تماس صوتی ورودی",
     "incomingVideoCall": "تماس تصویری ورودی",
-    "startConversation": "یک مکالمه جدید شروع کنید"
+    "startConversation": "یک مکالمه جدید شروع کنید",
+    "callRejected": "تماس رد شد",
+    "noReply": "پاسخی نیست",
+    "callStartFailed": "شروع تماس ناموفق بود",
+    "callFailed": "تماس ناموفق",
+    "userOffline": "کاربر در حال حاضر آفلاین است",
+    "friendRequestAccepted": "درخواست دوستی پذیرفته شد",
+    "friendRequestRejected": "درخواست دوستی رد شد",
+    "actionFailed": "عملیات ناموفق",
+    "freeCallApplied": "تماس رایگان اعمال شد",
+    "profileVisibility": "نمایش پروفایل",
+    "profile1": "پروفایل 1",
+    "profile2": "پروفایل 2"
   },
   "world": {
     "title": "دور دنیا",

@@ -61,7 +61,7 @@ router.post("/", storyCreateLimiter, async (req: Request, res: Response) => {
   }
 });
 
-// ── GET / — Get stories feed (own + friends, last 24h) ──
+// ── GET / — Get stories feed (own + friends, last 24h) — cursor-paginated ──
 router.get("/", async (req: Request, res: Response) => {
   const userId = (req.session as any)?.userId;
   if (!userId) return res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
@@ -70,6 +70,19 @@ router.get("/", async (req: Request, res: Response) => {
   if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
 
   try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const cursor = req.query.cursor as string | undefined;
+
+    const params: any[] = [userId, limit];
+    let cursorClause = "";
+    if (cursor) {
+      const cursorDate = new Date(cursor);
+      if (!isNaN(cursorDate.getTime())) {
+        cursorClause = `AND s.created_at < $3`;
+        params.push(cursorDate.toISOString());
+      }
+    }
+
     // Get stories from self + accepted friends
     const result = await pool.query(
       `SELECT s.id, s.user_id as "userId", s.type, s.media_url as "mediaUrl",
@@ -81,6 +94,7 @@ router.get("/", async (req: Request, res: Response) => {
        JOIN users u ON u.id = s.user_id
        WHERE s.is_active = true
          AND s.expires_at > NOW()
+         ${cursorClause}
          AND (
            s.user_id = $1
            OR s.user_id IN (
@@ -94,8 +108,8 @@ router.get("/", async (req: Request, res: Response) => {
            )
          )
        ORDER BY s.created_at DESC
-       LIMIT 200`,
-      [userId],
+       LIMIT $2`,
+      params,
     );
 
     // Group by user for UI convenience
@@ -115,7 +129,10 @@ router.get("/", async (req: Request, res: Response) => {
       });
     }
 
-    return res.json({ success: true, data: Array.from(storiesByUser.values()) });
+    const rows = result.rows;
+    const nextCursor = rows.length === limit ? rows[rows.length - 1].createdAt : null;
+
+    return res.json({ success: true, data: Array.from(storiesByUser.values()), nextCursor });
   } catch (err: any) {
     storyLog.error(`Get stories feed error: ${err.message}`);
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -192,8 +209,8 @@ router.post("/:id/view", async (req: Request, res: Response) => {
     // Only increment view count if a new row was actually inserted
     if (viewResult.rowCount && viewResult.rowCount > 0) {
       await pool.query(
-        `UPDATE stories SET view_count = view_count + 1 WHERE id = $1 AND user_id != $2`,
-        [req.params.id, userId],
+        `UPDATE stories SET view_count = view_count + 1 WHERE id = $1`,
+        [req.params.id],
       );
     }
 

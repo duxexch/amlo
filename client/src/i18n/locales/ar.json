@@ -1574,7 +1574,19 @@
     "callEnded": "انتهت المكالمة",
     "coinsCharged": "عملة تم خصمها",
     "incomingVoiceCall": "مكالمة صوتية واردة",
-    "incomingVideoCall": "مكالمة فيديو واردة"
+    "incomingVideoCall": "مكالمة فيديو واردة",
+    "callRejected": "تم رفض المكالمة",
+    "noReply": "لا رد",
+    "callStartFailed": "تعذر بدء المكالمة",
+    "callFailed": "فشل الاتصال",
+    "userOffline": "المستخدم غير متصل حالياً",
+    "friendRequestAccepted": "تم قبول طلب الصداقة",
+    "friendRequestRejected": "تم رفض طلب الصداقة",
+    "actionFailed": "تعذر تنفيذ العملية",
+    "freeCallApplied": "تم تطبيق المكالمة المجانية",
+    "profileVisibility": "ملف ظاهر",
+    "profile1": "ملف 1",
+    "profile2": "ملف 2"
   },
   "world": {
     "title": "حول العالم",

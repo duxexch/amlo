@@ -17,10 +17,11 @@ import { getUserSocketId, isUserOnline, areUsersOnline, getLastSeen, getLastSeen
 import * as schema from "../../shared/schema";
 import { sendMessageSchema, initiateCallSchema, reportMessageSchema } from "../../shared/schema";
 import { storage } from "../storage";
-import { encryptMessage, decryptMessage, decryptMessages } from "../utils/encryption";
+import { encryptMessage, decryptMessage } from "../utils/encryption";
 import { getAllPricing } from "../pricingService";
 import { sendLocalizedPush, type LocalizedPushJob } from "../services/notificationDispatch";
 import { enqueueNotificationJob } from "../services/notificationQueue";
+import { socialStabilityMetrics as stabilityMetrics, type SocialStabilityMetricKey } from "../services/socialMetrics";
 import {
   claimDailyMission,
   getClaimedDailyMissionIds,
@@ -45,6 +46,112 @@ import {
 } from "./socialHelpers";
 
 const router = Router();
+
+const MSG_DECRYPT_CACHE_TTL_SEC = 24 * 60 * 60;
+const ACTIVE_STREAMS_CACHE_TTL_SEC = 10;
+const RECOMMENDED_STREAMS_CACHE_TTL_SEC = 10;
+const GIFTS_CACHE_TTL_SEC = 15;
+const LOCK_KEY_SCHEDULED_STREAMS = 712341;
+const LOCK_KEY_FRIEND_EXPIRY = 712342;
+const STREAM_CACHE_VERSION_KEY = "streams:list:cache:version";
+const LIVE_FLAGS_CACHE_TTL_MS = 5000;
+const DAILY_MISSIONS_FLAG_CACHE_TTL_MS = 5000;
+let lastStreamCacheInvalidationMs = 0;
+let liveFlagsCache: { value: LiveFeatureFlags; expiresAt: number } | null = null;
+let dailyMissionsFlagCache: { value: boolean; expiresAt: number } | null = null;
+
+function lockMetricKeys(lockKey: number): { acquired: SocialStabilityMetricKey; skipped: SocialStabilityMetricKey } | null {
+  if (lockKey === LOCK_KEY_SCHEDULED_STREAMS) {
+    return { acquired: "scheduledLockAcquired", skipped: "scheduledLockSkipped" };
+  }
+  if (lockKey === LOCK_KEY_FRIEND_EXPIRY) {
+    return { acquired: "friendExpiryLockAcquired", skipped: "friendExpiryLockSkipped" };
+  }
+  return null;
+}
+
+async function tryAcquireJobLock(db: any, lockKey: number): Promise<boolean> {
+  try {
+    const result: any = await db.execute(sql`SELECT pg_try_advisory_lock(${lockKey}) AS locked`);
+    const locked = !!result?.rows?.[0]?.locked;
+    const mk = lockMetricKeys(lockKey);
+    if (mk) {
+      if (locked) stabilityMetrics[mk.acquired] += 1;
+      else stabilityMetrics[mk.skipped] += 1;
+    }
+    return locked;
+  } catch {
+    return false;
+  }
+}
+
+async function releaseJobLock(db: any, lockKey: number): Promise<void> {
+  try {
+    await db.execute(sql`SELECT pg_advisory_unlock(${lockKey})`);
+  } catch {
+    // best-effort unlock
+  }
+}
+
+async function decryptMessageCached(messageId: string, ciphertext: string, conversationId: string): Promise<string> {
+  if (!ciphertext) return ciphertext;
+
+  const redis = getRedis();
+  const cacheKey = `msg:dec:${conversationId}:${messageId}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached !== null) {
+        stabilityMetrics.decryptCacheHits += 1;
+        return cached;
+      }
+      stabilityMetrics.decryptCacheMisses += 1;
+    } catch {
+      stabilityMetrics.decryptCacheErrors += 1;
+      // cache read is best-effort
+    }
+  } else {
+    stabilityMetrics.decryptCacheMisses += 1;
+  }
+
+  const decrypted = decryptMessage(ciphertext, conversationId);
+
+  if (redis) {
+    try {
+      await redis.set(cacheKey, decrypted, "EX", MSG_DECRYPT_CACHE_TTL_SEC);
+    } catch {
+      stabilityMetrics.decryptCacheErrors += 1;
+      // cache write is best-effort
+    }
+  }
+
+  return decrypted;
+}
+
+async function getStreamCacheVersion(redis: ReturnType<typeof getRedis>): Promise<string> {
+  if (!redis) return "1";
+  try {
+    const v = await redis.get(STREAM_CACHE_VERSION_KEY);
+    return v || "1";
+  } catch {
+    return "1";
+  }
+}
+
+async function invalidateStreamListCaches(): Promise<void> {
+  const now = Date.now();
+  if (now - lastStreamCacheInvalidationMs < 1000) return;
+  lastStreamCacheInvalidationMs = now;
+
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.incr(STREAM_CACHE_VERSION_KEY);
+  } catch {
+    // best-effort invalidation
+  }
+}
 
 // ── Helper: get the other participant ID in a conversation ──
 async function getConversationOtherId(db: any, conversationId: string, userId: string): Promise<string | null> {
@@ -523,6 +630,17 @@ router.post("/friends/:id/accept", async (req, res) => {
       userId,
     });
 
+    // Push notification to original sender: "Your friend request was accepted"
+    if (receiver) {
+      queueLocalizedPush({
+        userId: friendship.senderId,
+        preferenceKey: "friendRequests",
+        kind: "friend-accepted" as any,
+        actorName: receiver.displayName || receiver.username || "User",
+        url: "/friends",
+      });
+    }
+
     return res.json({ success: true, data: updated });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
@@ -760,14 +878,16 @@ router.get("/conversations", async (req, res) => {
     const onlineMap = await areUsersOnline(participantIds);
     const lastSeenMap = await getLastSeenBatch(participantIds);
 
-    const result = convs.map(c => {
+    const result = await Promise.all(convs.map(async (c) => {
       const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
       const unread = c.participant1Id === userId ? c.participant1Unread : c.participant2Unread;
       const rawLastMessage = lastMessages.find(m => m.id === c.lastMessageId);
       const lastMessage = rawLastMessage
         ? {
           ...rawLastMessage,
-          content: rawLastMessage.content ? decryptMessage(rawLastMessage.content, c.id) : rawLastMessage.content,
+          content: rawLastMessage.content
+            ? await decryptMessageCached(rawLastMessage.id, rawLastMessage.content, c.id)
+            : rawLastMessage.content,
           isEncrypted: true,
         }
         : null;
@@ -780,7 +900,7 @@ router.get("/conversations", async (req, res) => {
         lastMessage,
         lastMessageAt: c.lastMessageAt,
       };
-    });
+    }));
 
     return res.json({ success: true, data: result });
   } catch (err: any) {
@@ -937,7 +1057,12 @@ router.get("/conversations/:id/messages", async (req, res) => {
       });
     }
 
-    const decrypted = decryptMessages(msgs.reverse(), req.params.id);
+    const ordered = msgs.reverse();
+    const decrypted = await Promise.all(ordered.map(async (msg) => ({
+      ...msg,
+      content: msg.content ? await decryptMessageCached(msg.id, msg.content, req.params.id) : msg.content,
+      isEncrypted: true,
+    })));
     chatMetrics.fetchTotal += 1;
     chatMetrics.fetchLatencyMsTotal += Date.now() - startedAt;
 
@@ -1053,8 +1178,13 @@ router.post("/conversations/:id/messages", async (req, res) => {
       if (!charged) return res.status(402).json({ success: false, message: "رصيدك غير كافٍ لإرسال رسالة", coinsCost: messageCost });
     }
 
+    // Sanitize text content before encryption (defense-in-depth against stored XSS)
+    const safeContent = content
+      ? content.replace(/</g, "\u003C").replace(/>/g, "\u003E").replace(/"/g, "\u0022")
+      : null;
+
     // Encrypt message content
-    const encryptedContent = content ? encryptMessage(content, conv.id) : null;
+    const encryptedContent = safeContent ? encryptMessage(safeContent, conv.id) : null;
 
     const [msg] = await db.insert(schema.messages).values({
       conversationId: conv.id,
@@ -1484,6 +1614,25 @@ router.get("/chat/metrics", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
 
+  const ratioPercent = (hits: number, misses: number): number => {
+    const total = hits + misses;
+    if (total <= 0) return 0;
+    return Math.round((hits / total) * 10000) / 100;
+  };
+
+  const decryptCacheHitRatePct = ratioPercent(
+    stabilityMetrics.decryptCacheHits,
+    stabilityMetrics.decryptCacheMisses,
+  );
+  const liveFlagsCacheHitRatePct = ratioPercent(
+    stabilityMetrics.liveFlagsCacheHits,
+    stabilityMetrics.liveFlagsCacheMisses,
+  );
+  const dailyMissionsFlagCacheHitRatePct = ratioPercent(
+    stabilityMetrics.dailyMissionsFlagCacheHits,
+    stabilityMetrics.dailyMissionsFlagCacheMisses,
+  );
+
   return res.json({
     success: true,
     data: {
@@ -1493,9 +1642,55 @@ router.get("/chat/metrics", async (req, res) => {
       fetchTotal: chatMetrics.fetchTotal,
       fetchErrors: chatMetrics.fetchErrors,
       avgFetchLatencyMs: avgMs(chatMetrics.fetchLatencyMsTotal, chatMetrics.fetchTotal),
+      decryptCacheHits: stabilityMetrics.decryptCacheHits,
+      decryptCacheMisses: stabilityMetrics.decryptCacheMisses,
+      decryptCacheErrors: stabilityMetrics.decryptCacheErrors,
+      decryptCacheHitRatePct,
+      liveFlagsCacheHits: stabilityMetrics.liveFlagsCacheHits,
+      liveFlagsCacheMisses: stabilityMetrics.liveFlagsCacheMisses,
+      liveFlagsCacheHitRatePct,
+      dailyMissionsFlagCacheHits: stabilityMetrics.dailyMissionsFlagCacheHits,
+      dailyMissionsFlagCacheMisses: stabilityMetrics.dailyMissionsFlagCacheMisses,
+      dailyMissionsFlagCacheHitRatePct,
+      scheduledLockAcquired: stabilityMetrics.scheduledLockAcquired,
+      scheduledLockSkipped: stabilityMetrics.scheduledLockSkipped,
+      friendExpiryLockAcquired: stabilityMetrics.friendExpiryLockAcquired,
+      friendExpiryLockSkipped: stabilityMetrics.friendExpiryLockSkipped,
       timestamp: new Date().toISOString(),
     },
   });
+});
+
+// ════════════════════════════════════════════════════════════
+// ICE SERVERS (TURN credentials)
+// ════════════════════════════════════════════════════════════
+import crypto from "crypto";
+import { getConfig } from "../config";
+
+router.get("/ice-servers", (_req, res) => {
+  const cfg = getConfig();
+  const servers: Array<{ urls: string | string[]; username?: string; credential?: string }> = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
+  ];
+
+  const turnSecret = cfg.TURN_SECRET;
+  const turnHost = cfg.TURN_EXTERNAL_IP || cfg.CORS_ORIGIN?.replace(/^https?:\/\//, "");
+  if (turnSecret && turnHost) {
+    // Time-limited credentials (valid 24h) using HMAC per Coturn's use-auth-secret
+    const ttl = 86400;
+    const expiry = Math.floor(Date.now() / 1000) + ttl;
+    const username = `${expiry}:ablox`;
+    const credential = crypto.createHmac("sha1", turnSecret).update(username).digest("base64");
+    servers.push(
+      { urls: `turn:${turnHost}:3478?transport=udp`, username, credential },
+      { urls: `turn:${turnHost}:3478?transport=tcp`, username, credential },
+      // TURNS (TLS) on port 443 — fallback for restrictive firewalls
+      { urls: `turns:${turnHost}:443?transport=tcp`, username, credential },
+    );
+  }
+
+  return res.json({ success: true, data: servers });
 });
 
 // ════════════════════════════════════════════════════════════
@@ -1619,6 +1814,32 @@ router.post("/calls", async (req, res) => {
       freeCallApplied: freeQuota.applied,
       freeCallsRemaining: freeQuota.remaining,
     }, "Call initiated");
+
+    // Server-side call timeout — if still ringing after 40s, mark as missed
+    if (receiverOnline && call?.id) {
+      const timeoutCallId = call.id;
+      const timeoutCallerId = userId;
+      const timeoutReceiverId = receiverId;
+      setTimeout(async () => {
+        try {
+          const db2 = getDb();
+          if (!db2) return;
+          const [still] = await db2.select().from(schema.calls)
+            .where(and(eq(schema.calls.id, timeoutCallId), eq(schema.calls.status, "ringing")))
+            .limit(1);
+          if (!still) return;
+          await db2.update(schema.calls)
+            .set({ status: "missed", endedAt: new Date() })
+            .where(and(eq(schema.calls.id, timeoutCallId), eq(schema.calls.status, "ringing")));
+          io.to(`user:${timeoutCallerId}`).emit("call-timeout", { callId: timeoutCallId });
+          io.to(`user:${timeoutReceiverId}`).emit("call-timeout", { callId: timeoutCallId });
+          socialLog.info({ callId: timeoutCallId }, "Call timed out (40s)");
+        } catch (err: any) {
+          socialLog.warn({ err, callId: timeoutCallId }, "Call timeout handler error");
+        }
+      }, 40_000);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
@@ -2812,8 +3033,28 @@ router.get("/wallet/transactions/export", async (req: Request, res: Response) =>
 // GET /social/gifts — public gift catalog
 router.get("/gifts", async (req: Request, res: Response) => {
   try {
+    const redis = getRedis();
+    const cacheKey = "gifts:catalog:v1";
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) return res.json(JSON.parse(cached));
+      } catch {
+        // best-effort cache read
+      }
+    }
+
     const gifts = await storage.getGifts();
     const activeGifts = (gifts || []).filter((g: any) => g.isActive !== false);
+
+    if (redis) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(activeGifts), "EX", GIFTS_CACHE_TTL_SEC);
+      } catch {
+        // best-effort cache write
+      }
+    }
+
     return res.json(activeGifts);
   } catch (err: any) {
     socialLog.error({ err }, "Get gifts error");
@@ -3184,8 +3425,15 @@ type LiveFeatureFlags = {
 };
 
 async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
+  const now = Date.now();
+  if (liveFlagsCache && liveFlagsCache.expiresAt > now) {
+    stabilityMetrics.liveFlagsCacheHits += 1;
+    return liveFlagsCache.value;
+  }
+  stabilityMetrics.liveFlagsCacheMisses += 1;
+
   if (!db) {
-    return {
+    const fallback = {
       liveRecommendationEnabled: true,
       postStreamReportEnabled: true,
       liveGamificationEnabled: true,
@@ -3193,6 +3441,8 @@ async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
       smartDirectorTelemetryEnabled: true,
       autoClipsEnabled: true,
     };
+    liveFlagsCache = { value: fallback, expiresAt: now + LIVE_FLAGS_CACHE_TTL_MS };
+    return fallback;
   }
 
   const keys = [
@@ -3218,7 +3468,7 @@ async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
     return defaultValue;
   };
 
-  return {
+  const resolved = {
     liveRecommendationEnabled: toBool("live_recommendation_enabled", true),
     postStreamReportEnabled: toBool("post_stream_report_enabled", true),
     liveGamificationEnabled: toBool("live_gamification_enabled", true),
@@ -3226,24 +3476,39 @@ async function getLiveFeatureFlags(db: any): Promise<LiveFeatureFlags> {
     smartDirectorTelemetryEnabled: toBool("smart_director_telemetry_enabled", true),
     autoClipsEnabled: toBool("auto_clips_enabled", true),
   };
+
+  liveFlagsCache = { value: resolved, expiresAt: now + LIVE_FLAGS_CACHE_TTL_MS };
+  return resolved;
 }
 
 async function isDailyMissionsEnabled(db: any): Promise<boolean> {
+  const now = Date.now();
+  if (dailyMissionsFlagCache && dailyMissionsFlagCache.expiresAt > now) {
+    stabilityMetrics.dailyMissionsFlagCacheHits += 1;
+    return dailyMissionsFlagCache.value;
+  }
+  stabilityMetrics.dailyMissionsFlagCacheMisses += 1;
+
   if (!db) return true;
   const [row] = await db.select({ value: schema.systemSettings.value })
     .from(schema.systemSettings)
     .where(eq(schema.systemSettings.key, "daily_missions_enabled"))
     .limit(1);
   const raw = String(row?.value || "true").toLowerCase();
-  return !(raw === "false" || raw === "0" || raw === "off" || raw === "no");
+  const resolved = !(raw === "false" || raw === "0" || raw === "off" || raw === "no");
+  dailyMissionsFlagCache = { value: resolved, expiresAt: now + DAILY_MISSIONS_FLAG_CACHE_TTL_MS };
+  return resolved;
 }
 
 // GET /social/feature-flags — lightweight runtime flags for live UX
 router.get("/feature-flags", async (_req: Request, res: Response) => {
   try {
     const db = getDb();
-    const flags = await getLiveFeatureFlags(db);
-    return res.json({ success: true, data: flags });
+    const [flags, dailyMissionsEnabled] = await Promise.all([
+      getLiveFeatureFlags(db),
+      isDailyMissionsEnabled(db),
+    ]);
+    return res.json({ success: true, data: { ...flags, dailyMissionsEnabled } });
   } catch (err: any) {
     socialLog.error({ err }, "Feature flags error");
     return res.json({
@@ -3255,6 +3520,7 @@ router.get("/feature-flags", async (_req: Request, res: Response) => {
         creatorAnalyticsCsvEnabled: true,
         smartDirectorTelemetryEnabled: true,
         autoClipsEnabled: true,
+        dailyMissionsEnabled: true,
       },
     });
   }
@@ -3720,12 +3986,39 @@ router.get("/streams/active", async (req: Request, res: Response) => {
     const db = getDb();
     if (!db) return res.json([]);
 
+    const redis = getRedis();
+    const cacheVersion = await getStreamCacheVersion(redis);
+    const cacheKey = `streams:active:${category || "all"}:v${cacheVersion}`;
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return res.json(JSON.parse(cached));
+        }
+      } catch {
+        // best-effort cache read
+      }
+    }
+
     const conditions = [eq(schema.streams.status, "active")];
     if (category && category !== "all") {
       conditions.push(eq(schema.streams.category, category));
     }
 
-    const data = await db.select().from(schema.streams)
+    const data = await db.select({
+      id: schema.streams.id,
+      userId: schema.streams.userId,
+      title: schema.streams.title,
+      type: schema.streams.type,
+      status: schema.streams.status,
+      category: schema.streams.category,
+      viewerCount: schema.streams.viewerCount,
+      peakViewers: schema.streams.peakViewers,
+      totalGifts: schema.streams.totalGifts,
+      tags: schema.streams.tags,
+      startedAt: schema.streams.startedAt,
+      scheduledAt: schema.streams.scheduledAt,
+    }).from(schema.streams)
       .where(and(...conditions))
       .orderBy(desc(schema.streams.viewerCount)).limit(50);
 
@@ -3750,6 +4043,14 @@ router.get("/streams/active", async (req: Request, res: Response) => {
       };
     });
 
+    if (redis) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(enriched), "EX", ACTIVE_STREAMS_CACHE_TTL_SEC);
+      } catch {
+        // best-effort cache write
+      }
+    }
+
     return res.json(enriched);
   } catch (err: any) {
     socialLog.error({ err }, "Active streams error");
@@ -3770,13 +4071,37 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
 
     const category = String(req.query.category || "").trim();
     const currentUserId = String((req.session as any)?.userId || "").trim() || null;
+    const redis = getRedis();
+    const cacheVersion = await getStreamCacheVersion(redis);
+    const recCacheKey = `streams:recommended:${category || "all"}:${currentUserId || "anon"}:v${cacheVersion}`;
+    if (redis) {
+      try {
+        const cached = await redis.get(recCacheKey);
+        if (cached) return res.json(JSON.parse(cached));
+      } catch {
+        // best-effort cache read
+      }
+    }
 
     const conditions = [eq(schema.streams.status, "active")];
     if (category && category !== "all") {
       conditions.push(eq(schema.streams.category, category));
     }
 
-    const streams = await db.select().from(schema.streams)
+    const streams = await db.select({
+      id: schema.streams.id,
+      userId: schema.streams.userId,
+      title: schema.streams.title,
+      type: schema.streams.type,
+      status: schema.streams.status,
+      category: schema.streams.category,
+      viewerCount: schema.streams.viewerCount,
+      peakViewers: schema.streams.peakViewers,
+      totalGifts: schema.streams.totalGifts,
+      tags: schema.streams.tags,
+      startedAt: schema.streams.startedAt,
+      scheduledAt: schema.streams.scheduledAt,
+    }).from(schema.streams)
       .where(and(...conditions))
       .orderBy(desc(schema.streams.viewerCount), desc(schema.streams.startedAt))
       .limit(80);
@@ -3835,7 +4160,17 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
     });
 
     ranked.sort((a: any, b: any) => Number(b.recommendationScore) - Number(a.recommendationScore));
-    return res.json(ranked.slice(0, 50));
+    const payload = ranked.slice(0, 50);
+
+    if (redis) {
+      try {
+        await redis.set(recCacheKey, JSON.stringify(payload), "EX", RECOMMENDED_STREAMS_CACHE_TTL_SEC);
+      } catch {
+        // best-effort cache write
+      }
+    }
+
+    return res.json(payload);
   } catch (err: any) {
     socialLog.error({ err }, "Recommended streams error");
     return res.json([]);
@@ -3937,14 +4272,14 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "فشل في إنشاء البث" });
     }
 
-    // Add host as viewer with host role
-    await storage.addStreamViewer(stream.id, userId, "host");
-
-    // Create LiveKit room for media streaming
-    try {
-      await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
-    } catch (lkErr: any) {
-      socialLog.warn({ err: lkErr }, "LiveKit room creation failed (non-blocking)");
+    if (!isScheduled) {
+      // Add host + room only for active streams
+      await storage.addStreamViewer(stream.id, userId, "host");
+      try {
+        await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
+      } catch (lkErr: any) {
+        socialLog.warn({ err: lkErr }, "LiveKit room creation failed (non-blocking)");
+      }
     }
 
     const enriched = await enrichStream(stream);
@@ -3972,6 +4307,8 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       } catch { /* non-blocking */ }
     }
 
+    await invalidateStreamListCaches();
+
     return res.json({ success: true, data: enriched });
   } catch (err: any) {
     socialLog.error({ err }, "Create stream error");
@@ -3992,6 +4329,9 @@ router.post("/streams/:id/end", async (req: Request, res: Response) => {
 
     const ended = await storage.endStream(streamId);
 
+    // Broadcast stream-ended to all viewers in the room
+    io.to(`room:${streamId}`).emit("stream-ended", { streamId });
+
     // Cleanup LiveKit room
     try {
       await deleteLiveKitRoom(`stream-${streamId}`);
@@ -4000,6 +4340,7 @@ router.post("/streams/:id/end", async (req: Request, res: Response) => {
     }
 
     socialLog.info({ streamId, userId }, "Stream ended");
+    await invalidateStreamListCaches();
     return res.json({ success: true, data: ended });
   } catch (err: any) {
     socialLog.error({ err }, "End stream error");
@@ -4028,6 +4369,8 @@ router.post("/streams/:id/join", async (req: Request, res: Response) => {
       }).where(eq(schema.streams.id, streamId));
     }
 
+    await invalidateStreamListCaches();
+
     return res.json({ success: true });
   } catch (err: any) {
     socialLog.error({ err }, "Join stream error");
@@ -4042,6 +4385,7 @@ router.post("/streams/:id/leave", async (req: Request, res: Response) => {
   try {
     const streamId = paramStr(req.params.id);
     await storage.removeStreamViewer(streamId, userId);
+    await invalidateStreamListCaches();
     return res.json({ success: true });
   } catch (err: any) {
     socialLog.error({ err }, "Leave stream error");
@@ -5208,5 +5552,91 @@ router.get("/xp/rewards", (_req, res) => {
   }));
   return res.json({ success: true, data: { rewards, sampleLevels: levels } });
 });
+
+// ── Scheduled stream auto-start — activate streams whose scheduledAt has passed ──
+setInterval(async () => {
+  const db = getDb();
+  if (!db) return;
+  const hasLock = await tryAcquireJobLock(db, LOCK_KEY_SCHEDULED_STREAMS);
+  if (!hasLock) return;
+  try {
+    const dueStreams = await db.select({
+      id: schema.streams.id,
+      userId: schema.streams.userId,
+      title: schema.streams.title,
+      type: schema.streams.type,
+    })
+      .from(schema.streams)
+      .where(and(
+        eq(schema.streams.status, "scheduled"),
+        sql`${schema.streams.scheduledAt} <= NOW()`,
+      ))
+      .limit(20);
+
+    for (const stream of dueStreams) {
+      try {
+        const activated = await db.update(schema.streams)
+          .set({ status: "active", startedAt: new Date() })
+          .where(and(
+            eq(schema.streams.id, stream.id),
+            eq(schema.streams.status, "scheduled"),
+            sql`${schema.streams.scheduledAt} <= NOW()`,
+          ))
+          .returning({ id: schema.streams.id });
+        if (activated.length === 0) continue;
+
+        await storage.addStreamViewer(stream.id, stream.userId, "host");
+
+        // Create LiveKit room
+        try {
+          await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
+        } catch { /* non-blocking */ }
+
+        // Notify followers
+        const followers = await db.select({ followerId: schema.userFollows.followerId })
+          .from(schema.userFollows).where(eq(schema.userFollows.followingId, stream.userId)).limit(500);
+        const [hostUser] = await db.select({ displayName: schema.users.displayName, avatar: schema.users.avatar })
+          .from(schema.users).where(eq(schema.users.id, stream.userId)).limit(1);
+
+        for (const f of followers) {
+          io.to(`user:${f.followerId}`).emit("stream-started", {
+            streamId: stream.id,
+            hostName: hostUser?.displayName || "مستخدم",
+            hostAvatar: hostUser?.avatar || null,
+            title: stream.title,
+            type: stream.type,
+          });
+        }
+
+        socialLog.info({ streamId: stream.id, userId: stream.userId }, "Scheduled stream auto-started");
+      } catch (err: any) {
+        socialLog.warn({ streamId: stream.id, err: err?.message }, "Failed to auto-start scheduled stream");
+      }
+    }
+  } catch (err: any) {
+    socialLog.warn({ err: err?.message }, "Scheduled stream auto-start check failed");
+  } finally {
+    await releaseJobLock(db, LOCK_KEY_SCHEDULED_STREAMS);
+  }
+}, 30_000).unref();
+
+// ── Friend request expiration — clean up pending requests older than 30 days ──
+setInterval(async () => {
+  const db = getDb();
+  if (!db) return;
+  const hasLock = await tryAcquireJobLock(db, LOCK_KEY_FRIEND_EXPIRY);
+  if (!hasLock) return;
+  try {
+    await db.delete(schema.friendships)
+      .where(and(
+        eq(schema.friendships.status, "pending"),
+        sql`${schema.friendships.createdAt} < NOW() - INTERVAL '30 days'`,
+      ));
+  } catch (err: any) {
+    socialLog.warn({ err: err?.message }, "Friend request expiration cleanup failed");
+  } finally {
+    await releaseJobLock(db, LOCK_KEY_FRIEND_EXPIRY);
+  }
+}, 6 * 60 * 60 * 1000).unref(); // Every 6 hours
 
 export default router;

@@ -160,6 +160,100 @@ router.get("/:id", async (req: Request, res: Response) => {
   }
 });
 
+// ── PUT /:id — Update group (admin only) ──
+router.put("/:id", async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.userId;
+  if (!userId) return res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
+
+  const pool = getPool();
+  if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+
+  try {
+    // Verify admin role
+    const roleCheck = await pool.query(
+      `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2 AND role = 'admin'`,
+      [req.params.id, userId],
+    );
+    if (roleCheck.rows.length === 0) {
+      return res.status(403).json({ success: false, message: "ليس لديك صلاحية" });
+    }
+
+    const { name, description, avatar } = req.body;
+    const setClauses: string[] = [];
+    const values: any[] = [];
+    let paramIdx = 1;
+
+    if (typeof name === "string" && name.trim().length >= 1 && name.trim().length <= 100) {
+      setClauses.push(`name = $${paramIdx++}`);
+      values.push(name.trim());
+    }
+    if (typeof description === "string" && description.length <= 500) {
+      setClauses.push(`description = $${paramIdx++}`);
+      values.push(description.trim() || null);
+    }
+    if (typeof avatar === "string" && avatar.length <= 500) {
+      setClauses.push(`avatar = $${paramIdx++}`);
+      values.push(avatar || null);
+    }
+
+    if (setClauses.length === 0) {
+      return res.status(400).json({ success: false, message: "لا توجد بيانات للتحديث" });
+    }
+
+    values.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE group_conversations SET ${setClauses.join(", ")}
+       WHERE id = $${paramIdx} AND is_active = true
+       RETURNING id, name, avatar, description`,
+      values,
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
+    }
+
+    groupLog.info(`Group ${req.params.id} updated by ${userId}`);
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (err: any) {
+    groupLog.error(`Update group error: ${err.message}`);
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+// ── DELETE /:id — Delete group (creator only, soft-delete) ──
+router.delete("/:id", async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.userId;
+  if (!userId) return res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
+
+  const pool = getPool();
+  if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+
+  try {
+    // Only the creator can delete
+    const creatorCheck = await pool.query(
+      `SELECT creator_id FROM group_conversations WHERE id = $1 AND is_active = true`,
+      [req.params.id],
+    );
+    if (creatorCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
+    }
+    if (creatorCheck.rows[0].creator_id !== userId) {
+      return res.status(403).json({ success: false, message: "فقط منشئ المجموعة يمكنه حذفها" });
+    }
+
+    await pool.query(
+      `UPDATE group_conversations SET is_active = false WHERE id = $1`,
+      [req.params.id],
+    );
+
+    groupLog.info(`Group ${req.params.id} deleted (soft) by creator ${userId}`);
+    return res.json({ success: true, message: "تم حذف المجموعة" });
+  } catch (err: any) {
+    groupLog.error(`Delete group error: ${err.message}`);
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
 // ── POST /:id/members — Add members (admin/moderator only) ──
 router.post("/:id/members", async (req: Request, res: Response) => {
   const userId = (req.session as any)?.userId;

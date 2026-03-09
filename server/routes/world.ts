@@ -21,6 +21,7 @@ const MAX_MATCH_CANDIDATES = 50;             // Max candidates to fetch for scor
 const GOOD_CHAT_DURATION_SECONDS = 300;      // 5 min threshold for "good chat history"
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes — zombie session cleanup
 const STALE_SEARCH_MAX_MINUTES = 20;
+const LOCK_KEY_WORLD_STALE_CLEANUP = 712351;
 
 // Express 5: req.params values can be string | string[]
 function paramStr(v: string | string[] | undefined): string {
@@ -1037,12 +1038,17 @@ router.post("/sessions/:id/friend-request", async (req, res) => {
         userId,
         friendshipId: friendship.id,
       });
-      io.to(targetSocketId).emit("friend-request", {
-        from: userId,
-        to: targetId,
-        request: friendship,
-      });
     }
+
+    // Send friend-request event via user room for consistency
+    const [senderInfo] = await db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      displayName: schema.users.displayName,
+      avatar: schema.users.avatar,
+      level: schema.users.level,
+    }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    io.to(`user:${targetId}`).emit("friend-request", { friendship, sender: senderInfo || null });
 
     res.json({ success: true, data: { message: "تم إرسال طلب الصداقة", friendshipId: friendship.id } });
   } catch (err) {
@@ -1243,7 +1249,22 @@ export default router;
 setInterval(async () => {
   const db = getDb();
   if (!db) return;
+  let hasLock = false;
   try {
+    const lockResult: any = await db.execute(sql`SELECT pg_try_advisory_lock(${LOCK_KEY_WORLD_STALE_CLEANUP}) AS locked`);
+    hasLock = !!lockResult?.rows?.[0]?.locked;
+    if (!hasLock) return;
+
+    // Find affected users before updating so we can notify them
+    const staleRows = await db.select({ userId: schema.worldSessions.userId })
+      .from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.status, "searching"),
+        sql`${schema.worldSessions.startedAt} < NOW() - (${STALE_SEARCH_MAX_MINUTES} * INTERVAL '1 minute')`,
+      ));
+
+    if (staleRows.length === 0) return;
+
     await db.update(schema.worldSessions)
       .set({
         status: "cancelled",
@@ -1253,7 +1274,26 @@ setInterval(async () => {
         eq(schema.worldSessions.status, "searching"),
         sql`${schema.worldSessions.startedAt} < NOW() - (${STALE_SEARCH_MAX_MINUTES} * INTERVAL '1 minute')`,
       ));
+
+    // Notify each affected user that their search timed out
+    for (const row of staleRows) {
+      io.to(`user:${row.userId}`).emit("world-queue-timeout", {
+        reason: "timeout",
+      });
+    }
+
+    if (staleRows.length > 0) {
+      worldLog.info(`Cleaned up ${staleRows.length} stale world sessions and notified users`);
+    }
   } catch (err) {
     worldLog.warn({ err }, "World stale-session cleanup failed");
+  } finally {
+    if (hasLock) {
+      try {
+        await db.execute(sql`SELECT pg_advisory_unlock(${LOCK_KEY_WORLD_STALE_CLEANUP})`);
+      } catch {
+        // best-effort unlock
+      }
+    }
   }
 }, CLEANUP_INTERVAL_MS).unref();

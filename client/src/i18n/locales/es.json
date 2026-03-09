@@ -1496,7 +1496,19 @@
     "coinsCharged": "monedas cobradas",
     "incomingVoiceCall": "Llamada de voz entrante",
     "incomingVideoCall": "Videollamada entrante",
-    "startConversation": "Inicia una nueva conversación"
+    "startConversation": "Inicia una nueva conversación",
+    "callRejected": "Llamada rechazada",
+    "noReply": "Sin respuesta",
+    "callStartFailed": "Error al iniciar la llamada",
+    "callFailed": "Llamada fallida",
+    "userOffline": "El usuario no está conectado",
+    "friendRequestAccepted": "Solicitud de amistad aceptada",
+    "friendRequestRejected": "Solicitud de amistad rechazada",
+    "actionFailed": "Error en la acción",
+    "freeCallApplied": "Llamada gratuita aplicada",
+    "profileVisibility": "Visibilidad del perfil",
+    "profile1": "Perfil 1",
+    "profile2": "Perfil 2"
   },
   "world": {
     "title": "Alrededor del mundo",

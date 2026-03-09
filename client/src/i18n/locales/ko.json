@@ -1504,7 +1504,19 @@
     "coinsCharged": "코인 차감",
     "incomingVoiceCall": "수신 음성 통화",
     "incomingVideoCall": "수신 영상 통화",
-    "startConversation": "새 대화를 시작하세요"
+    "startConversation": "새 대화를 시작하세요",
+    "callRejected": "통화 거부됨",
+    "noReply": "응답 없음",
+    "callStartFailed": "통화 시작 실패",
+    "callFailed": "통화 실패",
+    "userOffline": "사용자가 현재 오프라인입니다",
+    "friendRequestAccepted": "친구 요청이 수락되었습니다",
+    "friendRequestRejected": "친구 요청이 거부되었습니다",
+    "actionFailed": "작업 실패",
+    "freeCallApplied": "무료 통화가 적용되었습니다",
+    "profileVisibility": "프로필 공개",
+    "profile1": "프로필 1",
+    "profile2": "프로필 2"
   },
   "world": {
     "title": "세계 일주",

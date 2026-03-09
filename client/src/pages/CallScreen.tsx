@@ -121,6 +121,7 @@ export function CallScreen() {
   const callType = (params.get("type") || "voice") as "voice" | "video";
   const isRandomMatch = params.get("random") === "1";
   const sessionId = params.get("session");
+  const isIncoming = params.get("incoming") === "1";
   const conn = useConnectionQuality();
 
   const [status, setStatus] = useState<CallState>("connecting");
@@ -144,6 +145,60 @@ export function CallScreen() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const ringbackRef = useRef<{ osc: OscillatorNode; gain: GainNode; ctx: AudioContext; interval: ReturnType<typeof setInterval> } | null>(null);
+
+  // Ringback tone for the caller while ringing
+  useEffect(() => {
+    if (isIncoming) return; // Only for caller
+    if (status !== "ringing") {
+      // Stop ringback when no longer ringing
+      if (ringbackRef.current) {
+        const rb = ringbackRef.current;
+        clearInterval(rb.interval);
+        rb.osc.stop();
+        rb.ctx.close().catch(() => { });
+        ringbackRef.current = null;
+      }
+      return;
+    }
+
+    // Generate ringback tone pattern (1s on, 3s off)
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(425, ctx.currentTime);
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+
+    // Toggle on/off pattern
+    let on = true;
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    const interval = setInterval(() => {
+      on = !on;
+      gain.gain.setValueAtTime(on ? 0.06 : 0, ctx.currentTime);
+    }, on ? 1000 : 3000);
+    // More accurate: 1s on, 3s off cycle
+    clearInterval(interval);
+    let phase = 0;
+    const ringInterval = setInterval(() => {
+      phase = (phase + 1) % 4;
+      gain.gain.setValueAtTime(phase === 0 ? 0.06 : 0, ctx.currentTime);
+    }, 1000);
+
+    ringbackRef.current = { osc, gain, ctx, interval: ringInterval };
+
+    return () => {
+      clearInterval(ringInterval);
+      osc.stop();
+      ctx.close().catch(() => { });
+      ringbackRef.current = null;
+    };
+  }, [status, isIncoming]);
 
   // Load matched user info for random calls
   useEffect(() => {
@@ -236,15 +291,9 @@ export function CallScreen() {
     if (!userId) return;
 
     const socket = getSocket();
+    let incomingOfferHandled = false;
 
-    const handleSignal = (data: { callId: string; senderId: string; signal: any }) => {
-      if (data.senderId === userId) {
-        webrtcManager.handleSignal(data.signal);
-      }
-    };
-    socket.on("call-signal", handleSignal);
-
-    webrtcManager.startCall(userId, callType, {
+    const callHandlers: Parameters<typeof webrtcManager.startCall>[2] = {
       onStateChange: (state) => {
         setStatus(state);
         if (state === "ended" || state === "failed") {
@@ -271,7 +320,36 @@ export function CallScreen() {
         setTimeout(() => setErrorMsg(null), 5000);
       },
       onDurationTick: setDuration,
-    });
+    };
+
+    const handleSignal = (data: { callId: string; senderId: string; signal: any }) => {
+      if (data.senderId !== userId) return;
+
+      // Incoming call: wait for the caller's offer, then acceptCall
+      if (isIncoming && !incomingOfferHandled && data.signal?.type === "offer") {
+        incomingOfferHandled = true;
+        webrtcManager.acceptCall(
+          callId || data.callId,
+          userId,
+          callType,
+          { type: "offer", sdp: data.signal.sdp },
+          callHandlers,
+        );
+        return;
+      }
+
+      // All other signals (answer, ICE candidates) go through handleSignal
+      webrtcManager.handleSignal(data.signal);
+    };
+    socket.on("call-signal", handleSignal);
+
+    // Outgoing call: start immediately
+    // Incoming call: wait for the offer signal (handled above)
+    if (!isIncoming) {
+      webrtcManager.startCall(userId, callType, callHandlers);
+    } else {
+      setStatus("connecting");
+    }
 
     return () => {
       socket.off("call-signal", handleSignal);
@@ -304,14 +382,25 @@ export function CallScreen() {
       setTimeout(() => navigate("/chat"), 1200);
     };
 
+    // Call timeout — if stays ringing/connecting for 30s, auto-end
+    const onCallTimeout = (data: { callId: string }) => {
+      if (data?.callId !== callId) return;
+      setErrorMsg(t("social.noReply", "لا رد"));
+      webrtcManager.endCall();
+      setStatus("ended");
+      setTimeout(() => navigate("/chat"), 2000);
+    };
+
     socket.on("call-answered", onCallAnswered);
     socket.on("call-rejected", onCallRejected);
     socket.on("call-ended", onCallEnded);
+    socket.on("call-timeout", onCallTimeout);
 
     return () => {
       socket.off("call-answered", onCallAnswered);
       socket.off("call-rejected", onCallRejected);
       socket.off("call-ended", onCallEnded);
+      socket.off("call-timeout", onCallTimeout);
     };
   }, [callId, navigate, status, t]);
 
@@ -457,7 +546,7 @@ export function CallScreen() {
             )}
             {(status === "ended" || status === "failed") && (
               <div className="text-center">
-                <p className="text-white/40 text-sm">{status === "failed" ? "فشل الاتصال" : t("social.callEnded")}</p>
+                <p className="text-white/40 text-sm">{status === "failed" ? t("social.callFailed", "فشل الاتصال") : t("social.callEnded")}</p>
                 <p className="text-white/60 text-lg font-bold mt-1">{formatDuration(duration)}</p>
                 <div className="flex items-center justify-center gap-1 text-amber-400 text-sm mt-2">
                   <Coins className="w-4 h-4" />

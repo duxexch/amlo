@@ -1504,7 +1504,19 @@
     "coinsCharged": "सिक्के काटे गए",
     "incomingVoiceCall": "आने वाली वॉयस कॉल",
     "incomingVideoCall": "आने वाली वीडियो कॉल",
-    "startConversation": "एक नई बातचीत शुरू करें"
+    "startConversation": "एक नई बातचीत शुरू करें",
+    "callRejected": "कॉल अस्वीकृत",
+    "noReply": "कोई जवाब नहीं",
+    "callStartFailed": "कॉल शुरू करने में विफल",
+    "callFailed": "कॉल विफल",
+    "userOffline": "उपयोगकर्ता वर्तमान में ऑफलाइन है",
+    "friendRequestAccepted": "मित्रता अनुरोध स्वीकृत",
+    "friendRequestRejected": "मित्रता अनुरोध अस्वीकृत",
+    "actionFailed": "क्रिया विफल",
+    "freeCallApplied": "मुफ्त कॉल लागू की गई",
+    "profileVisibility": "प्रोफाइल दृश्यता",
+    "profile1": "प्रोफाइल 1",
+    "profile2": "प्रोफाइल 2"
   },
   "world": {
     "title": "दुनिया भर में",

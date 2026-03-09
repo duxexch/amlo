@@ -1504,7 +1504,19 @@
     "coinsCharged": "jeton kesildi",
     "incomingVoiceCall": "Gelen sesli arama",
     "incomingVideoCall": "Gelen görüntülü arama",
-    "startConversation": "Yeni bir sohbet başlat"
+    "startConversation": "Yeni bir sohbet başlat",
+    "callRejected": "Arama reddedildi",
+    "noReply": "Yanıt yok",
+    "callStartFailed": "Arama başlatılamadı",
+    "callFailed": "Arama başarısız",
+    "userOffline": "Kullanıcı şu anda çevrimdışı",
+    "friendRequestAccepted": "Arkadaşlık isteği kabul edildi",
+    "friendRequestRejected": "Arkadaşlık isteği reddedildi",
+    "actionFailed": "İşlem başarısız",
+    "freeCallApplied": "Ücretsiz arama uygulandı",
+    "profileVisibility": "Profil görünürlüğü",
+    "profile1": "Profil 1",
+    "profile2": "Profil 2"
   },
   "world": {
     "title": "Dünya Turu",

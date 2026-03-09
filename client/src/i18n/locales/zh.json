@@ -1504,7 +1504,19 @@
     "coinsCharged": "金币已扣除",
     "incomingVoiceCall": "来电语音通话",
     "incomingVideoCall": "来电视频通话",
-    "startConversation": "开始新对话"
+    "startConversation": "开始新对话",
+    "callRejected": "通话已拒绝",
+    "noReply": "无应答",
+    "callStartFailed": "无法发起通话",
+    "callFailed": "通话失败",
+    "userOffline": "用户当前离线",
+    "friendRequestAccepted": "好友请求已接受",
+    "friendRequestRejected": "好友请求已拒绝",
+    "actionFailed": "操作失败",
+    "freeCallApplied": "已应用免费通话",
+    "profileVisibility": "资料可见性",
+    "profile1": "资料 1",
+    "profile2": "资料 2"
   },
   "world": {
     "title": "环游世界",

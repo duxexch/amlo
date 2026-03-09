@@ -268,15 +268,32 @@ function App() {
         });
       };
 
+      const handleFriendAcceptedGlobal = (data: any) => {
+        const friendName = data?.friend?.displayName || data?.friend?.username || "User";
+        publishNotification({
+          type: "friend-request",
+          titleKey: "notify.friendAccepted.title",
+          bodyKey: "notify.friendAccepted.body",
+          params: { name: friendName },
+          title: t("social.friendRequestAccepted", "تم قبول طلب الصداقة"),
+          body: friendName,
+          url: "/friends",
+          persistent: false,
+          meta: { kind: "friend-accepted" },
+        });
+      };
+
       socket.on("incoming-call", handleIncomingCall);
       socket.on("new-message", handleNewMessageGlobal);
       socket.on("friend-request", handleFriendRequestGlobal);
+      socket.on("friend-accepted", handleFriendAcceptedGlobal);
       socket.on("finance-updated", handleFinanceUpdatedGlobal);
       // Store cleanup ref
       (window as any).__cleanupIncomingCall = () => {
         socket.off("incoming-call", handleIncomingCall);
         socket.off("new-message", handleNewMessageGlobal);
         socket.off("friend-request", handleFriendRequestGlobal);
+        socket.off("friend-accepted", handleFriendAcceptedGlobal);
         socket.off("finance-updated", handleFinanceUpdatedGlobal);
       };
     });
@@ -321,7 +338,7 @@ function App() {
                 return;
               }
               setIncomingCall(false);
-              navigate(`/call?user=${callerId}&type=${isVideo ? "video" : "voice"}&session=${callId}`);
+              navigate(`/call?user=${callerId}&type=${isVideo ? "video" : "voice"}&session=${callId}&incoming=1`);
             }}
             onDecline={async () => {
               const { callId } = incomingCallInfo;
