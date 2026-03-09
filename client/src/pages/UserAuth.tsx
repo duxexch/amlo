@@ -47,10 +47,12 @@ export function UserAuth() {
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpEmail, setOtpEmail] = useState("");
   const [otpPurpose, setOtpPurpose] = useState<"register" | "login">("register");
+  const [otpRequestId, setOtpRequestId] = useState<string | null>(null);
   const [loginOtpEmail, setLoginOtpEmail] = useState("");
   const [showLoginOtp, setShowLoginOtp] = useState(false);
   const [loginOtpNeedsDeviceTrust, setLoginOtpNeedsDeviceTrust] = useState(false);
   const [loginOtpValues, setLoginOtpValues] = useState(["", "", "", "", "", ""]);
+  const [loginOtpRequestId, setLoginOtpRequestId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -134,6 +136,7 @@ export function UserAuth() {
   const startLoginOtpFlow = async (options?: { deviceTrustRequired?: boolean }) => {
     const result = await loginOtpApi.sendOtp();
     setLoginOtpEmail(result.email || "");
+    setLoginOtpRequestId(result.requestId || null);
     setLoginOtpNeedsDeviceTrust(!!options?.deviceTrustRequired);
     setAuthSuccess(result.devCode ? `${t("auth.otpTitle", "رمز التحقق")}: ${result.devCode}` : null);
     setShowLoginOtp(true);
@@ -218,6 +221,7 @@ export function UserAuth() {
         setAuthCooldownSeconds(0);
         setOtpEmail(email.trim());
         setOtpPurpose("register");
+        setOtpRequestId(otpResult.requestId || null);
         setShowOtp(true);
         setOtpTimer(Math.max(1, Number(otpResult.cooldownSeconds || 60)));
         setOtpValues(["", "", "", "", "", ""]);
@@ -324,7 +328,7 @@ export function UserAuth() {
     setAuthError(null);
     try {
       // Verify OTP
-      const verifyResult = await authApi.verifyOtp(otpEmail, code);
+      const verifyResult = await authApi.verifyOtp(otpEmail, code, otpRequestId || undefined);
       if (!verifyResult.success) {
         setAuthError(verifyResult.message);
         return;
@@ -517,7 +521,7 @@ export function UserAuth() {
                   if (code.length !== 6) return;
                   setAuthLoading(true); setAuthError(null);
                   try {
-                    await loginOtpApi.verifyOtp(code);
+                    await loginOtpApi.verifyOtp(code, loginOtpRequestId || undefined);
                     setLocation("/");
                   } catch (err: any) {
                     applyAuthUiError(err);
@@ -530,7 +534,7 @@ export function UserAuth() {
                 {t("auth.verifyOtp", "تحقق")}
               </button>
 
-              <button onClick={() => { setShowLoginOtp(false); setLoginOtpNeedsDeviceTrust(false); setLoginOtpValues(["", "", "", "", "", ""]); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
+              <button onClick={() => { setShowLoginOtp(false); setLoginOtpNeedsDeviceTrust(false); setLoginOtpValues(["", "", "", "", "", ""]); setLoginOtpRequestId(null); setAuthError(null); }} className="w-full text-white/40 text-sm hover:text-white transition-colors flex items-center justify-center gap-1">
                 <ChevronLeft className="w-4 h-4" />
                 {t("common.back", "رجوع")}
               </button>
@@ -593,6 +597,7 @@ export function UserAuth() {
                       const result = otpPurpose === "register"
                         ? await authApi.sendRegisterOtp(otpEmail)
                         : await authApi.sendOtp(otpEmail);
+                      setOtpRequestId(result.requestId || null);
                       setOtpTimer(Math.max(1, Number(result.cooldownSeconds || 60)));
                       setOtpValues(["", "", "", "", "", ""]);
                     } catch (err: any) {
@@ -603,7 +608,7 @@ export function UserAuth() {
               </div>
 
               <button
-                onClick={() => { setShowOtp(false); setOtpValues(["", "", "", "", "", ""]); setAuthError(null); setAuthSuccess(null); }}
+                onClick={() => { setShowOtp(false); setOtpValues(["", "", "", "", "", ""]); setOtpRequestId(null); setAuthError(null); setAuthSuccess(null); }}
                 className="w-full text-white/40 text-sm hover:text-white transition-colors mt-4 flex items-center justify-center gap-1"
               >
                 <ChevronLeft className="w-4 h-4" />

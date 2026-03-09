@@ -8,7 +8,7 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { createLogger } from "../logger";
 import { cacheGet, cacheSet, cacheDel } from "../redis";
-import { randomInt } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 
 const emailLog = createLogger("email");
 
@@ -188,12 +188,13 @@ function generateOtp(): string {
 const otpKey = (email: string) => `otp:code:${email.toLowerCase()}`;
 const otpAttemptsKey = (email: string) => `otp:attempts:${email.toLowerCase()}`;
 const otpCooldownKey = (email: string) => `otp:cooldown:${email.toLowerCase()}`;
+const otpRequestIdKey = (email: string) => `otp:request-id:${email.toLowerCase()}`;
 
 /**
  * Send OTP email to user.
  * Returns { success, message, cooldownSeconds? }
  */
-export async function sendOtp(email: string): Promise<{ success: boolean; message: string; cooldownSeconds?: number }> {
+export async function sendOtp(email: string): Promise<{ success: boolean; message: string; cooldownSeconds?: number; requestId?: string }> {
   const emailLower = email.toLowerCase();
 
   // Check cooldown
@@ -210,6 +211,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
 
   // Generate OTP
   const code = generateOtp();
+  const requestId = randomUUID();
 
   if (!transporter) {
     if (isOtpDevFallbackEnabled()) {
@@ -217,6 +219,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
       await cacheSet(otpKey(emailLower), code, otpConfig.expiryMinutes * 60);
       await cacheSet(otpAttemptsKey(emailLower), "0", otpConfig.expiryMinutes * 60);
       await cacheSet(otpCooldownKey(emailLower), String(otpConfig.cooldownMinutes * 60), otpConfig.cooldownMinutes * 60);
+      await cacheSet(otpRequestIdKey(emailLower), requestId, otpConfig.expiryMinutes * 60);
       setLocalOtpRecord(emailLower, code);
       if (shouldLogDevOtpCode()) {
         emailLog.warn(`DEV OTP for ${emailLower}: ${code}`);
@@ -224,6 +227,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
       return {
         success: true,
         message: "تم إرسال رمز التحقق (وضع التطوير)",
+        requestId,
         // Exposed only for local temporary testing when fallback mode is enabled.
         ...(process.env.OTP_DEV_LOG_OTP === "true" ? { devCode: code } : {}),
       } as any;
@@ -239,6 +243,21 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
     await cacheSet(otpAttemptsKey(emailLower), "0", otpConfig.expiryMinutes * 60);
     // Set cooldown
     await cacheSet(otpCooldownKey(emailLower), String(otpConfig.cooldownMinutes * 60), otpConfig.cooldownMinutes * 60);
+    await cacheSet(otpRequestIdKey(emailLower), requestId, otpConfig.expiryMinutes * 60);
+
+    // Verify persistence to avoid "code delivered but not verifiable" when Redis writes fail silently.
+    const persistedCode = await cacheGet(otpKey(emailLower));
+    const persistedRequestId = await cacheGet(otpRequestIdKey(emailLower));
+    if (persistedCode !== code || persistedRequestId !== requestId) {
+      emailLog.error(`OTP persistence verification failed for ${emailLower.slice(0, 3)}***`);
+      await cacheDel(otpKey(emailLower));
+      await cacheDel(otpAttemptsKey(emailLower));
+      await cacheDel(otpCooldownKey(emailLower));
+      await cacheDel(otpRequestIdKey(emailLower));
+      clearLocalOtpRecord(emailLower);
+      return { success: false, message: "تعذر حفظ رمز التحقق. حاول مرة أخرى" };
+    }
+
     setLocalOtpRecord(emailLower, code);
 
     // Send email
@@ -251,7 +270,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
     });
 
     emailLog.info(`OTP sent to ${emailLower.slice(0, 3)}***`);
-    return { success: true, message: "تم إرسال رمز التحقق إلى بريدك الإلكتروني" };
+    return { success: true, message: "تم إرسال رمز التحقق إلى بريدك الإلكتروني", requestId };
   } catch (err: any) {
     emailLog.error({ err }, `Failed to send OTP to ${emailLower.slice(0, 3)}***`);
     // Clean up on failure
@@ -265,7 +284,7 @@ export async function sendOtp(email: string): Promise<{ success: boolean; messag
  * Verify OTP code.
  * Returns { success, message }
  */
-export async function verifyOtp(email: string, code: string): Promise<{ success: boolean; message: string }> {
+export async function verifyOtp(email: string, code: string, requestId?: string): Promise<{ success: boolean; message: string }> {
   const emailLower = email.toLowerCase();
   const local = getLocalOtpRecord(emailLower);
 
@@ -281,9 +300,18 @@ export async function verifyOtp(email: string, code: string): Promise<{ success:
   }
 
   // Get stored OTP
-  const storedCode = (await cacheGet(otpKey(emailLower))) || local?.code || null;
+  const storedCodeRedis = await cacheGet(otpKey(emailLower));
+  const allowLocalFallback = process.env.NODE_ENV !== "production" && isOtpDevFallbackEnabled();
+  const storedCode = storedCodeRedis || (allowLocalFallback ? (local?.code || null) : null);
   if (!storedCode) {
     return { success: false, message: "رمز التحقق منتهي أو غير موجود. أعد الإرسال." };
+  }
+
+  if (requestId && storedCodeRedis) {
+    const storedRequestId = await cacheGet(otpRequestIdKey(emailLower));
+    if (!storedRequestId || storedRequestId !== requestId) {
+      return { success: false, message: "تم إصدار رمز أحدث. استخدم آخر رمز مرسل إلى بريدك." };
+    }
   }
 
   // Compare
@@ -302,6 +330,7 @@ export async function verifyOtp(email: string, code: string): Promise<{ success:
   await cacheDel(otpKey(emailLower));
   await cacheDel(otpAttemptsKey(emailLower));
   await cacheDel(otpCooldownKey(emailLower));
+  await cacheDel(otpRequestIdKey(emailLower));
   clearLocalOtpRecord(emailLower);
 
   emailLog.info(`OTP verified for ${emailLower.slice(0, 3)}***`);

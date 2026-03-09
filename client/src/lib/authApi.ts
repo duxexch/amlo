@@ -147,21 +147,21 @@ export const authApi = {
 
   // OTP
   sendOtp: (email: string) =>
-    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string }>("/otp/send", {
+    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string; requestId?: string }>("/otp/send", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
 
   sendRegisterOtp: (email: string) =>
-    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string }>("/otp/send-register", {
+    request<{ success: boolean; message: string; cooldownSeconds?: number; devCode?: string; requestId?: string }>("/otp/send-register", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
 
-  verifyOtp: (email: string, code: string) =>
+  verifyOtp: (email: string, code: string, requestId?: string) =>
     request<{ success: boolean; message: string; verified?: boolean }>("/otp/verify", {
       method: "POST",
-      body: JSON.stringify({ email, code }),
+      body: JSON.stringify({ email, code, requestId }),
     }),
 
   // OAuth
@@ -251,12 +251,12 @@ export const profileApi = {
 // ── Login OTP (alternative to PIN) ──
 export const loginOtpApi = {
   sendOtp: () =>
-    request<{ success: boolean; message: string; email?: string; devCode?: string }>("/login/otp", { method: "POST" }),
+    request<{ success: boolean; message: string; email?: string; devCode?: string; requestId?: string }>("/login/otp", { method: "POST" }),
 
-  verifyOtp: (code: string) =>
+  verifyOtp: (code: string, requestId?: string) =>
     request<{ success: boolean; data?: any }>("/login/otp-verify", {
       method: "POST",
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, requestId }),
     }),
 };
 

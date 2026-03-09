@@ -1366,7 +1366,7 @@ router.post("/otp/send", async (req: Request, res: Response) => {
  */
 router.post("/otp/verify", async (req: Request, res: Response) => {
   try {
-    const { email, code } = req.body;
+    const { email, code, requestId } = req.body;
     if (!email || !code) {
       return res.status(400).json({ success: false, message: "يرجى إدخال البريد والرمز" });
     }
@@ -1376,7 +1376,7 @@ router.post("/otp/verify", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "رمز التحقق يجب أن يكون 6 أرقام" });
     }
 
-    const result = await verifyOtp(email.trim(), normalizedCode);
+    const result = await verifyOtp(email.trim(), normalizedCode, typeof requestId === "string" ? requestId : undefined);
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -1603,7 +1603,7 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
     const userId = requireAuth(req, res);
     if (!userId) return;
 
-    const { code } = req.body;
+    const { code, requestId } = req.body;
     if (!code) {
       return res.status(400).json({ success: false, message: "يرجى إدخال رمز التحقق" });
     }
@@ -1618,7 +1618,7 @@ router.post("/login/otp-verify", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "رمز التحقق يجب أن يكون 6 أرقام" });
     }
 
-    const result = await verifyOtp(user.email, normalizedCode);
+    const result = await verifyOtp(user.email, normalizedCode, typeof requestId === "string" ? requestId : undefined);
     if (!result.success) {
       return res.status(400).json(result);
     }
