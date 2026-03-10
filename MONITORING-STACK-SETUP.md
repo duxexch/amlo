@@ -57,6 +57,16 @@ curl.exe -s http://localhost:3001/api/health
 curl.exe -s http://localhost:3000/api/metrics | findstr /C:"ablox_social_call_balance_warnings_emitted" /C:"ablox_social_call_balance_exhausted_ended"
 ```
 
+## One-Command Production Smoke Check
+```bash
+chmod +x script/production-smoke-check.sh
+./script/production-smoke-check.sh
+```
+
+Optional flags:
+- `DOMAIN_URL=https://your-domain.tld ./script/production-smoke-check.sh`
+- `RUN_ALERT_TEST=0 ./script/production-smoke-check.sh` to skip sending test alerts.
+
 ## Notes
 - This stack is scoped to `ablox` service names on `ablox_network`.
 - Do not run global prune/reset commands on shared VPS.
