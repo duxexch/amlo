@@ -33,6 +33,8 @@ Set in `.env` before production use:
 - `SLACK_WEBHOOK_URL`
 - `PAGER_WEBHOOK_URL`
 
+If webhook vars are not set, Alertmanager now uses safe local defaults (`http://127.0.0.1:65535`) so the service still starts.
+
 ## Smoke Checks
 ```powershell
 curl.exe -s http://localhost:9090/-/healthy

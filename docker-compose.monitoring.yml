@@ -42,7 +42,11 @@ services:
     restart: unless-stopped
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
+      - --config.expand-env
       - --storage.path=/alertmanager
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-http://127.0.0.1:65535}
+      PAGER_WEBHOOK_URL: ${PAGER_WEBHOOK_URL:-http://127.0.0.1:65535}
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ablox_alertmanager_data:/alertmanager
