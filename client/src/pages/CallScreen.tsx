@@ -262,10 +262,12 @@ export function CallScreen() {
   }, []);
 
   // Ensure outgoing calls are created on server to trigger incoming-call notification.
+  // Caller does NOT start WebRTC yet — waits for receiver to accept first.
   useEffect(() => {
     if (!userId || isRandomMatch || callId) return;
 
     let cancelled = false;
+    setStatus("ringing");
     callsApi.initiate(userId, callType)
       .then((call: any) => {
         if (cancelled) return;
@@ -286,42 +288,49 @@ export function CallScreen() {
     return () => { cancelled = true; };
   }, [userId, isRandomMatch, callId, callType, t]);
 
-  // ── Initialize WebRTC call ──
+  // ── Shared WebRTC event handlers (used by both caller and receiver) ──
+  const callHandlersRef = useRef<Parameters<typeof webrtcManager.startCall>[2]>({
+    onStateChange: (state) => {
+      setStatus(state);
+      if (state === "ended" || state === "failed") {
+        setTimeout(() => navigate("/chat"), 2500);
+      }
+    },
+    onLocalStream: (stream) => {
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+    },
+    onRemoteStream: (stream) => {
+      if (callType === "video" && remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
+      }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = stream;
+      }
+    },
+    onStats: setCallStats,
+    onQualityChange: setConnectionQuality,
+    onError: (err) => {
+      setErrorMsg(err);
+      setTimeout(() => setErrorMsg(null), 5000);
+    },
+    onDurationTick: setDuration,
+  });
+
+  // Use a ref so socket handlers always see the latest callId without re-mounting
+  const callIdRef = useRef(callId);
+  callIdRef.current = callId;
+
+  // ── Unified socket listener: signaling + call lifecycle events ──
+  // Merged into ONE effect to eliminate race conditions between separate effects.
   useEffect(() => {
     if (!userId) return;
 
     const socket = getSocket();
     let incomingOfferHandled = false;
 
-    const callHandlers: Parameters<typeof webrtcManager.startCall>[2] = {
-      onStateChange: (state) => {
-        setStatus(state);
-        if (state === "ended" || state === "failed") {
-          setTimeout(() => navigate("/chat"), 2500);
-        }
-      },
-      onLocalStream: (stream) => {
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-      },
-      onRemoteStream: (stream) => {
-        if (callType === "video" && remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-        }
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream;
-        }
-      },
-      onStats: setCallStats,
-      onQualityChange: setConnectionQuality,
-      onError: (err) => {
-        setErrorMsg(err);
-        setTimeout(() => setErrorMsg(null), 5000);
-      },
-      onDurationTick: setDuration,
-    };
-
+    // ── WebRTC signaling ──
     const handleSignal = (data: { callId: string; senderId: string; signal: any }) => {
       if (data.senderId !== userId) return;
 
@@ -329,45 +338,29 @@ export function CallScreen() {
       if (isIncoming && !incomingOfferHandled && data.signal?.type === "offer") {
         incomingOfferHandled = true;
         webrtcManager.acceptCall(
-          callId || data.callId,
+          callIdRef.current || data.callId,
           userId,
           callType,
           { type: "offer", sdp: data.signal.sdp },
-          callHandlers,
+          callHandlersRef.current,
         );
         return;
       }
 
-      // All other signals (answer, ICE candidates) go through handleSignal
+      // All other signals (answer, ICE candidates)
       webrtcManager.handleSignal(data.signal);
     };
-    socket.on("call-signal", handleSignal);
 
-    // Outgoing call: start immediately
-    // Incoming call: wait for the offer signal (handled above)
-    if (!isIncoming) {
-      webrtcManager.startCall(userId, callType, callHandlers);
-    } else {
-      setStatus("connecting");
-    }
-
-    return () => {
-      socket.off("call-signal", handleSignal);
-      webrtcManager.endCall();
-    };
-  }, [userId, callType]);
-
-  useEffect(() => {
-    if (!callId) return;
-    const socket = getSocket();
-
+    // ── Outgoing call: start WebRTC when receiver accepts ──
     const onCallAnswered = (data: { callId: string }) => {
-      if (data?.callId !== callId) return;
-      if (status === "ringing") setStatus("connecting");
+      const cid = callIdRef.current;
+      if (!cid || data?.callId !== cid || isIncoming) return;
+      webrtcManager.startCall(userId, callType, callHandlersRef.current, cid);
     };
 
     const onCallRejected = (data: { callId: string; reason?: string; message?: string }) => {
-      if (data?.callId !== callId) return;
+      const cid = callIdRef.current;
+      if (!cid || data?.callId !== cid) return;
       setErrorMsg(data?.message || t("social.callRejected", "تم رفض المكالمة"));
       webrtcManager.endCall();
       setStatus("ended");
@@ -375,7 +368,8 @@ export function CallScreen() {
     };
 
     const onCallEnded = (data: { callId: string; coinsCharged?: number; reason?: string; message?: string }) => {
-      if (data?.callId !== callId) return;
+      const cid = callIdRef.current;
+      if (!cid || data?.callId !== cid) return;
       if (typeof data?.coinsCharged === "number") setChargedCoins(data.coinsCharged);
       if (data?.reason === "balance_exhausted") {
         setErrorMsg(data?.message || t("social.callEndedNoBalance", "انتهى الرصيد وتم إنهاء المكالمة"));
@@ -386,33 +380,47 @@ export function CallScreen() {
     };
 
     const onCallBalanceWarning = (data: { callId: string; secondsRemaining?: number; message?: string }) => {
-      if (data?.callId !== callId) return;
+      const cid = callIdRef.current;
+      if (!cid || data?.callId !== cid) return;
       setErrorMsg(data?.message || t("social.callBalanceWarning", "تنبيه: رصيد المكالمة سينتهي قريباً"));
     };
 
-    // Call timeout — if stays ringing/connecting for 30s, auto-end
     const onCallTimeout = (data: { callId: string }) => {
-      if (data?.callId !== callId) return;
+      const cid = callIdRef.current;
+      if (!cid || data?.callId !== cid) return;
       setErrorMsg(t("social.noReply", "لا رد"));
       webrtcManager.endCall();
       setStatus("ended");
       setTimeout(() => navigate("/chat"), 2000);
     };
 
+    // Register ALL listeners at once — no race condition
+    socket.on("call-signal", handleSignal);
     socket.on("call-answered", onCallAnswered);
     socket.on("call-rejected", onCallRejected);
     socket.on("call-ended", onCallEnded);
     socket.on("call-timeout", onCallTimeout);
     socket.on("call-balance-warning", onCallBalanceWarning);
 
+    // Incoming call: POST /answer now that signal listener is ready
+    if (isIncoming && callId) {
+      setStatus("connecting");
+      callsApi.answer(callId).catch((err: any) => {
+        setErrorMsg(err?.message || t("social.callAcceptFailed", "تعذر قبول المكالمة"));
+        setStatus("failed");
+      });
+    }
+
     return () => {
+      socket.off("call-signal", handleSignal);
       socket.off("call-answered", onCallAnswered);
       socket.off("call-rejected", onCallRejected);
       socket.off("call-ended", onCallEnded);
       socket.off("call-timeout", onCallTimeout);
       socket.off("call-balance-warning", onCallBalanceWarning);
+      webrtcManager.endCall();
     };
-  }, [callId, navigate, status, t]);
+  }, [userId, callType, isIncoming, navigate, t]);
 
   // ── Cleanup on tab close / navigation ──
   useEffect(() => {

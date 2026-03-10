@@ -594,7 +594,10 @@ export const sendMessageSchema = z.object({
   content: z.string().min(1).max(5000).optional(),
   type: z.enum(["text", "image", "video", "voice", "gift"]).default("text"),
   clientMessageId: z.string().min(8).max(100).optional(),
-  mediaUrl: z.string().url().max(2048).optional(),
+  mediaUrl: z.string().max(2048).refine(
+    (v) => v.startsWith("/uploads/") || v.startsWith("https://") || v.startsWith("http://"),
+    { message: "mediaUrl must be a valid path or URL" },
+  ).optional(),
   giftId: z.string().max(100).optional(),
   replyToId: z.string().max(100).optional(),
 });

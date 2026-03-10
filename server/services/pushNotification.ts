@@ -98,6 +98,8 @@ export interface PushPayload {
   badge?: string;
   tag?: string;
   url?: string;
+  type?: string;
+  requireInteraction?: boolean;
   data?: Record<string, any>;
 }
 
@@ -113,9 +115,12 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
     icon: payload.icon || "/icons/icon-192x192.png",
     badge: payload.badge || "/icons/icon-72x72.png",
     tag: payload.tag || "ablox-notification",
+    type: payload.type || payload.data?.type || "system",
+    requireInteraction: payload.requireInteraction || payload.data?.requireInteraction || false,
     ...(payload.data || {}),
     data: {
       url: payload.url || "/",
+      type: payload.type || payload.data?.type || "system",
       ...payload.data,
     },
   });

@@ -127,12 +127,16 @@ export async function sendLocalizedPush(job: LocalizedPushJob): Promise<void> {
             body,
             tag,
             url,
+            type: kind,
+            requireInteraction: persistent || requireInteraction,
             data: {
                 type: kind,
                 requireInteraction: persistent || requireInteraction,
                 lang: en ? "en" : "ar",
                 openActionTitle: en ? "Open" : "فتح",
                 dismissActionTitle: en ? "Dismiss" : "تجاهل",
+                acceptTitle: en ? "Accept" : "قبول",
+                declineTitle: en ? "Decline" : "رفض",
             },
         });
     } catch (err: any) {

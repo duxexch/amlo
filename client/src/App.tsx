@@ -186,6 +186,18 @@ function App() {
       }
     });
 
+    // Pre-request media permissions so they're ready for calls
+    if (navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+        .then((stream) => { stream.getTracks().forEach((t) => t.stop()); })
+        .catch(() => {
+          // If video denied, try audio only
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then((stream) => { stream.getTracks().forEach((t) => t.stop()); })
+            .catch(() => { /* user denied — will be asked again on call */ });
+        });
+    }
+
     let socket: any;
     import("@/lib/socketManager").then(({ getSocket }) => {
       socket = getSocket();
@@ -218,11 +230,9 @@ function App() {
       };
 
       const handleNewMessageGlobal = (data: any) => {
-        const onChatPage = window.location.pathname.startsWith("/friends") || window.location.pathname.startsWith("/chat");
-        if (onChatPage && !document.hidden) return;
-
         const senderName = data?.sender?.displayName || data?.sender?.username || "User";
-        const preview = data?.message?.content || t("social.newMessage", "رسالة جديدة");
+        const msgType = data?.message?.type || "text";
+        const preview = msgType === "image" ? "📷 " + t("social.photo", "صورة") : msgType === "voice" ? "🎤 " + t("social.voiceMessage", "رسالة صوتية") : msgType === "video" ? "🎬 " + t("social.videoClip", "مقطع فيديو") : data?.message?.content || t("social.newMessage", "رسالة جديدة");
         const targetUserId = data?.sender?.id || data?.message?.senderId;
         publishNotification({
           type: "message",
@@ -238,9 +248,6 @@ function App() {
       };
 
       const handleFriendRequestGlobal = (data: any) => {
-        const onFriendsPage = window.location.pathname.startsWith("/friends") || window.location.pathname.startsWith("/chat");
-        if (onFriendsPage && !document.hidden) return;
-
         const senderName = data?.sender?.displayName || data?.sender?.username || "User";
         publishNotification({
           type: "friend-request",
@@ -313,6 +320,7 @@ function App() {
             position="top-center"
             richColors
             theme="dark"
+            duration={2000}
             toastOptions={{
               classNames: {
                 description: "text-[11px] leading-tight",
@@ -331,14 +339,9 @@ function App() {
                 toast.error(t("social.callDataIncomplete", "بيانات المكالمة غير مكتملة"));
                 return;
               }
-              try {
-                await callsApi.answer(callId);
-              } catch {
-                toast.error(t("social.callAcceptFailed", "تعذر قبول المكالمة"));
-                setIncomingCall(false);
-                return;
-              }
               setIncomingCall(false);
+              // Navigate to CallScreen FIRST so it mounts and registers signal listeners,
+              // then the CallScreen itself will POST /answer when ready.
               navigate(`/call?user=${callerId}&type=${isVideo ? "video" : "voice"}&session=${callId}&incoming=1`);
             }}
             onDecline={async () => {

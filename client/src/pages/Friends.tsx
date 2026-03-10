@@ -230,7 +230,11 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
       layout
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all group"
+      onClick={onMessage}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onMessage(); }}
+      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all group cursor-pointer"
     >
       <UserAvatar user={friend} />
       <div className="flex-1 min-w-0">
@@ -243,7 +247,7 @@ function FriendCard({ friend, onMessage, onCall }: { friend: any; onMessage: () 
           {friend.isOnline ? t("social.online") : t("social.offline")}
         </p>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {/* Profile Visibility Toggle */}
         <div className="relative">
           <button

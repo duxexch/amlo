@@ -1881,9 +1881,14 @@ router.get("/ice-servers", (_req, res) => {
     servers.push(
       { urls: `turn:${turnHost}:3478?transport=udp`, username, credential },
       { urls: `turn:${turnHost}:3478?transport=tcp`, username, credential },
-      // TURNS (TLS) on port 443 — fallback for restrictive firewalls
-      { urls: `turns:${turnHost}:443?transport=tcp`, username, credential },
     );
+    // Only advertise TURNS if TLS cert files are configured
+    if (cfg.TURN_TLS_CERT_FILE && cfg.TURN_TLS_KEY_FILE) {
+      const turnsPort = cfg.TURN_TLS_LISTEN_PORT || "5349";
+      servers.push(
+        { urls: `turns:${turnHost}:${turnsPort}?transport=tcp`, username, credential },
+      );
+    }
   }
 
   return res.json({ success: true, data: servers });
@@ -1994,18 +1999,19 @@ router.post("/calls", async (req, res) => {
           caller: callerInfo,
         });
       }
-
-      queueLocalizedPush({
-        userId: receiverId,
-        preferenceKey: "calls",
-        kind: "call",
-        actorName: caller.displayName || caller.username || "User",
-        url: "/friends",
-        persistent: true,
-      });
     } else {
       socialLog.info({ callId: call.id, callerId: userId, receiverId, type: "missed" }, "Call missed — receiver offline");
     }
+
+    // Always send push notification — critical for offline/background users
+    queueLocalizedPush({
+      userId: receiverId,
+      preferenceKey: "calls",
+      kind: "call",
+      actorName: caller.displayName || caller.username || "User",
+      url: `/call?user=${userId}&type=${type}&session=${call.id}&incoming=1`,
+      persistent: true,
+    });
 
     socialLog.info({
       callId: call.id,

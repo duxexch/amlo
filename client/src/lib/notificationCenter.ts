@@ -357,18 +357,20 @@ export function publishNotification(input: NotificationInput) {
       onClick: handleToastNavigate,
     }
     : undefined;
+  // Calls: persistent toast (no auto-dismiss). Others: 2s auto-dismiss.
+  const toastDuration = entry.persistent ? Infinity : 2000;
   if (toastBody) {
     toast.info(toastTitle, {
       description: toastBody,
       action,
+      duration: toastDuration,
     });
   } else {
-    toast.info(toastTitle, { action });
+    toast.info(toastTitle, { action, duration: toastDuration });
   }
 
-  if (document.hidden || entry.persistent) {
-    showBrowserNotification(entry);
-  }
+  // Always show browser notification (system shade) for messages/calls
+  showBrowserNotification(entry);
 
   void pushInboxItemToServer(entry);
 

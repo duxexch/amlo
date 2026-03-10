@@ -111,16 +111,19 @@ class WebRTCManager {
 
   /**
    * Initialize a call (outgoing)
+   * @param callId - The server-assigned call ID (from POST /calls)
    */
   async startCall(
     targetUserId: string,
     callType: CallType,
-    handlers: Partial<CallEventHandlers>
+    handlers: Partial<CallEventHandlers>,
+    callId?: string
   ): Promise<void> {
     this.cleanup();
     this.handlers = handlers;
     this.callType = callType;
     this.targetUserId = targetUserId;
+    if (callId) this.callId = callId;
     this.setState("connecting");
 
     try {
@@ -153,8 +156,6 @@ class WebRTCManager {
         targetId: targetUserId,
         signal: { type: "offer", sdp: offer.sdp },
       });
-
-      this.setState("ringing");
     } catch (err: any) {
       this.handleError(err.message || "فشل بدء المكالمة");
     }

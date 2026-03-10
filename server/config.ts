@@ -32,6 +32,9 @@ const envSchema = z.object({
   // ── TURN/STUN (Coturn) ──
   TURN_SECRET: z.string().optional(),
   TURN_EXTERNAL_IP: z.string().optional(),
+  TURN_TLS_CERT_FILE: z.string().optional(),
+  TURN_TLS_KEY_FILE: z.string().optional(),
+  TURN_TLS_LISTEN_PORT: z.string().optional(),
 
   // ── Admin defaults ──
   ADMIN_USERNAME: z.string().optional(),

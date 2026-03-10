@@ -166,23 +166,30 @@ self.addEventListener("push", function (event) {
     data = { title: "Ablox", body: event.data.text() };
   }
 
+  var isCall = data.type === "call";
+
   event.waitUntil(
     self.registration.showNotification(data.title || "Ablox", {
       body: data.body || "",
       icon: data.icon || "/icons/icon-192x192.png",
       badge: data.badge || "/icons/icon-96x96.png",
-      tag: data.tag || "ablox-notification",
+      tag: isCall ? "ablox-incoming-call" : (data.tag || "ablox-notification"),
       dir: data.dir || "auto",
       lang: data.lang || "en",
       renotify: true,
-      requireInteraction: Boolean(data.requireInteraction),
+      requireInteraction: isCall || Boolean(data.requireInteraction),
       silent: false,
-      vibrate: data.vibrate || [120, 80, 120, 80, 200],
+      vibrate: isCall ? [300, 100, 300, 100, 300, 100, 300] : (data.vibrate || [120, 80, 120, 80, 200]),
       data: { url: data.url || "/", type: data.type || "system" },
-      actions: [
-        { action: "open", title: data.openActionTitle || "Open" },
-        { action: "dismiss", title: data.dismissActionTitle || "Dismiss" },
-      ],
+      actions: isCall
+        ? [
+          { action: "accept", title: data.acceptTitle || "Accept" },
+          { action: "decline", title: data.declineTitle || "Decline" },
+        ]
+        : [
+          { action: "open", title: data.openActionTitle || "Open" },
+          { action: "dismiss", title: data.dismissActionTitle || "Dismiss" },
+        ],
     })
   );
 });
@@ -193,9 +200,14 @@ self.addEventListener("push", function (event) {
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
 
-  if (event.action === "dismiss") return;
+  if (event.action === "dismiss" || event.action === "decline") return;
 
   var targetUrl = (event.notification.data && event.notification.data.url) || "/";
+
+  // For call accept action or call notification tap — navigate to call screen
+  if (event.action === "accept" || (event.notification.data && event.notification.data.type === "call" && event.action !== "decline")) {
+    targetUrl = (event.notification.data && event.notification.data.url) || "/friends";
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (clients) {
