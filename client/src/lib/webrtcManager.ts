@@ -55,9 +55,10 @@ async function getIceServers(): Promise<RTCIceServer[]> {
     const res = await fetch("/api/social/ice-servers", { credentials: "include" });
     const json = await res.json();
     if (res.ok && json?.success && Array.isArray(json.data)) {
-      cachedIceServers = json.data;
+      const servers = json.data as RTCIceServer[];
+      cachedIceServers = servers;
       iceServersFetchedAt = now;
-      return cachedIceServers;
+      return servers;
     }
   } catch {
     // Fall through to fallback
