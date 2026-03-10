@@ -183,6 +183,33 @@ function App() {
     void ensureForegroundNotificationPermission().then((permission) => {
       if (permission === "granted") {
         void ensurePushSubscription();
+        // Register periodic background sync to keep SW alive
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.ready.then((reg: any) => {
+            if (reg.periodicSync) {
+              reg.periodicSync.register("keepalive", { minInterval: 15 * 60 * 1000 }).catch(() => { });
+              reg.periodicSync.register("update-content", { minInterval: 60 * 60 * 1000 }).catch(() => { });
+            }
+            // Show persistent notification to keep app alive in background (mobile)
+            if (reg.showNotification && !document.hidden) {
+              reg.getNotifications({ tag: "ablox-persistent" }).then((existing: Notification[]) => {
+                if (existing.length === 0) {
+                  reg.showNotification("Ablox", {
+                    body: t("app.runningInBackground", "التطبيق يعمل في الخلفية"),
+                    icon: "/icons/icon-192x192.png",
+                    badge: "/icons/icon-96x96.png",
+                    tag: "ablox-persistent",
+                    silent: true,
+                    requireInteraction: false,
+                    renotify: false,
+                    ongoing: true,
+                    data: { url: "/", type: "persistent" },
+                  } as any);
+                }
+              });
+            }
+          });
+        }
       }
     });
 

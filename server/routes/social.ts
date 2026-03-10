@@ -4410,6 +4410,70 @@ router.get("/streams/my", async (req: Request, res: Response) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════
+// ── Scheduled Streams — البثوث المجدولة ──
+// (Must be registered BEFORE /streams/:id to avoid Express treating "scheduled" as an :id)
+// ═══════════════════════════════════════════════════════
+
+router.get("/streams/scheduled", async (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    if (!db) return res.json([]);
+    const data = await db.select().from(schema.streams)
+      .where(and(eq(schema.streams.status, "scheduled"), sql`${schema.streams.scheduledAt} > NOW()`))
+      .orderBy(asc(schema.streams.scheduledAt));
+    const userIds = data.map(s => s.userId).filter(Boolean);
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
+      users.forEach(u => { usersMap[u.id] = u; });
+    }
+    const enriched = data.map(s => {
+      const host = usersMap[s.userId];
+      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+    });
+    return res.json(enriched);
+  } catch (err: any) {
+    socialLog.error({ err }, "Scheduled streams error");
+    return res.json([]);
+  }
+});
+
+// GET /streams/search — search streams by title/tags
+// (Must be registered BEFORE /streams/:id)
+router.get("/streams/search", searchLimiter, async (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    if (!q || q.length < 2) return res.json([]);
+    const db = getDb();
+    if (!db) return res.json([]);
+    const escapedQ = escapeLike(q);
+    const data = await db.select().from(schema.streams)
+      .where(and(
+        eq(schema.streams.status, "active"),
+        or(
+          sql`LOWER(${schema.streams.title}) LIKE ${"%" + escapedQ + "%"}`,
+          sql`LOWER(${schema.streams.tags}) LIKE ${"%" + escapedQ + "%"}`
+        )
+      ))
+      .orderBy(desc(schema.streams.viewerCount)).limit(30);
+    const userIds = data.map(s => s.userId).filter(Boolean);
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
+      users.forEach(u => { usersMap[u.id] = u; });
+    }
+    const enriched = data.map(s => {
+      const host = usersMap[s.userId];
+      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+    });
+    return res.json(enriched);
+  } catch (err: any) {
+    socialLog.error({ err }, "Stream search error");
+    return res.json([]);
+  }
+});
+
 // GET /social/streams/:id — get stream detail with host info
 router.get("/streams/:id", async (req: Request, res: Response) => {
   try {
@@ -4456,13 +4520,13 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       }
     }
 
-    // Auto-end zombie streams older than 6 hours
+    // Auto-end zombie streams older than 1 hour
     const existing = await storage.getUserActiveStream(userId);
     if (existing) {
       const ageMs = Date.now() - new Date(existing.startedAt || 0).getTime();
-      if (ageMs > 6 * 3600_000) {
+      if (ageMs > 3600_000) {
         await storage.endStream(existing.id);
-        socialLog.info({ streamId: existing.id, userId }, "Auto-ended zombie stream (>6h)");
+        socialLog.info({ streamId: existing.id, userId }, "Auto-ended zombie stream (>1h)");
       } else {
         return res.status(400).json({ success: false, message: "لديك بث نشط بالفعل", data: existing });
       }
@@ -4856,68 +4920,6 @@ router.post("/streams/:id/kick", async (req: Request, res: Response) => {
   } catch (err: any) {
     socialLog.error({ err }, "Kick participant error");
     return res.status(500).json({ success: false, message: "خطأ في طرد المشارك" });
-  }
-});
-
-// ═══════════════════════════════════════════════════════
-// ── Scheduled Streams — البثوث المجدولة ──
-// ═══════════════════════════════════════════════════════
-
-router.get("/streams/scheduled", async (_req: Request, res: Response) => {
-  try {
-    const db = getDb();
-    if (!db) return res.json([]);
-    const data = await db.select().from(schema.streams)
-      .where(and(eq(schema.streams.status, "scheduled"), sql`${schema.streams.scheduledAt} > NOW()`))
-      .orderBy(asc(schema.streams.scheduledAt));
-    const userIds = data.map(s => s.userId).filter(Boolean);
-    let usersMap: Record<string, any> = {};
-    if (userIds.length > 0) {
-      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
-      users.forEach(u => { usersMap[u.id] = u; });
-    }
-    const enriched = data.map(s => {
-      const host = usersMap[s.userId];
-      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
-    });
-    return res.json(enriched);
-  } catch (err: any) {
-    socialLog.error({ err }, "Scheduled streams error");
-    return res.json([]);
-  }
-});
-
-// GET /streams/search — search streams by title/tags
-router.get("/streams/search", searchLimiter, async (req: Request, res: Response) => {
-  try {
-    const q = String(req.query.q || "").trim().toLowerCase();
-    if (!q || q.length < 2) return res.json([]);
-    const db = getDb();
-    if (!db) return res.json([]);
-    const escapedQ = escapeLike(q);
-    const data = await db.select().from(schema.streams)
-      .where(and(
-        eq(schema.streams.status, "active"),
-        or(
-          sql`LOWER(${schema.streams.title}) LIKE ${"%" + escapedQ + "%"}`,
-          sql`LOWER(${schema.streams.tags}) LIKE ${"%" + escapedQ + "%"}`
-        )
-      ))
-      .orderBy(desc(schema.streams.viewerCount)).limit(30);
-    const userIds = data.map(s => s.userId).filter(Boolean);
-    let usersMap: Record<string, any> = {};
-    if (userIds.length > 0) {
-      const users = await db.select().from(schema.users).where(inArray(schema.users.id, userIds));
-      users.forEach(u => { usersMap[u.id] = u; });
-    }
-    const enriched = data.map(s => {
-      const host = usersMap[s.userId];
-      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
-    });
-    return res.json(enriched);
-  } catch (err: any) {
-    socialLog.error({ err }, "Stream search error");
-    return res.json([]);
   }
 });
 

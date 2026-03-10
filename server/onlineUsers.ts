@@ -50,13 +50,27 @@ export async function getUserSocketId(userId: string): Promise<string | null> {
   return null;
 }
 
-/** Remove a user from the online map (local + Redis sync) */
-export async function removeUserOnline(userId: string): Promise<void> {
+/** Remove a user from the online map (local + Redis sync).
+ *  If `expectedSocketId` is provided, only removes if current socketId matches —
+ *  prevents race conditions during reconnection where old disconnect removes new socket. */
+export async function removeUserOnline(userId: string, expectedSocketId?: string): Promise<void> {
+  if (expectedSocketId) {
+    const current = localMap.get(userId);
+    if (current && current !== expectedSocketId) return; // Newer socket already registered
+  }
   localMap.delete(userId);
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.hdel(REDIS_KEY, userId);
+      if (expectedSocketId) {
+        // Atomic conditional delete — only remove if socketId hasn't changed
+        await redis.eval(
+          `if redis.call('hget', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('hdel', KEYS[1], ARGV[1]) else return 0 end`,
+          1, REDIS_KEY, userId, expectedSocketId,
+        );
+      } else {
+        await redis.hdel(REDIS_KEY, userId);
+      }
     } catch (err) {
       onlineLog.warn(`Redis removeUserOnline failed for ${userId}: ${err}`);
     }
@@ -214,7 +228,13 @@ export function startOnlineUsersCleanup(io: { sockets: { sockets: Map<string, un
         const pipeline = redis.pipeline();
         for (const [userId, socketId] of Object.entries(all)) {
           if (!io.sockets.sockets.has(socketId)) {
-            pipeline.hdel(REDIS_KEY, userId);
+            // Conditional delete — only remove if socketId hasn't been updated since we read it
+            pipeline.eval(
+              `if redis.call('hget', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('hdel', KEYS[1], ARGV[1]) else return 0 end`,
+              1, REDIS_KEY, userId, socketId,
+            );
+            // Also clean local map conditionally
+            if (localMap.get(userId) === socketId) localMap.delete(userId);
             cleaned++;
           }
         }

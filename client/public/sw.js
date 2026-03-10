@@ -10,7 +10,7 @@
  *   - Offline: Custom offline page fallback
  */
 
-var CACHE_VERSION = "ablox-v6";
+var CACHE_VERSION = "ablox-v7";
 var STATIC_CACHE = CACHE_VERSION + "-static";
 var DYNAMIC_CACHE = CACHE_VERSION + "-dynamic";
 var IMAGE_CACHE = CACHE_VERSION + "-images";
@@ -243,6 +243,12 @@ self.addEventListener("periodicsync", function (event) {
       caches.open(DYNAMIC_CACHE).then(function (cache) {
         return cache.add("/api/social/featured-streams").catch(function () { });
       })
+    );
+  }
+  if (event.tag === "keepalive") {
+    // Lightweight ping to keep SW alive and refresh push subscription
+    event.waitUntil(
+      fetch("/api/health", { method: "GET", cache: "no-store" }).catch(function () { })
     );
   }
 });

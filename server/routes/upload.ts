@@ -199,7 +199,6 @@ async function findDuplicateAvatarOwner(userId: string, uploadedFilePath: string
   );
 
   const hashByPath = new Map<string, string>();
-  const dHashByPath = new Map<string, string | null>();
   for (const row of rows) {
     const avatarPath = row.avatar_path as string;
     if (!avatarPath) continue;
@@ -208,6 +207,7 @@ async function findDuplicateAvatarOwner(userId: string, uploadedFilePath: string
 
     try {
       const st = fs.statSync(absPath);
+      // Only block exact byte-identical duplicates (same size + same SHA-256)
       if (st.size !== uploadedStat.size) continue;
 
       let candidateHash = hashByPath.get(absPath);
@@ -221,25 +221,6 @@ async function findDuplicateAvatarOwner(userId: string, uploadedFilePath: string
           ownerUserId: row.owner_user_id as string,
           source: (row.source as "users" | "user_profiles") || "users",
           mode: "exact",
-        };
-      }
-
-      if (!uploadedDHash) continue;
-
-      let candidateDHash = dHashByPath.get(absPath);
-      if (candidateDHash === undefined) {
-        candidateDHash = await computeDHash(absPath);
-        dHashByPath.set(absPath, candidateDHash);
-      }
-      if (!candidateDHash) continue;
-
-      const distance = hammingDistance(uploadedDHash, candidateDHash);
-      if (distance <= DHASH_MAX_DISTANCE) {
-        return {
-          ownerUserId: row.owner_user_id as string,
-          source: (row.source as "users" | "user_profiles") || "users",
-          mode: "perceptual",
-          distance,
         };
       }
     } catch {

@@ -1130,7 +1130,25 @@ router.put("/profiles/:index", async (req: Request, res: Response) => {
       .limit(1);
 
     if (!existing) {
-      return res.status(404).json({ success: false, message: "الملف الشخصي غير موجود" });
+      // Profile doesn't exist yet — fallback to updating the main user record
+      // so avatar/name changes aren't lost for users who haven't completed PIN setup
+      const userUpdateData: Record<string, any> = { updatedAt: new Date() };
+      const data = parsed.data;
+      if (data.displayName !== undefined) userUpdateData.displayName = data.displayName;
+      if (data.avatar !== undefined) userUpdateData.avatar = (data.avatar || "").trim();
+      if (data.bio !== undefined) userUpdateData.bio = data.bio;
+      if (data.gender !== undefined) userUpdateData.gender = data.gender;
+      if (data.country !== undefined) userUpdateData.country = data.country;
+      if (data.birthDate !== undefined) userUpdateData.birthDate = data.birthDate;
+
+      const [updatedUser] = await db
+        .update(schema.users)
+        .set(userUpdateData)
+        .where(eq(schema.users.id, userId))
+        .returning();
+
+      log(`Profile ${profileIndex} not found — updated main user record for ${userId}`);
+      return res.json({ success: true, data: stripSensitive(updatedUser) });
     }
 
     // Update profile

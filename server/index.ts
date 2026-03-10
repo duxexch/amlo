@@ -1099,7 +1099,7 @@ io.on("connection", (socket) => {
       const stillConnected = (io.sockets.adapter.rooms.get(`user:${userId}`)?.size || 0) > 0;
       if (!stillConnected) {
         invalidateFriendPresenceRecipients(userId);
-        await removeUserOnline(userId);
+        await removeUserOnline(userId, socket.id);
         const nowIso = new Date().toISOString();
         await setLastSeen(userId);
         void emitPresenceUpdateToFriends({

@@ -275,13 +275,13 @@ router.post("/search", async (req, res) => {
       conditions.push(eq(schema.users.country, filters.countryFilter));
     }
 
-    // Exclude recently matched users (last 24h)
+    // Exclude recently matched users (last 2h — short enough to not block re-matching in low-user scenarios)
     const recentSessions = await db.select({ matchedUserId: schema.worldSessions.matchedUserId })
       .from(schema.worldSessions)
       .where(and(
         eq(schema.worldSessions.userId, userId),
         sql`${schema.worldSessions.matchedUserId} IS NOT NULL`,
-        gte(schema.worldSessions.startedAt, sql`NOW() - INTERVAL '24 hours'`)
+        gte(schema.worldSessions.startedAt, sql`NOW() - INTERVAL '2 hours'`)
       ));
     const recentIds = recentSessions.map(s => s.matchedUserId).filter(Boolean) as string[];
     if (recentIds.length > 0) {
@@ -324,6 +324,15 @@ router.post("/search", async (req, res) => {
     }
 
     // ── Compatibility Scoring Algorithm ──
+    // Fetch users actively searching in world sessions — boost their score
+    const searchingSessionsInit = await db.select({ userId: schema.worldSessions.userId })
+      .from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.status, "searching"),
+        ne(schema.worldSessions.userId, userId),
+      ));
+    const searchingUserIdsInit = new Set(searchingSessionsInit.map(s => s.userId).filter(Boolean) as string[]);
+
     const userInterests = (currentUser?.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
     const userAge = currentUser?.birthDate ? Math.floor((Date.now() - new Date(currentUser.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
 
@@ -380,7 +389,10 @@ router.post("/search", async (req, res) => {
       const prevDuration = sessionHistory.get(candidate.id);
       if (prevDuration && prevDuration > GOOD_CHAT_DURATION_SECONDS) score += 10; // >5 min = good chat history
 
-      // 7. Random factor (+0-5) to prevent deterministic results
+      // 7. Actively searching boost (+30) — prioritize users also looking for a match
+      if (searchingUserIdsInit.has(candidate.id)) score += 30;
+
+      // 8. Random factor (+0-5) to prevent deterministic results
       score += Math.random() * 5;
 
       return { ...candidate, compatibilityScore: score };
@@ -547,7 +559,7 @@ router.post("/sessions/:id/try-match", async (req, res) => {
       .where(and(
         eq(schema.worldSessions.userId, userId),
         sql`${schema.worldSessions.matchedUserId} IS NOT NULL`,
-        gte(schema.worldSessions.startedAt, sql`NOW() - INTERVAL '24 hours'`)
+        gte(schema.worldSessions.startedAt, sql`NOW() - INTERVAL '2 hours'`)
       ));
     const recentIds = recentSessions.map(s => s.matchedUserId).filter(Boolean) as string[];
     if (recentIds.length > 0) {
@@ -570,6 +582,15 @@ router.post("/sessions/:id/try-match", async (req, res) => {
     if (candidates.length === 0) {
       return res.json({ success: true, data: { session, matched: false } });
     }
+
+    // Fetch users actively searching in world sessions — boost their score
+    const searchingSessions = await db.select({ userId: schema.worldSessions.userId })
+      .from(schema.worldSessions)
+      .where(and(
+        eq(schema.worldSessions.status, "searching"),
+        ne(schema.worldSessions.userId, userId),
+      ));
+    const searchingUserIds = new Set(searchingSessions.map(s => s.userId).filter(Boolean) as string[]);
 
     const userInterests = (currentUser?.interests || "").split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
     const userAge = currentUser?.birthDate ? Math.floor((Date.now() - new Date(currentUser.birthDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
@@ -618,6 +639,9 @@ router.post("/sessions/:id/try-match", async (req, res) => {
 
       const prevDuration = sessionHistory.get(candidate.id);
       if (prevDuration && prevDuration > GOOD_CHAT_DURATION_SECONDS) score += 10;
+
+      // 8. Actively searching boost (+30) — prioritize users also looking for a match
+      if (searchingUserIds.has(candidate.id)) score += 30;
 
       score += Math.random() * 5;
 
