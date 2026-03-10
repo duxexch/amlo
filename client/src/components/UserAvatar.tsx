@@ -4,7 +4,7 @@
  * Single source of truth for user avatar display.
  * Used across Friends, ChatPopupModal, and other pages.
  */
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Check } from "lucide-react";
 
 const AVATAR_COLORS = [
@@ -46,11 +46,12 @@ export const UserAvatar = memo(function UserAvatar({ user, size = "md", showVeri
   const name = user?.displayName || user?.username || "?";
   const color = AVATAR_COLORS[Math.abs(name.charCodeAt(0)) % AVATAR_COLORS.length];
   const initial = name[0]?.toUpperCase();
+  const [imgError, setImgError] = useState(false);
 
   return (
     <div className="relative shrink-0">
-      {user?.avatar ? (
-        <img src={user.avatar} alt="" className={`${SIZE_CLASSES[size]} rounded-2xl object-cover`} />
+      {user?.avatar && !imgError ? (
+        <img src={user.avatar} alt="" className={`${SIZE_CLASSES[size]} rounded-2xl object-cover`} onError={() => setImgError(true)} />
       ) : (
         <div className={`${SIZE_CLASSES[size]} rounded-2xl bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white ${TEXT_CLASSES[size]}`}>
           {initial}

@@ -75,6 +75,7 @@ services:
       retries: 3
     volumes:
       - ablox_logs:/app/logs
+      - ablox_uploads:/app/uploads
     networks:
       - ablox_network
       - traefik_net
@@ -280,6 +281,9 @@ volumes:
     driver: local
   ablox_redisdata:
     name: ablox_redisdata
+    driver: local
+  ablox_uploads:
+    name: ablox_uploads
     driver: local
   ablox_logs:
     name: ablox_logs

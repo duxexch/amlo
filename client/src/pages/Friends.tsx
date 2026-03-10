@@ -135,13 +135,12 @@ function OnlineStrip({ friends, onChat, onSearch }: { friends: any[]; onChat: (i
             <button key={f.id} onClick={() => onChat(f.id)} className="flex flex-col items-center gap-1.5 shrink-0 group">
               <div className="relative">
                 <div className="w-[3.5rem] h-[3.5rem] rounded-full p-[2.5px] bg-gradient-to-br from-primary/60 to-secondary/60 group-hover:from-primary group-hover:to-secondary transition-all shadow-[0_0_12px_rgba(var(--primary-rgb),0.15)] group-hover:shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)]">
-                  {f.avatar ? (
-                    <img src={f.avatar} alt="" className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    <div className={`w-full h-full rounded-full bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white text-sm`}>
-                      {initial}
-                    </div>
-                  )}
+                  <div className={`w-full h-full rounded-full bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white text-sm relative overflow-hidden`}>
+                    {initial}
+                    {f.avatar && (
+                      <img src={f.avatar} alt="" className="absolute inset-0 w-full h-full rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    )}
+                  </div>
                 </div>
                 <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-400 rounded-full border-[2.5px] border-[#0a0a1a] shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
               </div>
@@ -394,6 +393,8 @@ export function Friends() {
   const [location, navigate] = useLocation();
   const [notifyMode, setNotifyModeState] = useState<ChatNotifyMode>(() => getChatNotifyMode());
   const [showNotifyMenu, setShowNotifyMenu] = useState(false);
+  const notifyBtnRef = useRef<HTMLDivElement>(null);
+  const [notifyAlignRight, setNotifyAlignRight] = useState(true);
   const [showMetricsPanel, setShowMetricsPanel] = useState(false);
   const [chatMetrics, setChatMetrics] = useState<ChatMetricsSnapshot | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -467,6 +468,11 @@ export function Friends() {
   useEffect(() => {
     const onClickOutside = () => setShowNotifyMenu(false);
     if (!showNotifyMenu) return;
+    // Detect if button is in right half → align dropdown to right, else to left
+    if (notifyBtnRef.current) {
+      const rect = notifyBtnRef.current.getBoundingClientRect();
+      setNotifyAlignRight(rect.left + rect.width / 2 > window.innerWidth / 2);
+    }
     document.addEventListener("click", onClickOutside);
     return () => document.removeEventListener("click", onClickOutside);
   }, [showNotifyMenu]);
@@ -803,7 +809,7 @@ export function Friends() {
               >
                 <Activity className="w-4 h-4" />
               </button>
-              <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <div className="relative" ref={notifyBtnRef} onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => setShowNotifyMenu((v) => !v)}
                   className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors flex items-center justify-center"
@@ -817,7 +823,7 @@ export function Friends() {
                       initial={{ opacity: 0, y: -6, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                      className="absolute top-10 right-0 rtl:right-auto rtl:left-0 w-[min(11rem,calc(100vw-1rem))] bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl p-1 z-50 max-h-[55vh] overflow-y-auto"
+                      className={`absolute top-10 w-[min(11rem,calc(100vw-1rem))] bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl p-1 z-50 max-h-[55vh] overflow-y-auto ${notifyAlignRight ? "right-0" : "left-0"}`}
                     >
                       {[{ key: "all", label: t("social.notifyAll", "الكل") }, { key: "sound", label: t("social.notifySound", "صوت فقط") }, { key: "push", label: t("social.notifyPush", "إشعار فقط") }, { key: "off", label: t("social.notifyOff", "إيقاف") }].map((opt) => (
                         <button
