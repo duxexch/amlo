@@ -41,7 +41,7 @@
     "adminPanel": "Panel Admin",
     "social": "Sosial",
     "download": "Unduh",
-    "cex": "CEX",
+    "cex": "Potongan",
     "friends": "Teman",
     "chat": "Obrolan"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "Video Langsung",
     "audioLiveLabel": "Audio Langsung",
     "tabWorld": "Seluruh Dunia",
+    "tabPieces": "Potongan",
     "featuredLive": "Siaran Unggulan",
     "followedAccounts": "Diikuti",
     "liveNow": "Siaran Langsung",

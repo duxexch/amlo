@@ -41,7 +41,7 @@
     "adminPanel": "管理面板",
     "social": "社交",
     "download": "下载",
-    "cex": "CEX",
+    "cex": "碎片",
     "friends": "好友",
     "chat": "聊天"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "视频直播",
     "audioLiveLabel": "音频直播",
     "tabWorld": "环游世界",
+    "tabPieces": "碎片",
     "featuredLive": "精选直播",
     "followedAccounts": "关注的人",
     "liveNow": "直播中",

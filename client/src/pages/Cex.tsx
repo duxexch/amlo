@@ -499,7 +499,7 @@ export function Cex() {
         <>
             {/* Header */}
             <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3 safe-area-top bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
-                <h1 className="text-white font-black text-xl pointer-events-auto drop-shadow-lg">CEX</h1>
+                <h1 className="text-white font-black text-xl pointer-events-auto drop-shadow-lg">{t("nav.cex")}</h1>
                 {isLoggedIn && (
                     <button
                         onClick={() => setShowCreate(true)}

@@ -41,7 +41,7 @@
     "adminPanel": "Yönetim Paneli",
     "social": "Sosyal",
     "download": "İndir",
-    "cex": "CEX",
+    "cex": "Parçalar",
     "friends": "Arkadaşlar",
     "chat": "Sohbet"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "Video Canlı",
     "audioLiveLabel": "Ses Canlı",
     "tabWorld": "Dünya Genelinde",
+    "tabPieces": "Parçalar",
     "featuredLive": "Öne Çıkan Yayınlar",
     "followedAccounts": "Takip Edilenler",
     "liveNow": "Canlı",

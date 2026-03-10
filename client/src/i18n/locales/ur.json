@@ -41,7 +41,7 @@
     "adminPanel": "ایڈمن پینل",
     "social": "سوشل",
     "download": "ڈاؤن لوڈ",
-    "cex": "CEX",
+    "cex": "ٹکڑے",
     "friends": "دوست",
     "chat": "چیٹ"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "ویڈیو لائیو",
     "audioLiveLabel": "آڈیو لائیو",
     "tabWorld": "دنیا بھر میں",
+    "tabPieces": "ٹکڑے",
     "featuredLive": "نمایاں لائیو",
     "followedAccounts": "فالو شدہ",
     "liveNow": "ابھی لائیو",

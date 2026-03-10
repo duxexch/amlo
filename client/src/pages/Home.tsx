@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe, MessageCircle, SlidersHorizontal } from "lucide-react";
+import { Video, Mic, Users, Flame, Radio, Circle, Clock, Eye, Globe, MessageCircle, SlidersHorizontal, Film } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import avatarImg from "@/assets/images/avatar-3d.png";
 import heroBg from "@/assets/images/hero-bg.png";
@@ -69,7 +69,7 @@ function FeaturedMarquee() {
           setStreams(data.data);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => controller.abort();
   }, []);
 
@@ -149,7 +149,7 @@ function getSavedRandomFilters(): Omit<MatchFilters, 'type'> {
   try {
     const saved = localStorage.getItem(RANDOM_FILTERS_KEY);
     if (saved) return JSON.parse(saved);
-  } catch {}
+  } catch { }
   return { genderFilter: "both", ageMin: 18, ageMax: 99, countryFilter: "" };
 }
 
@@ -181,7 +181,7 @@ export function Home() {
       .then(data => {
         if (data.success) setFollowedAccounts(data.data);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => controller.abort();
   }, []);
 
@@ -204,262 +204,265 @@ export function Home() {
 
       {/* Tabs */}
       <div className="space-y-6 mt-4">
-      <div className="flex p-1.5 bg-white/5 rounded-2xl w-full max-w-md mx-auto backdrop-blur-md border border-white/10">
-        <button 
-          onClick={() => setActiveTab('random')}
-          className={`flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === 'random' ? 'bg-primary text-white shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'text-white/60 hover:text-white'}`}
-        >
-          {t("home.tabRandomChat")}
-        </button>
-        <button 
-          onClick={() => setActiveTab('live')}
-          className={`flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === 'live' ? 'bg-secondary text-white shadow-[0_0_15px_rgba(236,72,153,0.5)]' : 'text-white/60 hover:text-white'}`}
-        >
-          {t("home.tabLiveStream")}
-        </button>
-        <button 
-          onClick={() => navigate('/world')}
-          className="flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 text-white/60 hover:text-white flex items-center justify-center gap-1.5 hover:bg-emerald-500/10"
-        >
-          <Globe className="w-4 h-4 text-emerald-400" />
-          {t("home.tabWorld")}
-        </button>
-      </div>
+        <div className="flex p-1.5 bg-white/5 rounded-2xl w-full max-w-md mx-auto backdrop-blur-md border border-white/10">
+          <button
+            onClick={() => setActiveTab('random')}
+            className={`flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === 'random' ? 'bg-primary text-white shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'text-white/60 hover:text-white'}`}
+          >
+            {t("home.tabRandomChat")}
+          </button>
+          <button
+            onClick={() => setActiveTab('live')}
+            className={`flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 ${activeTab === 'live' ? 'bg-secondary text-white shadow-[0_0_15px_rgba(236,72,153,0.5)]' : 'text-white/60 hover:text-white'}`}
+          >
+            {t("home.tabLiveStream")}
+          </button>
+          <button
+            onClick={() => navigate('/world')}
+            className="flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 text-white/60 hover:text-white flex items-center justify-center gap-1.5 hover:bg-emerald-500/10"
+          >
+            <Globe className="w-4 h-4 text-emerald-400" />
+            {t("home.tabWorld")}
+          </button>
+          <button
+            onClick={() => navigate('/cex')}
+            className="flex-1 py-3 px-3 rounded-xl font-bold text-sm transition-all duration-300 text-white/60 hover:text-white flex items-center justify-center gap-1.5 hover:bg-orange-500/10"
+          >
+            <Film className="w-4 h-4 text-orange-400" />
+            {t("home.tabPieces")}
+          </button>
+        </div>
 
-      {/* Random Match Section */}
-      {activeTab === 'random' && (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-4"
-        >
-          {/* Three compact cards — always visible without scrolling */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            {/* Video */}
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleStartRandom("video")}
-              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-primary/30 transition-all duration-300"
-            >
-              <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-primary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-shadow">
-                <Video className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-primary" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomVideoTitle")}</h3>
-                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomVideoDesc")}</p>
-              </div>
-            </motion.button>
+        {/* Random Match Section */}
+        {activeTab === 'random' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            {/* Three compact cards — always visible without scrolling */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {/* Video */}
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleStartRandom("video")}
+                className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-primary/30 transition-all duration-300"
+              >
+                <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-primary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-shadow">
+                  <Video className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-primary" />
+                </div>
+                <div className="relative z-10">
+                  <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomVideoTitle")}</h3>
+                  <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomVideoDesc")}</p>
+                </div>
+              </motion.button>
 
-            {/* Audio */}
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleStartRandom("audio")}
-              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-secondary/30 transition-all duration-300"
-            >
-              <div className="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-secondary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(236,72,153,0.3)] transition-shadow">
-                <Mic className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-secondary" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomAudioTitle")}</h3>
-                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomAudioDesc")}</p>
-              </div>
-            </motion.button>
+              {/* Audio */}
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleStartRandom("audio")}
+                className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-secondary/30 transition-all duration-300"
+              >
+                <div className="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-secondary/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(236,72,153,0.3)] transition-shadow">
+                  <Mic className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-secondary" />
+                </div>
+                <div className="relative z-10">
+                  <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomAudioTitle")}</h3>
+                  <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomAudioDesc")}</p>
+                </div>
+              </motion.button>
 
-            {/* Text */}
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleStartRandom("text")}
-              className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-emerald-500/30 transition-all duration-300"
-            >
-              <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-emerald-500/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-shadow">
-                <MessageCircle className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-emerald-400" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomTextTitle")}</h3>
-                <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomTextDesc")}</p>
-              </div>
-            </motion.button>
-          </div>
+              {/* Text */}
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleStartRandom("text")}
+                className="glass rounded-2xl p-3 sm:p-5 flex flex-col items-center gap-2 sm:gap-3 text-center group relative overflow-hidden border border-white/5 hover:border-emerald-500/30 transition-all duration-300"
+              >
+                <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full bg-emerald-500/20 flex items-center justify-center relative z-10 group-hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-shadow">
+                  <MessageCircle className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-emerald-400" />
+                </div>
+                <div className="relative z-10">
+                  <h3 className="text-xs sm:text-sm md:text-base font-bold text-white leading-tight">{t("home.randomTextTitle")}</h3>
+                  <p className="text-[10px] sm:text-xs text-white/40 mt-0.5 hidden sm:line-clamp-2">{t("home.randomTextDesc")}</p>
+                </div>
+              </motion.button>
+            </div>
 
-          {/* Filter Settings Button */}
-          <div className="flex justify-center">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => { setFiltersType("video"); setShowFiltersModal(true); }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/[0.06] backdrop-blur-sm border border-white/[0.08] text-white/50 text-sm font-medium hover:bg-white/[0.12] hover:border-primary/30 hover:text-white/80 transition-all"
-            >
-              <SlidersHorizontal className="w-4 h-4 text-primary/70" />
-              {t("matching.filtersTitle")}
-            </motion.button>
-          </div>
-        </motion.div>
-      )}
+            {/* Filter Settings Button */}
+            <div className="flex justify-center">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => { setFiltersType("video"); setShowFiltersModal(true); }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/[0.06] backdrop-blur-sm border border-white/[0.08] text-white/50 text-sm font-medium hover:bg-white/[0.12] hover:border-primary/30 hover:text-white/80 transition-all"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-primary/70" />
+                {t("matching.filtersTitle")}
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
 
-      {/* Live Streams Section — Followed Accounts */}
-      {activeTab === 'live' && (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-5"
-        >
-          {/* Header with filters */}
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Radio className="w-5 h-5 text-red-400" />
-                {t("home.followedAccounts")}
-              </h2>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="flex items-center gap-1 text-green-400">
-                  <Circle className="w-2.5 h-2.5 fill-green-400" />
-                  {videoLiveCount} {t("home.videoLiveLabel")}
-                </span>
-                <span className="text-white/30">|</span>
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <Circle className="w-2.5 h-2.5 fill-emerald-400" />
-                  {audioLiveCount} {t("home.audioLiveLabel")}
-                </span>
-                <span className="text-white/30">|</span>
-                <span className="flex items-center gap-1 text-white/40">
-                  <Circle className="w-2.5 h-2.5 fill-white/30" />
-                  {offlineCount} {t("home.offline")}
-                </span>
+        {/* Live Streams Section — Followed Accounts */}
+        {activeTab === 'live' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-5"
+          >
+            {/* Header with filters */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <Radio className="w-5 h-5 text-red-400" />
+                  {t("home.followedAccounts")}
+                </h2>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Circle className="w-2.5 h-2.5 fill-green-400" />
+                    {videoLiveCount} {t("home.videoLiveLabel")}
+                  </span>
+                  <span className="text-white/30">|</span>
+                  <span className="flex items-center gap-1 text-emerald-400">
+                    <Circle className="w-2.5 h-2.5 fill-emerald-400" />
+                    {audioLiveCount} {t("home.audioLiveLabel")}
+                  </span>
+                  <span className="text-white/30">|</span>
+                  <span className="flex items-center gap-1 text-white/40">
+                    <Circle className="w-2.5 h-2.5 fill-white/30" />
+                    {offlineCount} {t("home.offline")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Filter chips */}
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { key: 'all' as const, label: t("home.filterAll"), count: followedAccounts.length },
+                  { key: 'videoLive' as const, label: t("home.filterVideoLive"), count: videoLiveCount },
+                  { key: 'audioLive' as const, label: t("home.filterAudioLive"), count: audioLiveCount },
+                  { key: 'offline' as const, label: t("home.filterOffline"), count: offlineCount },
+                ].map(f => (
+                  <button
+                    key={f.key}
+                    onClick={() => setLiveFilter(f.key)}
+                    className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all duration-300 ${liveFilter === f.key
+                        ? 'bg-primary text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                        : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
+                      }`}
+                  >
+                    {f.label} ({f.count})
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Filter chips */}
-            <div className="flex gap-2 flex-wrap">
-              {[
-                { key: 'all' as const, label: t("home.filterAll"), count: followedAccounts.length },
-                { key: 'videoLive' as const, label: t("home.filterVideoLive"), count: videoLiveCount },
-                { key: 'audioLive' as const, label: t("home.filterAudioLive"), count: audioLiveCount },
-                { key: 'offline' as const, label: t("home.filterOffline"), count: offlineCount },
-              ].map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setLiveFilter(f.key)}
-                  className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all duration-300 ${
-                    liveFilter === f.key
-                      ? 'bg-primary text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                      : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
-                  }`}
-                >
-                  {f.label} ({f.count})
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Accounts grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <AnimatePresence mode="popLayout">
-              {filteredAccounts.map((account) => (
-                <motion.div
-                  key={account.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Link href={account.isLive ? (account.liveType === 'audio' ? `/live?audio=${account.id}` : `/room/${account.id}`) : `/profile/${account.id}`}>
-                    <a className={`glass rounded-2xl p-4 flex items-center gap-4 group border transition-all duration-300 block ${
-                      account.isLive && account.liveType === 'audio'
-                        ? 'border-emerald-500/20 hover:border-emerald-500/40 hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]'
-                        : account.isLive
-                        ? 'border-green-500/20 hover:border-green-500/40 hover:shadow-[0_0_20px_rgba(34,197,94,0.15)]'
-                        : 'border-white/5 hover:border-white/15'
-                    }`}>
-                      {/* Avatar with status indicator */}
-                      <div className="relative shrink-0">
-                        <div className={`w-14 h-14 rounded-full overflow-hidden ${
-                          account.isLive ? 'ring-2 ring-green-500 ring-offset-2 ring-offset-[#0c0c1d]' : 'ring-1 ring-white/10'
+            {/* Accounts grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <AnimatePresence mode="popLayout">
+                {filteredAccounts.map((account) => (
+                  <motion.div
+                    key={account.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <Link href={account.isLive ? (account.liveType === 'audio' ? `/live?audio=${account.id}` : `/room/${account.id}`) : `/profile/${account.id}`}>
+                      <a className={`glass rounded-2xl p-4 flex items-center gap-4 group border transition-all duration-300 block ${account.isLive && account.liveType === 'audio'
+                          ? 'border-emerald-500/20 hover:border-emerald-500/40 hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+                          : account.isLive
+                            ? 'border-green-500/20 hover:border-green-500/40 hover:shadow-[0_0_20px_rgba(34,197,94,0.15)]'
+                            : 'border-white/5 hover:border-white/15'
                         }`}>
-                          <img src={avatarImg} alt={account.displayName} className="w-full h-full object-cover" />
+                        {/* Avatar with status indicator */}
+                        <div className="relative shrink-0">
+                          <div className={`w-14 h-14 rounded-full overflow-hidden ${account.isLive ? 'ring-2 ring-green-500 ring-offset-2 ring-offset-[#0c0c1d]' : 'ring-1 ring-white/10'
+                            }`}>
+                            <img src={avatarImg} alt={account.displayName} className="w-full h-full object-cover" />
+                          </div>
+                          {/* Status dot */}
+                          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-[#0c0c1d] flex items-center justify-center ${account.isLive && account.liveType === 'audio' ? 'bg-emerald-500' : account.isLive ? 'bg-green-500' : 'bg-gray-500'
+                            }`}>
+                            {account.isLive && (
+                              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                            )}
+                          </div>
                         </div>
-                        {/* Status dot */}
-                        <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-[#0c0c1d] flex items-center justify-center ${
-                          account.isLive && account.liveType === 'audio' ? 'bg-emerald-500' : account.isLive ? 'bg-green-500' : 'bg-gray-500'
-                        }`}>
-                          {account.isLive && (
-                            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-white font-bold text-base truncate">{account.displayName}</h3>
+                            {account.isLive && account.liveType === 'audio' ? (
+                              <span className="bg-emerald-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 shadow-[0_0_6px_rgba(16,185,129,0.5)] animate-pulse">
+                                <Mic className="w-2.5 h-2.5" />
+                                AUDIO
+                              </span>
+                            ) : account.isLive ? (
+                              <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 shadow-[0_0_6px_rgba(239,68,68,0.5)] animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                                LIVE
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="text-white/40 text-sm truncate">@{account.username}</p>
+                          {account.isLive ? (
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className={`${account.liveType === 'audio' ? 'text-emerald-400' : 'text-green-400'} text-xs font-medium truncate`}>{account.streamTitle}</span>
+                              <span className="flex items-center gap-1 text-white/50 text-xs shrink-0">
+                                <Eye className="w-3 h-3" />
+                                {account.viewers >= 1000 ? (account.viewers / 1000).toFixed(1) + "K" : account.viewers}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 mt-1 text-white/30 text-xs">
+                              <Clock className="w-3 h-3" />
+                              {t("home.lastSeen")} {getTimeSince(account.lastSeen, t)}
+                            </div>
                           )}
                         </div>
-                      </div>
 
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-white font-bold text-base truncate">{account.displayName}</h3>
+                        {/* Action */}
+                        <div className="shrink-0">
                           {account.isLive && account.liveType === 'audio' ? (
-                            <span className="bg-emerald-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 shadow-[0_0_6px_rgba(16,185,129,0.5)] animate-pulse">
-                              <Mic className="w-2.5 h-2.5" />
-                              AUDIO
-                            </span>
+                            <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center group-hover:bg-emerald-500/20 transition-all">
+                              <Mic className="w-4 h-4 text-emerald-400" />
+                            </div>
                           ) : account.isLive ? (
-                            <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 shadow-[0_0_6px_rgba(239,68,68,0.5)] animate-pulse">
-                              <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                              LIVE
-                            </span>
-                          ) : null}
+                            <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center group-hover:bg-red-500/20 transition-all">
+                              <Video className="w-4 h-4 text-red-400" />
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-white/10 transition-all">
+                              <Users className="w-4 h-4 text-white/40" />
+                            </div>
+                          )}
                         </div>
-                        <p className="text-white/40 text-sm truncate">@{account.username}</p>
-                        {account.isLive ? (
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className={`${account.liveType === 'audio' ? 'text-emerald-400' : 'text-green-400'} text-xs font-medium truncate`}>{account.streamTitle}</span>
-                            <span className="flex items-center gap-1 text-white/50 text-xs shrink-0">
-                              <Eye className="w-3 h-3" />
-                              {account.viewers >= 1000 ? (account.viewers / 1000).toFixed(1) + "K" : account.viewers}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1 mt-1 text-white/30 text-xs">
-                            <Clock className="w-3 h-3" />
-                            {t("home.lastSeen")} {getTimeSince(account.lastSeen, t)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action */}
-                      <div className="shrink-0">
-                        {account.isLive && account.liveType === 'audio' ? (
-                          <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center group-hover:bg-emerald-500/20 transition-all">
-                            <Mic className="w-4 h-4 text-emerald-400" />
-                          </div>
-                        ) : account.isLive ? (
-                          <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center group-hover:bg-red-500/20 transition-all">
-                            <Video className="w-4 h-4 text-red-400" />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-white/10 transition-all">
-                            <Users className="w-4 h-4 text-white/40" />
-                          </div>
-                        )}
-                      </div>
-                    </a>
-                  </Link>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {filteredAccounts.length === 0 && (
-            <div className="text-center py-12 text-white/30">
-              <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="text-lg font-medium">{t("home.noFollowed")}</p>
+                      </a>
+                    </Link>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
-          )}
-        </motion.div>
-      )}
 
-      {/* Hero Section */}
-      <section className="relative w-full h-[250px] md:h-[300px] rounded-3xl overflow-hidden shadow-2xl">
-        <img src={heroBg} alt="Hero" className="absolute inset-0 w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
-      </section>
+            {filteredAccounts.length === 0 && (
+              <div className="text-center py-12 text-white/30">
+                <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="text-lg font-medium">{t("home.noFollowed")}</p>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Hero Section */}
+        <section className="relative w-full h-[250px] md:h-[300px] rounded-3xl overflow-hidden shadow-2xl">
+          <img src={heroBg} alt="Hero" className="absolute inset-0 w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
+        </section>
       </div>
 
       {/* Random Chat Modals */}
@@ -476,7 +479,7 @@ export function Home() {
               ageMax: filters.ageMax,
               countryFilter: filters.countryFilter,
             }));
-          } catch {}
+          } catch { }
           setMatchFilters(filters);
           setShowMatching(true);
         }}

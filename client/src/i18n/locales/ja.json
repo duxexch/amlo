@@ -41,7 +41,7 @@
     "adminPanel": "管理パネル",
     "social": "ソーシャル",
     "download": "ダウンロード",
-    "cex": "CEX",
+    "cex": "ピース",
     "friends": "友達",
     "chat": "チャット"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "ビデオ配信中",
     "audioLiveLabel": "オーディオ配信中",
     "tabWorld": "世界一周",
+    "tabPieces": "ピース",
     "featuredLive": "注目のライブ",
     "followedAccounts": "フォロー中",
     "liveNow": "配信中",

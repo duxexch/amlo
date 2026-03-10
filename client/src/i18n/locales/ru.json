@@ -41,7 +41,7 @@
     "adminPanel": "Панель управления",
     "social": "Соцсети",
     "download": "Скачать",
-    "cex": "CEX",
+    "cex": "Кусочки",
     "friends": "Друзья",
     "chat": "Чат"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "Видео",
     "audioLiveLabel": "Аудио",
     "tabWorld": "По всему миру",
+    "tabPieces": "Кусочки",
     "featuredLive": "Избранные трансляции",
     "followedAccounts": "Подписки",
     "liveNow": "В эфире",

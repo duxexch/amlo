@@ -41,7 +41,7 @@
     "adminPanel": "एडमिन पैनल",
     "social": "सोशल",
     "download": "डाउनलोड",
-    "cex": "CEX",
+    "cex": "टुकड़े",
     "friends": "दोस्त",
     "chat": "चैट"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "वीडियो लाइव",
     "audioLiveLabel": "ऑडियो लाइव",
     "tabWorld": "दुनिया भर में",
+    "tabPieces": "टुकड़े",
     "featuredLive": "विशेष लाइव",
     "followedAccounts": "फ़ॉलो किए गए",
     "liveNow": "लाइव",

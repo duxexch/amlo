@@ -44,7 +44,7 @@
     "adminPanel": "لوحة التحكم",
     "social": "تواصل",
     "download": "تحميل",
-    "cex": "CEX"
+    "cex": "قطع"
   },
   "home": {
     "heroTitle": "عالم Ablox",
@@ -52,6 +52,7 @@
     "tabRandomChat": "دردشة عشوائية",
     "tabLiveStream": "بث مباشر",
     "tabWorld": "حول العالم",
+    "tabPieces": "قطع",
     "randomVideoTitle": "فيديو عشوائي",
     "randomVideoDesc": "تعرف على أشخاص جدد وجهاً لوجه",
     "randomAudioTitle": "صوت عشوائي",

@@ -41,7 +41,7 @@
     "adminPanel": "Adminbereich",
     "social": "Sozial",
     "download": "Herunterladen",
-    "cex": "CEX",
+    "cex": "Stücke",
     "friends": "Freunde",
     "chat": "Chat"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "Video Live",
     "audioLiveLabel": "Audio Live",
     "tabWorld": "Weltweit",
+    "tabPieces": "Stücke",
     "featuredLive": "Empfohlene Livestreams",
     "followedAccounts": "Abonniert",
     "liveNow": "Jetzt Live",

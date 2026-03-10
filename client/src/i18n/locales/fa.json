@@ -41,7 +41,7 @@
     "adminPanel": "پنل مدیریت",
     "social": "ارتباطات",
     "download": "دانلود",
-    "cex": "CEX",
+    "cex": "قطعات",
     "friends": "دوستان",
     "chat": "گفتگوها"
   },
@@ -68,6 +68,7 @@
     "videoLiveLabel": "ویدیو زنده",
     "audioLiveLabel": "صوت زنده",
     "tabWorld": "دور دنیا",
+    "tabPieces": "قطعات",
     "featuredLive": "پخش زنده ویژه",
     "followedAccounts": "دنبال‌شده‌ها",
     "liveNow": "زنده",
