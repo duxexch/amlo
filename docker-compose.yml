@@ -263,9 +263,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
         reservations:
-          memory: 64M
+          memory: 128M
 
 networks:
   ablox_network:
