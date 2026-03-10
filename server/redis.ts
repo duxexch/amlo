@@ -104,8 +104,9 @@ export function createRedisDuplicate(label: string): Redis | null {
  */
 function wrapIoredisForConnectRedis(redis: Redis) {
   const originalSet = redis.set.bind(redis);
-  (redis as any).set = (key: string, value: string, opts?: any) => {
-    if (opts && typeof opts === "object" && !Array.isArray(opts)) {
+  (redis as any).set = (key: string, value: string, ...rest: any[]) => {
+    const opts = rest[0];
+    if (rest.length === 1 && opts && typeof opts === "object" && !Array.isArray(opts)) {
       const args: any[] = [key, value];
       if (opts.EX) args.push("EX", opts.EX);
       else if (opts.PX) args.push("PX", opts.PX);
@@ -113,7 +114,7 @@ function wrapIoredisForConnectRedis(redis: Redis) {
       else if (opts.XX) args.push("XX");
       return (originalSet as any)(...args);
     }
-    return (originalSet as any)(key, value, opts);
+    return (originalSet as any)(key, value, ...rest);
   };
   return redis;
 }
