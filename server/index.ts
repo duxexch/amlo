@@ -394,6 +394,12 @@ io.on("connection", (socket) => {
   if (isStr(sessionUserId, 100)) {
     socket.join(`user:${sessionUserId}`);
     void setUserOnline(sessionUserId, socket.id);
+    socket.broadcast.emit("presence-update", {
+      userId: sessionUserId,
+      isOnline: true,
+      lastSeen: null,
+      ts: Date.now(),
+    });
   }
 
   // ── User goes online ──
@@ -409,6 +415,12 @@ io.on("connection", (socket) => {
     await setUserOnline(userId, socket.id);
     socket.data.userId = userId;
     socket.join(`user:${userId}`);
+    socket.broadcast.emit("presence-update", {
+      userId,
+      isOnline: true,
+      lastSeen: null,
+      ts: Date.now(),
+    });
   });
 
   // ── Rooms (live streams) ──
@@ -1031,6 +1043,12 @@ io.on("connection", (socket) => {
       if (!stillConnected) {
         await removeUserOnline(userId);
         await setLastSeen(userId);
+        socket.broadcast.emit("presence-update", {
+          userId,
+          isOnline: false,
+          lastSeen: new Date().toISOString(),
+          ts: Date.now(),
+        });
       }
 
       // ── World session disconnect notification ──

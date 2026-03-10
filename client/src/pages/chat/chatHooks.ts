@@ -370,6 +370,37 @@ export function useActiveChat(
       );
     };
 
+    const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean; lastSeen?: string | null }) => {
+      const targetUserId = String(data?.userId || "").trim();
+      if (!targetUserId) return;
+      const isOnline = Boolean(data?.isOnline);
+      const lastSeen = data?.lastSeen || null;
+
+      setConversations(prev => prev.map(c => {
+        if (c.otherUser?.id !== targetUserId) return c;
+        return {
+          ...c,
+          otherUser: {
+            ...c.otherUser,
+            isOnline,
+          },
+          ...(lastSeen ? { lastSeen } : {}),
+        };
+      }));
+
+      setActiveConv(prev => {
+        if (!prev || prev.otherUser?.id !== targetUserId) return prev;
+        return {
+          ...prev,
+          otherUser: {
+            ...prev.otherUser,
+            isOnline,
+          },
+          ...(lastSeen ? { lastSeen } : {}),
+        };
+      });
+    };
+
     const handleChatBlocked = (data: ChatBlockedPayload) => {
       if (activeConvRef.current?.otherUser?.id === data.blockerId) {
         setBlockStatus({ isBlocked: true, blockedByThem: true, blockedByMe: false });
@@ -409,6 +440,7 @@ export function useActiveChat(
     s.on("messages-read", handleMessagesRead);
     s.on("message-sent", handleMessageSent);
     s.on("chat-blocked", handleChatBlocked);
+    s.on("presence-update", handlePresenceUpdate);
     s.on("message-deleted", handleMessageDeleted);
     s.on("message-delivered", handleMessageDelivered);
     s.on("conversation-deleted", handleConversationDeleted);
@@ -425,6 +457,7 @@ export function useActiveChat(
       s.off("messages-read", handleMessagesRead);
       s.off("message-sent", handleMessageSent);
       s.off("chat-blocked", handleChatBlocked);
+      s.off("presence-update", handlePresenceUpdate);
       s.off("message-deleted", handleMessageDeleted);
       s.off("message-delivered", handleMessageDelivered);
       s.off("conversation-deleted", handleConversationDeleted);

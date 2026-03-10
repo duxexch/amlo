@@ -156,7 +156,7 @@ function ensureAudioContext() {
   return audioCtx;
 }
 
-function playTone(freq: number, duration: number, gain = 0.08, startDelay = 0) {
+function playTone(freq: number, duration: number, gain = 0.14, startDelay = 0) {
   const ctx = ensureAudioContext();
   if (!ctx) return;
 
@@ -217,7 +217,7 @@ function playMediaFile(url: string, mediaType: SoundSlot["mediaType"], volume: n
   const media = document.createElement(isVideo ? "video" : "audio");
   media.src = url;
   media.preload = "auto";
-  media.volume = Math.max(0, Math.min(1, volume));
+  media.volume = Math.max(0.3, Math.min(1, volume <= 0 ? 0 : volume * 1.6));
 
   if (isVideo) {
     (media as HTMLVideoElement).playsInline = true;
@@ -255,26 +255,26 @@ function playNotificationSound(type: AppNotificationType) {
     }
 
     if (type === "call") {
-      playTone(740, 0.16, 0.09, 0);
-      playTone(880, 0.16, 0.09, 0.19);
-      playTone(988, 0.2, 0.1, 0.39);
+      playTone(740, 0.16, 0.18, 0);
+      playTone(880, 0.16, 0.18, 0.19);
+      playTone(988, 0.2, 0.2, 0.39);
       return;
     }
 
     if (type === "admin") {
-      playTone(520, 0.12, 0.08, 0);
-      playTone(660, 0.12, 0.08, 0.14);
+      playTone(520, 0.12, 0.15, 0);
+      playTone(660, 0.12, 0.15, 0.14);
       return;
     }
 
     if (type === "friend-request") {
-      playTone(480, 0.1, 0.07, 0);
-      playTone(620, 0.14, 0.07, 0.12);
+      playTone(480, 0.1, 0.14, 0);
+      playTone(620, 0.14, 0.14, 0.12);
       return;
     }
 
-    playTone(560, 0.09, 0.07, 0);
-    playTone(760, 0.12, 0.07, 0.1);
+    playTone(560, 0.09, 0.14, 0);
+    playTone(760, 0.12, 0.14, 0.1);
   } catch {
     // Ignore audio errors.
   }
