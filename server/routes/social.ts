@@ -2159,11 +2159,8 @@ router.post("/calls/:id/answer", async (req, res) => {
       callBalanceTimers.set(call.id, timers);
     }
 
-    // Notify caller
-    const callerSocketId = await getUserSocketId(call.callerId);
-    if (callerSocketId) {
-      io.to(`user:${call.callerId}`).emit("call-answered", { callId: call.id });
-    }
+    // Notify caller — always emit via room (no getUserSocketId guard)
+    io.to(`user:${call.callerId}`).emit("call-answered", { callId: call.id });
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
@@ -4459,10 +4456,16 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       }
     }
 
-    // Check if user already has an active stream
+    // Auto-end zombie streams older than 6 hours
     const existing = await storage.getUserActiveStream(userId);
     if (existing) {
-      return res.status(400).json({ success: false, message: "لديك بث نشط بالفعل", data: existing });
+      const ageMs = Date.now() - new Date(existing.startedAt || 0).getTime();
+      if (ageMs > 6 * 3600_000) {
+        await storage.endStream(existing.id);
+        socialLog.info({ streamId: existing.id, userId }, "Auto-ended zombie stream (>6h)");
+      } else {
+        return res.status(400).json({ success: false, message: "لديك بث نشط بالفعل", data: existing });
+      }
     }
 
     const { title, type, tags, category, scheduledAt } = req.body;

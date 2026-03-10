@@ -448,6 +448,8 @@ export function CallScreen() {
         if (Number.isFinite(serverCoins)) setChargedCoins(serverCoins);
       } catch { }
     }
+    setStatus("ended");
+    setTimeout(() => navigate("/chat"), 1500);
   };
 
   const handleNext = () => {

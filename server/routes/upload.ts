@@ -183,7 +183,7 @@ async function findDuplicateAvatarOwner(userId: string, uploadedFilePath: string
   const uploadedStat = fs.statSync(uploadedFilePath);
   const uploadedHash = sha256File(uploadedFilePath);
   const uploadedDHash = await computeDHash(uploadedFilePath);
-  const DHASH_MAX_DISTANCE = 5;
+  const DHASH_MAX_DISTANCE = 10;
 
   const { rows } = await pool.query(
     `

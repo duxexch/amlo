@@ -286,6 +286,15 @@ const MessageBubble = memo(function MessageBubble({
               onClick={(e) => e.stopPropagation()}
             />
           )}
+          {msg.type === "voice" && msg.mediaUrl && (
+            <audio
+              src={msg.mediaUrl}
+              controls
+              preload="metadata"
+              className="w-full min-w-[200px]"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
           {msg.content && (showOriginalText || !hasTranslated) && (
             <p className="text-sm leading-snug whitespace-pre-wrap" dir="auto">{msg.content}</p>
           )}
@@ -911,7 +920,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           exit={{ opacity: 0, scale: 0.92, y: 30 }}
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
           onClick={e => e.stopPropagation()}
-          className="w-full max-w-lg h-[90vh] sm:h-[85vh] max-h-[700px] min-h-0 flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)] overflow-hidden"
+          className="w-full max-w-lg h-[90dvh] sm:h-[85dvh] max-h-[700px] min-h-0 flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)] overflow-hidden"
         >
           {/* ── Header ── */}
           <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3 bg-white/[0.02] shrink-0">

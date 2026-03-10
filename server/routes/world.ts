@@ -92,7 +92,7 @@ async function getBusyWorldUserIds(db: ReturnType<typeof getDb>, excludeSessionI
     matchedUserId: schema.worldSessions.matchedUserId,
   }).from(schema.worldSessions)
     .where(and(
-      sql`${schema.worldSessions.status} IN ('searching', 'matched', 'chatting')`,
+      sql`${schema.worldSessions.status} IN ('matched', 'chatting')`,
       excludeSessionId ? ne(schema.worldSessions.id, excludeSessionId) : sql`1=1`,
     ));
 
