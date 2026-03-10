@@ -67,6 +67,10 @@ Optional flags:
 - `DOMAIN_URL=https://your-domain.tld ./script/production-smoke-check.sh`
 - `RUN_ALERT_TEST=0 ./script/production-smoke-check.sh` to skip sending test alerts.
 
+Notes:
+- Metrics counters are validated from inside `ablox_app` for reliability.
+- External `/api/metrics` reachability is reported as informational only.
+
 ## Notes
 - This stack is scoped to `ablox` service names on `ablox_network`.
 - Do not run global prune/reset commands on shared VPS.

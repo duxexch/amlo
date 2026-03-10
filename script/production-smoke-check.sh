@@ -73,10 +73,24 @@ else
 fi
 
 # 4) Metrics endpoint contains critical counters
-if curl -fsS --max-time 10 "$DOMAIN_URL/api/metrics" | grep -Eq 'ablox_social_call_balance_warnings_emitted|ablox_social_call_balance_exhausted_ended'; then
-  pass "Metrics endpoint exposes call-balance counters"
+# Validate from inside app container for reliability (avoids proxy/CDN edge effects).
+if docker exec ablox_app wget -qO- http://127.0.0.1:3000/api/metrics >/tmp/amlo_metrics_internal.txt 2>/tmp/amlo_metrics_internal.err; then
+  if grep -Eq 'ablox_social_call_balance_warnings_emitted|ablox_social_call_balance_exhausted_ended' /tmp/amlo_metrics_internal.txt; then
+    pass "Metrics endpoint exposes call-balance counters (internal)"
+  else
+    fail "Metrics endpoint exposes call-balance counters (internal)"
+    info "Metrics sample (internal): $(head -n 5 /tmp/amlo_metrics_internal.txt | tr '\n' ' ')"
+  fi
 else
-  fail "Metrics endpoint exposes call-balance counters"
+  fail "Metrics endpoint reachable (internal)"
+  info "Metrics internal error: $(cat /tmp/amlo_metrics_internal.err 2>/dev/null || true)"
+fi
+
+# Optional external metrics reachability check for edge validation.
+if curl -fsS --max-time 10 "$DOMAIN_URL/api/metrics" >/tmp/amlo_metrics_external.txt 2>/tmp/amlo_metrics_external.err; then
+  pass "Metrics endpoint reachable via domain"
+else
+  info "Metrics endpoint via domain not reachable: $(cat /tmp/amlo_metrics_external.err 2>/dev/null || true)"
 fi
 
 # 5) Database health
