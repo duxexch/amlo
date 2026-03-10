@@ -352,13 +352,18 @@ export function CallScreen() {
       if (hasVideo) setCurrentCallType("video");
     },
     onRemoteStream: (stream) => {
-      if (callType === "video" && remoteVideoRef.current) {
+      // Always attach remote stream to video element (handles mid-call video toggle)
+      if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream;
         remoteVideoRef.current.play().catch(() => { });
       }
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
         remoteAudioRef.current.play().catch(() => { });
+      }
+      // If remote stream has video tracks, switch UI to video mode
+      if (stream.getVideoTracks().length > 0) {
+        setCurrentCallType("video");
       }
     },
     onStats: setCallStats,
@@ -575,10 +580,13 @@ export function CallScreen() {
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      {/* ── Full-screen remote video ── */}
-      {currentCallType === "video" && status === "active" && (
-        <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover z-0" />
-      )}
+      {/* ── Full-screen remote video (always in DOM, hidden when not active) ── */}
+      <video
+        ref={remoteVideoRef}
+        autoPlay playsInline
+        className={`absolute inset-0 w-full h-full object-cover z-0 ${currentCallType === "video" && status === "active" ? "block" : "hidden"
+          }`}
+      />
 
       {/* ── Voice-only / pre-connect background ── */}
       {!(currentCallType === "video" && status === "active") && (
@@ -630,20 +638,18 @@ export function CallScreen() {
       </AnimatePresence>
 
       {/* ── Local video PIP (small window) ── */}
-      {isVideoActive && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute top-20 right-4 z-20 w-[110px] h-[155px] rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl"
-        >
-          <video
-            ref={localVideoRef}
-            autoPlay playsInline muted
-            className="w-full h-full object-cover"
-            style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
-          />
-        </motion.div>
-      )}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: isVideoActive ? 1 : 0, scale: isVideoActive ? 1 : 0.8 }}
+        className={`absolute top-20 right-4 z-20 w-[110px] h-[155px] rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl ${isVideoActive ? "pointer-events-auto" : "pointer-events-none"}`}
+      >
+        <video
+          ref={localVideoRef}
+          autoPlay playsInline muted
+          className="w-full h-full object-cover"
+          style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
+        />
+      </motion.div>
 
       {/* ── Center content (pre-connect / voice states) ── */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-4">
@@ -737,8 +743,8 @@ export function CallScreen() {
             <button
               onClick={currentCallType === "video" && isVideoOn ? switchToVoice : switchToVideo}
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-all backdrop-blur-md ${currentCallType === "video" && isVideoOn
-                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                  : "bg-white/10 text-white/70 border border-white/10"
+                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                : "bg-white/10 text-white/70 border border-white/10"
                 }`}
               title={currentCallType === "video" && isVideoOn ? t("social.switchToVoice", "تحويل لصوتية") : t("social.switchToVideo", "تحويل لفيديو")}
             >

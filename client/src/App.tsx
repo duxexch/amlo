@@ -22,6 +22,7 @@ import {
   initNotificationCenter,
   publishNotification,
 } from "@/lib/notificationCenter";
+import { useSocketInvalidation } from "@/hooks/useSocketInvalidation";
 
 // ── Lazy-loaded pages (code splitting) ──
 const Home = lazy(() => import("@/pages/Home").then(m => ({ default: m.Home })));
@@ -176,6 +177,9 @@ function App() {
   }>({});
   const [location, navigate] = useLocation();
   const isAppPage = !location.startsWith('/admin') && !location.startsWith('/agent') && !location.startsWith('/agent-apply') && !location.startsWith('/account-apply') && location !== '/auth' && location !== '/pin-setup' && !location.startsWith('/reset-password') && location !== '/download';
+
+  // ── Socket → React Query cache invalidation (SWR) ──
+  useSocketInvalidation();
 
   // ── Listen for incoming calls via Socket.io ──
   useEffect(() => {

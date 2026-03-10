@@ -49,7 +49,7 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: true,
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: 30_000, // 30s — SWR: show cached instantly, refetch in background
       gcTime: 30 * 60 * 1000, // keep cached user data for 30 minutes
       retry: (failureCount, error) => {
         // Don't retry on auth errors or client errors
