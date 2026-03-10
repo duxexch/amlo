@@ -32,7 +32,22 @@ Set in `.env` before production use:
 - `GRAFANA_ADMIN_PASSWORD`
 
 Alertmanager config currently uses safe local fallback URLs (`http://127.0.0.1:65535`) so the service always starts.
-For real notifications, update these URLs directly in `monitoring/alertmanager/alertmanager.yml`.
+For real notifications, use the non-interactive setup script instead of editing YAML manually.
+
+## Configure Slack Alerts (No Manual Edit)
+```bash
+chmod +x script/configure-alertmanager-slack.sh
+SLACK_WEBHOOK_URL='https://hooks.slack.com/services/REAL/REAL/REAL' \
+SLACK_CHANNEL='#alerts-critical' \
+./script/configure-alertmanager-slack.sh
+```
+
+What this script does:
+- Validates the webhook directly against Slack (`ok` required).
+- Backs up `monitoring/alertmanager/alertmanager.yml`.
+- Writes a clean Slack-only Alertmanager config.
+- Restarts `alertmanager` only.
+- Sends a test alert and prints recent error logs.
 
 ## Smoke Checks
 ```powershell
