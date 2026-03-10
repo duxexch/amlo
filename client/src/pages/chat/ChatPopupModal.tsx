@@ -911,7 +911,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 sm:p-3 md:p-6"
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-2 sm:p-3 md:p-6"
         onClick={onClose}
       >
         <motion.div

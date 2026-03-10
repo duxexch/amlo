@@ -335,9 +335,11 @@ export function CallScreen() {
     onRemoteStream: (stream) => {
       if (callType === "video" && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream;
+        remoteVideoRef.current.play().catch(() => { });
       }
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
+        remoteAudioRef.current.play().catch(() => { });
       }
     },
     onStats: setCallStats,

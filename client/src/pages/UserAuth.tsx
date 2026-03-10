@@ -525,7 +525,7 @@ export function UserAuth() {
                     id={`login-otp-${i}`}
                     type="text"
                     inputMode="numeric"
-                    maxLength={1}
+                    maxLength={6}
                     value={val}
                     autoComplete="one-time-code"
                     onChange={(e) => handleLoginOtpChange(i, e.target.value)}
@@ -592,7 +592,7 @@ export function UserAuth() {
                     id={`otp-${i}`}
                     type="text"
                     inputMode="numeric"
-                    maxLength={1}
+                    maxLength={6}
                     value={val}
                     autoComplete="one-time-code"
                     onChange={(e) => handleOtpChange(i, e.target.value)}
