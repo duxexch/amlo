@@ -28,7 +28,7 @@ services:
       - ablox_grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana:/etc/grafana/provisioning/dashboards/json:ro
+      - ./monitoring/grafana:/var/lib/grafana/dashboards:ro
     ports:
       - "3001:3000"
     depends_on:
