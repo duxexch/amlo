@@ -1,0 +1,99 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ablox_prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus-alert-rules.yml:/etc/prometheus/rules/prometheus-alert-rules.yml:ro
+      - ablox_prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - ablox_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ablox_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ablox_grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana:/etc/grafana/provisioning/dashboards/json:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - ablox_network
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: ablox_alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ablox_alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - ablox_network
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: ablox_node_exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+    networks:
+      - ablox_network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: ablox_redis_exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-AbL0x_R3d1s_2026!}
+    ports:
+      - "9121:9121"
+    networks:
+      - ablox_network
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: ablox_postgres_exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-ablox_admin}:${POSTGRES_PASSWORD:-AbL0x_S3cur3_2026!}@postgres:5432/${POSTGRES_DB:-ablox}?sslmode=disable
+    ports:
+      - "9187:9187"
+    networks:
+      - ablox_network
+
+volumes:
+  ablox_prometheus_data:
+  ablox_grafana_data:
+  ablox_alertmanager_data:
+
+networks:
+  ablox_network:
+    name: ablox_network
+    driver: bridge

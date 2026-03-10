@@ -349,6 +349,10 @@ async function finalizeCallEnd(params: {
     reason: params.reason || "user_end",
   }, "Call ended");
 
+  if (params.reason === "balance_exhausted") {
+    stabilityMetrics.callBalanceExhaustedEnded += 1;
+  }
+
   return {
     ok: true as const,
     data: { ...updated, payerUserId, freeMinutesUsed, reason: params.reason || "user_end" },
@@ -2064,6 +2068,7 @@ router.post("/calls/:id/answer", async (req, res) => {
 
       if (totalBudgetSeconds > CALL_BALANCE_WARNING_LEAD_SECONDS) {
         timers.warningTimer = setTimeout(() => {
+          stabilityMetrics.callBalanceWarningsEmitted += 1;
           emitToUser(call.callerId, "call-balance-warning", {
             callId: call.id,
             secondsRemaining: CALL_BALANCE_WARNING_LEAD_SECONDS,

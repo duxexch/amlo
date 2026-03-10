@@ -272,3 +272,119 @@ max-port=49999
 | 🟢 منخفض | MOS score display | ⭐ | تجربة مستخدم |
 | 🟢 منخفض | Server analytics | ⭐⭐⭐ | تحليل طويل المدى |
 | 🟢 منخفض | Network change detect | ⭐ | ثبات عند تبديل شبكة |
+
+---
+
+## خارطة تنفيذ للحمل الكبير جدا (Very High Scale Blueprint)
+
+> هذا القسم يحوّل الخطة من تحسين جودة مكالمة إلى منصة قابلة للتوسع الأفقي عند أحمال ضخمة.
+
+### 1) افتراضات السعة المستهدفة
+
+| المستوى | مستخدمون متزامنون | مكالمات متزامنة (تقريبي) | Streams متزامنة | الهدف |
+|---------|--------------------|--------------------------|-----------------|-------|
+| Tier A | 10,000 | 1,000–1,500 | 150–300 | بداية التوسع |
+| Tier B | 50,000 | 5,000–8,000 | 800–1,500 | نمو سريع |
+| Tier C | 100,000+ | 10,000+ | 2,000+ | حمل كبير جدا |
+
+### 2) نموذج البنية المطلوب (Mandatory Architecture Split)
+
+1. **Edge Layer**:
+`Cloudflare/WAF + CDN + Rate Limits + Bot Mitigation`
+
+2. **App/API Layer (Stateless)**:
+`Node/Express + Socket.IO` في عدة نسخ خلف Load Balancer.
+لا state محلي، كل الجلسات/المفاتيح في Redis.
+
+3. **Realtime Bus Layer**:
+`Redis Cluster` لـ pub/sub والـ hot counters.
+وعند Tier B/C يضاف `NATS أو Kafka` لأحداث النظام الثقيلة.
+
+4. **Media Layer (منفصل بالكامل)**:
+`LiveKit/mediasoup SFU` على عقد مخصصة CPU/Network.
+`Coturn` على عقد منفصلة كذلك.
+
+5. **Data Layer**:
+`PostgreSQL + PgBouncer + Read Replicas + Partitioning`.
+
+6. **Async/Jobs Layer**:
+Queue موحدة مع `retry + DLQ + idempotency` (BullMQ/Redis Streams/Kafka).
+
+7. **Observability Layer**:
+`Prometheus + Grafana + Loki + Alertmanager + OpenTelemetry`.
+
+### 3) ما لا يجب تشغيله على نفس VPS
+
+- API + SFU + TURN + DB + Redis على نفس VM تحت حمل كبير = عنق زجاجة حتمي.
+- أي هدف أعلى من Tier A يحتاج فصل الأدوار على الأقل إلى:
+  - مجموعة App
+  - مجموعة Media (SFU)
+  - مجموعة TURN
+  - Data managed أو عقد مستقلة
+
+### 4) SLO/SLI إلزامية للإنتاج
+
+| المؤشر | الهدف |
+|--------|-------|
+| API p95 | أقل من 150ms |
+| Socket event p95 | أقل من 300ms |
+| Call setup success | أعلى من 99% |
+| Call drop rate | أقل من 1% |
+| Error rate 5xx | أقل من 0.5% |
+| TURN relay saturation | أقل من 70% عند الذروة |
+
+### 5) ضبط مبدئي لعقد Media/TURN
+
+1. **TURN**:
+- توسيع ports إلى مدى واسع ثابت (تم اقتراحه أعلاه).
+- تفعيل `TURNS:443` إلزامي.
+- Secret rotation دوري (أسبوعي/شهري حسب السياسة).
+
+2. **SFU/LiveKit**:
+- تفعيل Simulcast/ABR افتراضيا.
+- وضع bitrate ceilings حسب نوع الشبكة.
+- autoscaling policy على: `participants`, `egress bitrate`, `CPU`.
+
+3. **Client call profile**:
+- default video profile محافظ (360p/480p) مع ترقية ديناميكية عند الجودة الممتازة.
+
+### 6) خطة تنفيذ على 3 مراحل
+
+#### Phase 1 (أسبوع 1-2): Hardening + قياس
+1. تثبيت stack المراقبة الكامل وربط alerts.
+2. تفعيل dashboards لـ:
+`API latency`, `socket throughput`, `turn allocations`, `call success/drop`, `db pool pressure`.
+3. اعتماد baseline تحميل (k6 + سيناريو مكالمات).
+
+#### Phase 2 (أسبوع 3-4): فصل الطبقات
+1. فصل Media/TURN عن API فعليا.
+2. ترحيل Redis/Postgres إلى managed أو عقد مستقلة.
+3. تفعيل autoscaling لقسم App وMedia.
+
+#### Phase 3 (أسبوع 5-8): Scale-up تدريجي
+1. اختبار Tier A ثم Tier B تدريجيا.
+2. تشغيل load tests في نافذة مراقبة كاملة مع rollback ready.
+3. تفعيل feature flags لتقليل الجودة تلقائيا أثناء الضغط.
+
+### 7) اختبارات التحمل المطلوبة قبل كل ترقية مستوى
+
+1. **API/Socket Test**: k6 + websocket scenarios.
+2. **WebRTC Stress**: سيناريو call setup/teardown كثيف + packet loss simulation.
+3. **Soak Test**: 6-12 ساعات حمل متوسط مستمر.
+4. **Spike Test**: قفزات 3x خلال 2-5 دقائق.
+5. **Failure Test**: إسقاط Redis replica أو عقدة SFU والتأكد من التعافي.
+
+### 8) قرارات تشغيلية موصى بها
+
+1. للحمل الكبير جدا، اعتمد **Managed LiveKit** أو cluster SFU مخصص بدل عقدة واحدة.
+2. اجعل release policy: `canary 5% -> 25% -> 100%` مع auto-rollback.
+3. ضع runbook واضح للحوادث P1 يشمل:
+   - ارتفاع drop rate
+   - فشل call setup
+   - saturation في TURN/SFU
+
+### 9) نتيجة تنفيذ هذه الخارطة
+
+- تتحول المنصة من تحمل "جيد" إلى تحمل "مؤسسي" قابل للنمو.
+- جودة المكالمات تصبح مستقرة تحت الضغط بدلا من الانهيار المفاجئ.
+- أي توسع مستقبلي يصبح قرار سعة/تكلفة واضح، وليس رد فعل بعد الأعطال.

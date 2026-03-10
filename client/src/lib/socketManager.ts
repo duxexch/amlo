@@ -23,10 +23,10 @@ export interface ConnectionInfo {
 // ── Quality thresholds ──
 const QUALITY_THRESHOLDS: Record<ConnectionQuality, { maxRtt: number; minDownlink: number }> = {
   excellent: { maxRtt: 100, minDownlink: 5 },
-  good:      { maxRtt: 300, minDownlink: 1.5 },
-  fair:      { maxRtt: 600, minDownlink: 0.5 },
-  poor:      { maxRtt: Infinity, minDownlink: 0 },
-  offline:   { maxRtt: Infinity, minDownlink: 0 },
+  good: { maxRtt: 300, minDownlink: 1.5 },
+  fair: { maxRtt: 600, minDownlink: 0.5 },
+  poor: { maxRtt: Infinity, minDownlink: 0 },
+  offline: { maxRtt: Infinity, minDownlink: 0 },
 };
 
 // ── Queued event for offline sending ──
@@ -230,7 +230,7 @@ class SocketManager {
   private notifyListeners() {
     const info = { ...this.connectionInfo };
     this.qualityListeners.forEach(fn => {
-      try { fn(info); } catch {}
+      try { fn(info); } catch { }
     });
   }
 
@@ -305,7 +305,7 @@ class SocketManager {
     this.connectionInfo.dataSaver = enabled;
     this.notifyListeners();
     // Persist preference
-    try { localStorage.setItem("ablox:dataSaver", enabled ? "1" : "0"); } catch {}
+    try { localStorage.setItem("ablox:dataSaver", enabled ? "1" : "0"); } catch { }
   }
 
   /**
@@ -344,10 +344,10 @@ class SocketManager {
     // Video constraints scaled to connection quality
     const videoConstraints: Record<ConnectionQuality, MediaTrackConstraints> = {
       excellent: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
-      good:      { width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 20, max: 24 } },
-      fair:      { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 20 } },
-      poor:      { width: { ideal: 160 }, height: { ideal: 120 }, frameRate: { ideal: 10, max: 12 } },
-      offline:   { width: { ideal: 160 }, height: { ideal: 120 }, frameRate: { max: 10 } },
+      good: { width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 20, max: 24 } },
+      fair: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 20 } },
+      poor: { width: { ideal: 160 }, height: { ideal: 120 }, frameRate: { ideal: 10, max: 12 } },
+      offline: { width: { ideal: 160 }, height: { ideal: 120 }, frameRate: { max: 10 } },
     };
 
     return {
@@ -377,10 +377,10 @@ class SocketManager {
     // Video bitrates
     const bitrates: Record<ConnectionQuality, { min: number; max: number; start: number }> = {
       excellent: { min: 200_000, max: 1_000_000, start: 500_000 },  // 200K-1Mbps
-      good:      { min: 150_000, max: 500_000,   start: 300_000 },  // 150-500 kbps
-      fair:      { min: 80_000,  max: 250_000,   start: 150_000 },  // 80-250 kbps
-      poor:      { min: 30_000,  max: 100_000,   start: 50_000 },   // 30-100 kbps
-      offline:   { min: 0,       max: 50_000,    start: 30_000 },
+      good: { min: 150_000, max: 500_000, start: 300_000 },  // 150-500 kbps
+      fair: { min: 80_000, max: 250_000, start: 150_000 },  // 80-250 kbps
+      poor: { min: 30_000, max: 100_000, start: 50_000 },   // 30-100 kbps
+      offline: { min: 0, max: 50_000, start: 30_000 },
     };
 
     return saver

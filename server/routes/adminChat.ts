@@ -7,7 +7,7 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, or, desc, asc, sql, count, ne, inArray, like, gte, lte, between } from "drizzle-orm";
 import { escapeLike } from "../utils/validation";
-import { getDb } from "../db";import { requireAdmin } from "../middleware/adminAuth";
+import { getDb } from "../db"; import { requireAdmin } from "../middleware/adminAuth";
 import { storage } from "../storage";
 import { createLogger } from "../logger";
 const log = (msg: string, _src?: string) => chatLog.info(msg);
@@ -17,6 +17,7 @@ import { onlineUsersMap, getOnlineUsersCount } from "../onlineUsers";
 import { io, getLiveTelemetrySnapshot } from "../index";
 import { getUserSocketId } from "../onlineUsers";
 import { decryptMessage } from "../utils/encryption";
+import { invalidatePricingCache } from "../pricingService";
 
 const router = Router();
 
@@ -273,9 +274,9 @@ router.get("/conversations", requireAdmin, async (req, res) => {
     // Build conditions for conversation query
     const conditions = search && matchingUserIds.length > 0
       ? [or(
-          inArray(schema.conversations.participant1Id, matchingUserIds),
-          inArray(schema.conversations.participant2Id, matchingUserIds),
-        )]
+        inArray(schema.conversations.participant1Id, matchingUserIds),
+        inArray(schema.conversations.participant2Id, matchingUserIds),
+      )]
       : [];
 
     const [totalResult] = conditions.length > 0
@@ -284,36 +285,36 @@ router.get("/conversations", requireAdmin, async (req, res) => {
 
     const convs = conditions.length > 0
       ? await db.select().from(schema.conversations)
-          .where(and(...conditions))
-          .orderBy(desc(schema.conversations.lastMessageAt))
-          .limit(limit).offset(offset)
+        .where(and(...conditions))
+        .orderBy(desc(schema.conversations.lastMessageAt))
+        .limit(limit).offset(offset)
       : await db.select().from(schema.conversations)
-          .orderBy(desc(schema.conversations.lastMessageAt))
-          .limit(limit).offset(offset);
+        .orderBy(desc(schema.conversations.lastMessageAt))
+        .limit(limit).offset(offset);
 
     // Fetch participant info
     const allUserIds = Array.from(new Set(convs.flatMap(c => [c.participant1Id, c.participant2Id])));
     const users = allUserIds.length > 0
       ? await db.select({
-          id: schema.users.id,
-          username: schema.users.username,
-          displayName: schema.users.displayName,
-          avatar: schema.users.avatar,
-        }).from(schema.users).where(inArray(schema.users.id, allUserIds))
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatar: schema.users.avatar,
+      }).from(schema.users).where(inArray(schema.users.id, allUserIds))
       : [];
 
     // Message counts per conversation — single grouped query instead of N+1
     const convIds = convs.map(c => c.id);
     const msgCounts = convIds.length > 0
       ? await db.select({
-          conversationId: schema.messages.conversationId,
-          count: count(),
-        }).from(schema.messages)
-          .where(and(
-            inArray(schema.messages.conversationId, convIds),
-            eq(schema.messages.isDeleted, false),
-          ))
-          .groupBy(schema.messages.conversationId)
+        conversationId: schema.messages.conversationId,
+        count: count(),
+      }).from(schema.messages)
+        .where(and(
+          inArray(schema.messages.conversationId, convIds),
+          eq(schema.messages.isDeleted, false),
+        ))
+        .groupBy(schema.messages.conversationId)
       : [];
     const countMap = new Map(msgCounts.map(m => [m.conversationId, m.count]));
 
@@ -358,10 +359,10 @@ router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
     const senderIds = Array.from(new Set(msgs.map(m => m.senderId)));
     const senders = senderIds.length > 0
       ? await db.select({
-          id: schema.users.id,
-          username: schema.users.username,
-          displayName: schema.users.displayName,
-        }).from(schema.users).where(inArray(schema.users.id, senderIds))
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+      }).from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
 
     const data = msgs.map(m => {
@@ -462,7 +463,7 @@ router.get("/messages", requireAdmin, async (req, res) => {
     const senderIds = Array.from(new Set(msgs.map(m => m.senderId)));
     const senders = senderIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username, displayName: schema.users.displayName })
-          .from(schema.users).where(inArray(schema.users.id, senderIds))
+        .from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
 
     const data = msgs.map(m => {
@@ -539,8 +540,8 @@ router.post("/messages/bulk-delete", requireAdmin, async (req, res) => {
     const convIds = Array.from(new Set(toDelete.map(m => m.conversationId)));
     const convRows = convIds.length > 0
       ? await db.select({ id: schema.conversations.id, p1: schema.conversations.participant1Id, p2: schema.conversations.participant2Id })
-          .from(schema.conversations)
-          .where(inArray(schema.conversations.id, convIds))
+        .from(schema.conversations)
+        .where(inArray(schema.conversations.id, convIds))
       : [];
     const convMap = new Map(convRows.map(c => [c.id, c]));
 
@@ -592,7 +593,7 @@ router.get("/calls", requireAdmin, async (req, res) => {
     const allUserIds = Array.from(new Set(callsList.flatMap(c => [c.callerId, c.receiverId])));
     const users = allUserIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username, displayName: schema.users.displayName, avatar: schema.users.avatar })
-          .from(schema.users).where(inArray(schema.users.id, allUserIds))
+        .from(schema.users).where(inArray(schema.users.id, allUserIds))
       : [];
 
     const data = callsList.map(c => ({
@@ -795,6 +796,12 @@ router.put("/settings", requireAdmin, async (req, res) => {
   if (!db) return res.json({ success: true, message: "تم التحديث" });
 
   try {
+    const updatedKeys = new Set<string>(
+      settings
+        .map((item: { key?: unknown }) => (typeof item?.key === "string" ? item.key : ""))
+        .filter(Boolean),
+    );
+
     // Batch upsert using ON CONFLICT instead of N sequential queries
     if (settings.length > 0) {
       await Promise.all(settings.map(({ key, value }: { key: string; value: any }) =>
@@ -806,6 +813,16 @@ router.put("/settings", requireAdmin, async (req, res) => {
           })
       ));
     }
+
+    if (
+      updatedKeys.has("voice_call_rate") ||
+      updatedKeys.has("video_call_rate") ||
+      updatedKeys.has("message_cost") ||
+      updatedKeys.has("chat_message_cost")
+    ) {
+      await invalidatePricingCache();
+    }
+
     await storage.addAdminLog(req.session.adminId!, "update_chat_settings", "settings", "", `تحديث ${settings.length} إعدادات`);
     return res.json({ success: true, message: "تم تحديث الإعدادات" });
   } catch (err: any) {
@@ -1084,7 +1101,7 @@ router.get("/streams/active", requireAdmin, async (_req, res) => {
     const userIds = activeStreams.map(s => s.userId);
     const users = userIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username, displayName: schema.users.displayName })
-          .from(schema.users).where(inArray(schema.users.id, userIds))
+        .from(schema.users).where(inArray(schema.users.id, userIds))
       : [];
 
     const data = activeStreams.map(s => {
@@ -1372,7 +1389,7 @@ router.get("/message-reports", requireAdmin, async (req, res) => {
 
   try {
     let query = db.select().from(schema.messageReports);
-    
+
     if (statusFilter && statusFilter !== "all") {
       query = query.where(eq(schema.messageReports.status, statusFilter)) as any;
     }
@@ -1395,11 +1412,11 @@ router.get("/message-reports", requireAdmin, async (req, res) => {
 
     const users = userIds.length > 0
       ? await db.select({
-          id: schema.users.id,
-          username: schema.users.username,
-          displayName: schema.users.displayName,
-          avatar: schema.users.avatar,
-        }).from(schema.users).where(inArray(schema.users.id, userIds))
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatar: schema.users.avatar,
+      }).from(schema.users).where(inArray(schema.users.id, userIds))
       : [];
 
     // Get message content (decrypted) for each report
@@ -1518,11 +1535,11 @@ router.get("/chat-blocks", requireAdmin, async (req, res) => {
     const userIds = Array.from(new Set([...blocks.map(b => b.blockerId), ...blocks.map(b => b.blockedId)]));
     const users = userIds.length > 0
       ? await db.select({
-          id: schema.users.id,
-          username: schema.users.username,
-          displayName: schema.users.displayName,
-          avatar: schema.users.avatar,
-        }).from(schema.users).where(inArray(schema.users.id, userIds))
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatar: schema.users.avatar,
+      }).from(schema.users).where(inArray(schema.users.id, userIds))
       : [];
 
     const enriched = blocks.map(b => ({
@@ -1687,7 +1704,7 @@ router.get("/export/conversations", requireAdmin, async (_req, res) => {
     const userIds: string[] = [...new Set(convs.flatMap((c: { user1: string; user2: string }) => [c.user1, c.user2]))];
     const users = userIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username })
-          .from(schema.users).where(inArray(schema.users.id, userIds))
+        .from(schema.users).where(inArray(schema.users.id, userIds))
       : [];
     const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
 
@@ -1728,7 +1745,7 @@ router.get("/export/messages", requireAdmin, async (_req, res) => {
     const senderIds: string[] = [...new Set(msgs.map((m: { senderId: string }) => m.senderId))];
     const users = senderIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username })
-          .from(schema.users).where(inArray(schema.users.id, senderIds))
+        .from(schema.users).where(inArray(schema.users.id, senderIds))
       : [];
     const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
 
@@ -1777,7 +1794,7 @@ router.get("/export/reports", requireAdmin, async (_req, res) => {
     const userIds: string[] = [...new Set(reports.flatMap((r: { reporterId: string; reportedUserId: string }) => [r.reporterId, r.reportedUserId]))];
     const users = userIds.length > 0
       ? await db.select({ id: schema.users.id, username: schema.users.username })
-          .from(schema.users).where(inArray(schema.users.id, userIds))
+        .from(schema.users).where(inArray(schema.users.id, userIds))
       : [];
     const nameMap = new Map(users.map((u: { id: string; username: string }) => [u.id, u.username]));
 

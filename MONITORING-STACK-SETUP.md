@@ -1,0 +1,46 @@
+# MONITORING-STACK-SETUP
+
+## Goal
+Run Prometheus + Grafana + Alertmanager + exporters for `amlo` only, without affecting other Docker projects.
+
+## Files Added
+- `docker-compose.monitoring.yml`
+- `monitoring/prometheus/prometheus.yml`
+- `monitoring/prometheus-alert-rules.yml`
+- `monitoring/alertmanager/alertmanager.yml`
+- `monitoring/grafana/provisioning/datasources/datasource.yml`
+- `monitoring/grafana/provisioning/dashboards/dashboards.yml`
+- `monitoring/grafana/amlo-scale-overview-dashboard.json`
+
+## Startup
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d prometheus grafana alertmanager node-exporter redis-exporter postgres-exporter
+```
+
+## URLs
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+- Alertmanager: `http://localhost:9093`
+
+## Grafana Login
+- User: `${GRAFANA_ADMIN_USER:-admin}`
+- Password: `${GRAFANA_ADMIN_PASSWORD:-change-me}`
+
+## Required Env Vars
+Set in `.env` before production use:
+- `GRAFANA_ADMIN_USER`
+- `GRAFANA_ADMIN_PASSWORD`
+- `SLACK_WEBHOOK_URL`
+- `PAGER_WEBHOOK_URL`
+
+## Smoke Checks
+```powershell
+curl.exe -s http://localhost:9090/-/healthy
+curl.exe -s http://localhost:9093/-/healthy
+curl.exe -s http://localhost:3001/api/health
+curl.exe -s http://localhost:3000/api/metrics | findstr /C:"ablox_social_call_balance_warnings_emitted" /C:"ablox_social_call_balance_exhausted_ended"
+```
+
+## Notes
+- This stack is scoped to `ablox` service names on `ablox_network`.
+- Do not run global prune/reset commands on shared VPS.

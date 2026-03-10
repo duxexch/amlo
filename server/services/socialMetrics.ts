@@ -14,6 +14,8 @@ export const socialStabilityMetrics = {
     streamAutoStartSucceeded: 0,
     streamAutoStartSkipped: 0,
     streamAutoStartFailed: 0,
+    callBalanceWarningsEmitted: 0,
+    callBalanceExhaustedEnded: 0,
     notificationQueueEnqueued: 0,
     notificationQueueDeduplicated: 0,
     notificationQueueRetries: 0,

@@ -1,0 +1,91 @@
+{
+    "title": "AMLO Scale Overview",
+    "uid": "amlo-scale-overview",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "Call Balance Warnings (rate)",
+            "targets": [
+                {
+                    "expr": "rate(ablox_social_call_balance_warnings_emitted[5m])",
+                    "legendFormat": "warnings/sec"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Call Exhausted Endings (rate)",
+            "targets": [
+                {
+                    "expr": "rate(ablox_social_call_balance_exhausted_ended[5m])",
+                    "legendFormat": "exhausted/sec"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Notification Queue Depth",
+            "targets": [
+                {
+                    "expr": "ablox_notification_queue_depth",
+                    "legendFormat": "main queue"
+                },
+                {
+                    "expr": "ablox_notification_dead_letter_depth",
+                    "legendFormat": "dead letter"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Decrypt Cache Efficiency",
+            "targets": [
+                {
+                    "expr": "rate(ablox_social_decrypt_cache_hits[5m])",
+                    "legendFormat": "hits/sec"
+                },
+                {
+                    "expr": "rate(ablox_social_decrypt_cache_misses[5m])",
+                    "legendFormat": "misses/sec"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            }
+        }
+    ],
+    "templating": {
+        "list": []
+    },
+    "annotations": {
+        "list": []
+    }
+}

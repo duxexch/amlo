@@ -1,0 +1,49 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-slack
+  group_by: ["alertname", "service", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: pager-critical
+      continue: true
+    - matchers:
+        - severity="high"
+      receiver: slack-high
+      continue: true
+    - matchers:
+        - severity="medium"
+      receiver: slack-medium
+
+receivers:
+  - name: default-slack
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#alerts-default"
+        send_resolved: true
+
+  - name: pager-critical
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#alerts-critical"
+        send_resolved: true
+    webhook_configs:
+      - url: "${PAGER_WEBHOOK_URL}"
+        send_resolved: true
+
+  - name: slack-high
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#alerts-high"
+        send_resolved: true
+
+  - name: slack-medium
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#alerts-medium"
+        send_resolved: true

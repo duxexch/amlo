@@ -8,7 +8,7 @@ import {
   GripVertical, X, UserCheck, Video, Bell, MousePointerClick, Coins,
   Phone, Navigation, MapPin, Download, Link as LinkIcon, Info, Upload,
 } from "lucide-react";
-import { adminSettings, adminFeatured, adminAnnouncementPopup } from "@/lib/adminApi";
+import { adminSettings, adminFeatured, adminAnnouncementPopup, adminPricing } from "@/lib/adminApi";
 import { worldAdminApi } from "@/lib/worldApi";
 import { useTranslation } from "react-i18next";
 
@@ -1219,12 +1219,13 @@ function PricingTab() {
   const [messageCost, setMessageCost] = useState("1");
 
   useEffect(() => {
-    fetch("/api/social/pricing", { credentials: "include" })
-      .then(r => r.json())
-      .then(data => {
-        if (data.voice_call_rate !== undefined) setVoiceRate(String(data.voice_call_rate));
-        if (data.video_call_rate !== undefined) setVideoRate(String(data.video_call_rate));
-        if (data.message_cost !== undefined) setMessageCost(String(data.message_cost));
+    adminPricing.getAll()
+      .then((res) => {
+        const data = res.data;
+        if (!data) return;
+        if (data.calls?.voice_call_rate !== undefined) setVoiceRate(String(data.calls.voice_call_rate));
+        if (data.calls?.video_call_rate !== undefined) setVideoRate(String(data.calls.video_call_rate));
+        if (data.messages?.message_cost !== undefined) setMessageCost(String(data.messages.message_cost));
       })
       .catch(() => { });
   }, []);
@@ -1232,18 +1233,20 @@ function PricingTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch("/api/admin/settings/system", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          settings: [
-            { key: "voice_call_rate", value: voiceRate },
-            { key: "video_call_rate", value: videoRate },
-            { key: "message_cost", value: messageCost },
-          ]
-        })
-      });
+      const voice = Number(voiceRate);
+      const video = Number(videoRate);
+      const message = Number(messageCost);
+
+      await Promise.all([
+        adminPricing.updateCallRates({
+          voiceCallRate: Number.isFinite(voice) ? voice : 0,
+          videoCallRate: Number.isFinite(video) ? video : 0,
+        }),
+        adminPricing.updateMessageCosts({
+          messageCost: Number.isFinite(message) ? message : 0,
+        }),
+      ]);
+
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) { console.error(e); }

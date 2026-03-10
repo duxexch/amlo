@@ -1,0 +1,64 @@
+groups:
+  - name: amlo-critical
+    rules:
+      - alert: AmloHigh5xxRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: app
+        annotations:
+          summary: "API 5xx rate is above 1%"
+          description: "Investigate app errors and consider rollback."
+
+      - alert: AmloCallBalanceExhaustionSpike
+        expr: rate(ablox_social_call_balance_exhausted_ended[10m]) > 0.5
+        for: 10m
+        labels:
+          severity: high
+          service: call
+        annotations:
+          summary: "Call balance exhaustion endings are spiking"
+          description: "Check call pricing behavior and user balance depletion patterns."
+
+      - alert: AmloNotificationDLQGrowth
+        expr: increase(ablox_notification_dead_letter_depth[10m]) > 20
+        for: 10m
+        labels:
+          severity: high
+          service: queue
+        annotations:
+          summary: "Dead-letter queue depth is increasing"
+          description: "Notification jobs are failing repeatedly."
+
+  - name: amlo-capacity
+    rules:
+      - alert: AmloTurnWarningByProxy
+        expr: ablox_social_call_balance_warnings_emitted > 1000
+        for: 15m
+        labels:
+          severity: medium
+          service: call
+        annotations:
+          summary: "High number of call balance warnings"
+          description: "Possible high active call load or pricing pressure; validate call quality and retention impact."
+
+      - alert: AmloRedisMemoryPressure
+        expr: redis_memory_used_bytes / redis_total_system_memory_bytes > 0.8
+        for: 10m
+        labels:
+          severity: high
+          service: redis
+        annotations:
+          summary: "Redis memory pressure above 80%"
+          description: "Risk of evictions and latency spikes."
+
+      - alert: AmloPostgresPoolWaiters
+        expr: pg_stat_activity_count{state="active"} > 250
+        for: 10m
+        labels:
+          severity: high
+          service: postgres
+        annotations:
+          summary: "Postgres active sessions are high"
+          description: "Check pool saturation and slow queries."
