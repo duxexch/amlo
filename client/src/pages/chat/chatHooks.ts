@@ -599,10 +599,9 @@ export function useActiveChat(
             await outboxRemove(item.id);
           }
         } catch (err: any) {
-          if (!isTransientSendError(err)) {
-            await outboxMarkFailed(item.id, err?.message || "Send failed");
-            setMessages(prev => prev.map(m => m.id === item.id ? withSendState(m, "failed") : m));
-          }
+          // Never auto-loop retries in background. Fail once and wait for explicit user retry.
+          await outboxMarkFailed(item.id, err?.message || "Send failed");
+          setMessages(prev => prev.map(m => m.id === item.id ? withSendState(m, "failed") : m));
         }
       }
     } finally {
@@ -769,21 +768,10 @@ export function useActiveChat(
         await outboxMarkFailed(tempId, err?.message || "Blocked").catch(() => { });
         toast.error(err.message || t("chat.blocked", "تم الحظر"));
       } else {
-        if (isTransientSendError(err)) {
-          scheduleAutoRetry({
-            tempId,
-            clientMessageId,
-            conversationId: activeConv.id,
-            content,
-            replyToId,
-            attempt: 1,
-            t,
-          });
-        } else {
-          setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
-          await outboxMarkFailed(tempId, err?.message || "Send failed").catch(() => { });
-          toast.error(err?.message || t("chat.sendFailed", "فشل إرسال الرسالة"));
-        }
+        // Manual retry only: do not schedule automatic retries.
+        setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+        await outboxMarkFailed(tempId, err?.message || "Send failed").catch(() => { });
+        toast.error(err?.message || t("chat.sendFailed", "فشل إرسال الرسالة"));
       }
     } finally {
       setSendingMsg(false);
@@ -863,7 +851,7 @@ export function useActiveChat(
       );
     } catch (err: any) {
       // Mark as failed instead of removing (allows retry) — keep blob URL alive for retry
-      setMessages(prev => prev.map(m => m.id === tempId ? withSendState(m, "failed") : m));
+      setMessages(prev => prev.map(m => m.id === tempId ? withSendState({ ...m, _uploadProgress: m._uploadProgress }, "failed") : m));
       const isAbort = err instanceof DOMException ? err.name === "AbortError" : String(err?.name || "").toLowerCase() === "aborterror";
       await outboxMarkFailed(tempId, isAbort ? "Canceled by user" : (err?.message || "Upload failed")).catch(() => { });
       if (err.status === 402) {
@@ -950,17 +938,53 @@ export function useActiveChat(
       try {
         const outboxItem = await outboxGet(failedMsg.id).catch(() => null);
         const blob = outboxItem?.blob ? outboxItem.blob : await (await fetch(failedMsg.mediaUrl)).blob();
-        // Remove failed and re-send via sendMedia
-        setMessages(prev => prev.filter(m => m.id !== failedMsg.id));
-        revokeBlobUrlIfNeeded(failedMsg.mediaUrl);
-        sendMedia(blob, failedMsg.type, t);
+
+        // Keep the same message bubble fixed in-place while retrying.
+        setMessages(prev => prev.map(m => m.id === failedMsg.id
+          ? withSendState({ ...m, _uploadProgress: 0 }, "sending")
+          : m
+        ));
+
+        const uploadController = new AbortController();
+        uploadControllersRef.current.set(failedMsg.id, uploadController);
+
+        const mediaUrl = await uploadMedia(
+          blob,
+          outboxItem?.filename || (blob instanceof File ? blob.name : undefined),
+          (progress) => {
+            setMessages(prev => prev.map(m => m.id === failedMsg.id
+              ? { ...withSendState(m, "sending"), _uploadProgress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))) }
+              : m
+            ));
+          },
+          uploadController.signal,
+        );
+
+        const sentMsg = await chatApi.sendMessage(activeConv.id, {
+          content: failedMsg.content || (failedMsg.type === "image" ? "📷 صورة" : failedMsg.type === "video" ? "🎬 فيديو" : "🎤 رسالة صوتية"),
+          type: failedMsg.type,
+          mediaUrl,
+          clientMessageId: outboxItem?.clientMessageId,
+        }) as any;
+
+        setMessages(prev => prev.map(m => m.id === failedMsg.id ? withSendState({ ...sentMsg, senderId: "me" }, "sent") : m));
+        await outboxRemove(failedMsg.id).catch(() => { });
+        if (failedMsg.mediaUrl && failedMsg.mediaUrl !== mediaUrl) revokeBlobUrlIfNeeded(failedMsg.mediaUrl);
+        setConversations(prev =>
+          prev.map(c => c.id === activeConv.id
+            ? { ...c, lastMessage: { ...sentMsg, content: sentMsg.content }, lastMessageAt: sentMsg.createdAt }
+            : c
+          )
+        );
       } catch {
         setMessages(prev => prev.map(m => m.id === failedMsg.id ? withSendState(m, "failed") : m));
         await outboxMarkFailed(failedMsg.id, "Retry media failed").catch(() => { });
         toast.error(t("chat.retryFailed", "فشل في إعادة المحاولة"));
+      } finally {
+        uploadControllersRef.current.delete(failedMsg.id);
       }
     }
-  }, [activeConv, sendingMsg, sendMedia, setConversations]);
+  }, [activeConv, sendingMsg, setConversations]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setNewMessage(e.target.value);

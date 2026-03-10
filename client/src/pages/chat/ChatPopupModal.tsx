@@ -143,7 +143,24 @@ const MessageBubble = memo(function MessageBubble({
       <div className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
         <div className="w-7 h-7 shrink-0 invisible" />
         <div className="rounded-2xl px-4 py-2.5 bg-red-500/10 border border-red-500/20">
-          <p className="text-sm text-white/60">{msg.content || (msg.type === "image" ? "📷" : msg.type === "video" ? "🎬" : "🎙️")}</p>
+          {msg.type === "image" && msg.mediaUrl && (
+            <img src={msg.mediaUrl} alt="" className="rounded-xl max-h-60 mb-2 object-cover" />
+          )}
+          {msg.type === "video" && msg.mediaUrl && (
+            <video src={msg.mediaUrl} controls playsInline className="rounded-xl max-h-72 mb-2 w-full bg-black/30" />
+          )}
+          {msg.type === "voice" && msg.mediaUrl && (
+            <audio src={msg.mediaUrl} controls className="w-full mb-2" />
+          )}
+          <p className="text-sm text-white/70">{msg.content || (msg.type === "image" ? "📷 صورة" : msg.type === "video" ? "🎬 فيديو" : "🎙️ رسالة صوتية")}</p>
+          {msg.type !== "text" && typeof msg._uploadProgress === "number" && (
+            <div className="mt-1.5 pt-1.5 border-t border-red-400/20">
+              <div className="w-full h-1.5 rounded-full bg-black/20 overflow-hidden">
+                <div className="h-full bg-red-300/70 transition-all duration-200" style={{ width: `${Math.max(0, Math.min(100, msg._uploadProgress))}%` }} />
+              </div>
+              <p className="text-[10px] text-red-200/80 mt-1">{`${Math.max(0, Math.min(100, Math.round(msg._uploadProgress)))}%`}</p>
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-1">
             <span className="text-[10px] text-red-400">{t("chat.sendFailed", "فشل الإرسال")}</span>
             {onRetry && (
