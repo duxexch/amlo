@@ -41,7 +41,7 @@
     "adminPanel": "관리자 패널",
     "social": "소셜",
     "download": "다운로드",
-    "cex": "조각",
+    "cex": "시청",
     "friends": "친구",
     "chat": "채팅"
   },
@@ -68,7 +68,7 @@
     "videoLiveLabel": "비디오 라이브",
     "audioLiveLabel": "오디오 라이브",
     "tabWorld": "세계 여행",
-    "tabPieces": "조각",
+    "tabPieces": "시청",
     "featuredLive": "추천 라이브",
     "followedAccounts": "팔로우 중",
     "liveNow": "라이브",

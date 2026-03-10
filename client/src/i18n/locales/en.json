@@ -44,7 +44,7 @@
     "adminPanel": "Admin Panel",
     "social": "Social",
     "download": "Download",
-    "cex": "Pieces"
+    "cex": "Watch"
   },
   "home": {
     "heroTitle": "Ablox World",
@@ -52,7 +52,7 @@
     "tabRandomChat": "Random Chat",
     "tabLiveStream": "Live Stream",
     "tabWorld": "World",
-    "tabPieces": "Pieces",
+    "tabPieces": "Watch",
     "randomVideoTitle": "Random Video",
     "randomVideoDesc": "Meet new people face to face",
     "randomAudioTitle": "Random Audio",

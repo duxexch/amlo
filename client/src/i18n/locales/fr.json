@@ -41,7 +41,7 @@
     "adminPanel": "Panneau d'administration",
     "social": "Social",
     "download": "Télécharger",
-    "cex": "Pièces",
+    "cex": "Regarder",
     "friends": "Amis",
     "chat": "Chat"
   },
@@ -68,7 +68,7 @@
     "videoLiveLabel": "Vidéo Direct",
     "audioLiveLabel": "Audio Direct",
     "tabWorld": "À travers le monde",
-    "tabPieces": "Pièces",
+    "tabPieces": "Regarder",
     "featuredLive": "En direct vedettes",
     "followedAccounts": "Abonnements",
     "liveNow": "En direct",

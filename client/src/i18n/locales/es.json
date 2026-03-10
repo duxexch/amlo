@@ -41,7 +41,7 @@
     "adminPanel": "Panel de administración",
     "social": "Social",
     "download": "Descargar",
-    "cex": "Piezas",
+    "cex": "Ver",
     "friends": "Amigos",
     "chat": "Chat"
   },
@@ -68,7 +68,7 @@
     "videoLiveLabel": "Video en Vivo",
     "audioLiveLabel": "Audio en Vivo",
     "tabWorld": "Alrededor del Mundo",
-    "tabPieces": "Piezas",
+    "tabPieces": "Ver",
     "featuredLive": "Transmisiones Destacadas",
     "followedAccounts": "Seguidos",
     "liveNow": "En Vivo",
