@@ -403,6 +403,8 @@ io.on("connection", (socket) => {
       log(`Socket ${socket.id} tried to change userId from ${socket.data.userId} to ${userId}`, "socket.io");
       return;
     }
+    // Suppress duplicate calls — already online with same userId
+    if (socket.data.userId === userId) return;
     await setUserOnline(userId, socket.id);
     socket.data.userId = userId;
     socket.join(`user:${userId}`);
@@ -1704,18 +1706,33 @@ app.use((req, res, next) => {
   );
 
   // ── Graceful shutdown ──
+  let isShuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (isShuttingDown) return; // prevent double shutdown
+    isShuttingDown = true;
     log(`Received ${signal}. Starting graceful shutdown...`, "system");
 
-    // 1. Stop accepting new connections
+    // Force exit after 15s if something hangs
+    const forceTimer = setTimeout(() => {
+      log("Force exit after timeout", "system");
+      process.exit(1);
+    }, 15_000);
+    forceTimer.unref();
+
+    // 1. Stop accepting new HTTP connections
     httpServer.close(() => {
       log("HTTP server closed", "system");
     });
 
-    // 2. Close Socket.io connections
-    io.close(() => {
-      log("Socket.io server closed", "system");
-    });
+    // 2. Notify connected clients, then close Socket.io
+    try {
+      io.emit("server-shutdown", { message: "Server is restarting, please reconnect" });
+      // Give clients 2s to receive the shutdown notice before disconnecting
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      io.close(() => {
+        log("Socket.io server closed", "system");
+      });
+    } catch { /* best effort */ }
 
     // 3. Close database pool
     try {
@@ -1731,12 +1748,7 @@ app.use((req, res, next) => {
       log("Redis connection closed", "system");
     } catch { /* already closed */ }
 
-    // 5. Force exit after 10s if something hangs
-    setTimeout(() => {
-      log("Force exit after timeout", "system");
-      process.exit(1);
-    }, 10_000).unref();
-
+    log("Graceful shutdown complete", "system");
     process.exit(0);
   };
 

@@ -112,6 +112,12 @@ class SocketManager {
       this.updateQuality("offline", 0, 0);
     });
 
+    // Server graceful restart — reconnect after short delay
+    this.socket.on("server-shutdown", () => {
+      this.socket?.disconnect();
+      setTimeout(() => this.socket?.connect(), 3000);
+    });
+
     // Server can push quality hints
     this.socket.on("connection-quality", (data: { rtt?: number }) => {
       if (data.rtt) this.detectQuality(data.rtt);

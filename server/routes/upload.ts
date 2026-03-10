@@ -15,6 +15,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { randomUUID, createHash } from "crypto";
+import rateLimit from "express-rate-limit";
 import { createLogger } from "../logger";
 import { getPool } from "../db";
 import { storage } from "../storage";
@@ -32,6 +33,16 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 router.use(requireAuth);
+
+// ── Upload rate limiting (per IP) — prevents disk/bandwidth abuse ──
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,             // 30 uploads per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "عدد كبير من عمليات الرفع. حاول بعد دقيقة" },
+});
+router.use(uploadLimiter);
 
 // ── Magic bytes validation (prevents MIME spoofing) ──
 const MAGIC_BYTES: Record<string, Buffer[]> = {
