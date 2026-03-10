@@ -23,27 +23,27 @@ route:
 receivers:
   - name: default-slack
     slack_configs:
-      - api_url: "${SLACK_WEBHOOK_URL}"
+      - api_url: "http://127.0.0.1:65535"
         channel: "#alerts-default"
         send_resolved: true
 
   - name: pager-critical
     slack_configs:
-      - api_url: "${SLACK_WEBHOOK_URL}"
+      - api_url: "http://127.0.0.1:65535"
         channel: "#alerts-critical"
         send_resolved: true
     webhook_configs:
-      - url: "${PAGER_WEBHOOK_URL}"
+      - url: "http://127.0.0.1:65535"
         send_resolved: true
 
   - name: slack-high
     slack_configs:
-      - api_url: "${SLACK_WEBHOOK_URL}"
+      - api_url: "http://127.0.0.1:65535"
         channel: "#alerts-high"
         send_resolved: true
 
   - name: slack-medium
     slack_configs:
-      - api_url: "${SLACK_WEBHOOK_URL}"
+      - api_url: "http://127.0.0.1:65535"
         channel: "#alerts-medium"
         send_resolved: true

@@ -30,10 +30,9 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d prom
 Set in `.env` before production use:
 - `GRAFANA_ADMIN_USER`
 - `GRAFANA_ADMIN_PASSWORD`
-- `SLACK_WEBHOOK_URL`
-- `PAGER_WEBHOOK_URL`
 
-If webhook vars are not set, Alertmanager now uses safe local defaults (`http://127.0.0.1:65535`) so the service still starts.
+Alertmanager config currently uses safe local fallback URLs (`http://127.0.0.1:65535`) so the service always starts.
+For real notifications, update these URLs directly in `monitoring/alertmanager/alertmanager.yml`.
 
 ## Smoke Checks
 ```powershell
