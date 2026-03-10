@@ -1,45 +1,81 @@
 {
-  "id": "https://mrco.live/",
+  "id": "/",
   "name": "Ablox — دردشة فيديو وصوت عشوائية وبث مباشر",
   "short_name": "Ablox",
   "description": "دردشة فيديو وصوت عشوائية وبث مباشر — تعرّف على أشخاص جدد من حول العالم",
-  "start_url": "https://mrco.live/",
-  "scope": "https://mrco.live/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "tabbed", "standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "portrait",
   "background_color": "#06060f",
   "theme_color": "#0c0c1d",
   "dir": "rtl",
   "lang": "ar",
-  "categories": ["social", "entertainment", "communication"],
+  "categories": [
+    "social",
+    "entertainment",
+    "communication"
+  ],
   "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
   "handle_links": "preferred",
   "launch_handler": {
-    "client_mode": ["navigate-existing", "auto"]
+    "client_mode": [
+      "navigate-existing",
+      "auto"
+    ]
   },
   "edge_side_panel": {
     "preferred_width": 400
   },
   "tab_strip": {
     "home_tab": {
-      "url": "https://mrco.live/",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     "new_tab_button": {
-      "url": "https://mrco.live/home"
+      "url": "/home"
     }
   },
   "note_taking": {
-    "new_note_url": "https://mrco.live/friends"
+    "new_note_url": "/friends"
   },
   "file_handlers": [
     {
       "action": "/share",
       "accept": {
-        "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"],
-        "video/*": [".mp4", ".webm", ".ogg", ".mov", ".avi"],
-        "audio/*": [".mp3", ".wav", ".ogg", ".m4a", ".aac"]
+        "image/*": [
+          ".png",
+          ".jpg",
+          ".jpeg",
+          ".gif",
+          ".webp",
+          ".svg",
+          ".bmp",
+          ".ico"
+        ],
+        "video/*": [
+          ".mp4",
+          ".webm",
+          ".ogg",
+          ".mov",
+          ".avi"
+        ],
+        "audio/*": [
+          ".mp3",
+          ".wav",
+          ".ogg",
+          ".m4a",
+          ".aac"
+        ]
       }
     }
   ],
@@ -171,28 +207,48 @@
       "short_name": "دردشة",
       "description": "ابدأ دردشة عشوائية بالفيديو أو الصوت",
       "url": "/home",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "المحفظة",
       "short_name": "محفظة",
       "description": "إدارة عملاتك وهداياك",
       "url": "/wallet",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "الأصدقاء",
       "short_name": "أصدقاء",
       "description": "قائمة الأصدقاء والمحادثات",
       "url": "/friends",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "الملف الشخصي",
       "short_name": "بروفايل",
       "description": "عرض وتعديل ملفك الشخصي",
       "url": "/profile",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "/icons/icon-96x96.png",
+          "sizes": "96x96"
+        }
+      ]
     }
   ],
   "share_target": {
@@ -206,7 +262,10 @@
       "files": [
         {
           "name": "media",
-          "accept": ["image/*", "video/*"]
+          "accept": [
+            "image/*",
+            "video/*"
+          ]
         }
       ]
     }
@@ -226,14 +285,6 @@
       "platform": "play",
       "url": "https://play.google.com/store/apps/details?id=live.mrco.twa",
       "id": "live.mrco.twa"
-    },
-    {
-      "platform": "itunes",
-      "url": "https://apps.apple.com/app/ablox/id0000000000"
-    },
-    {
-      "platform": "windows",
-      "url": "https://www.microsoft.com/store/apps/ablox"
     }
   ],
   "prefer_related_applications": false

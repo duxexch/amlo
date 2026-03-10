@@ -48,7 +48,7 @@ export function serveStatic(app: Express) {
         res.setHeader("Cache-Control", "public, max-age=86400");
       }
       if (filePath.endsWith(".aab")) {
-        res.setHeader("Content-Type", "application/x-authorware-bin");
+        res.setHeader("Content-Type", "application/octet-stream");
         res.setHeader("Content-Disposition", "attachment; filename=\"ablox.aab\"");
         res.setHeader("Cache-Control", "public, max-age=86400");
       }
