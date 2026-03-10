@@ -146,6 +146,37 @@ export function CallScreen() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const ringbackRef = useRef<{ osc: OscillatorNode; gain: GainNode; ctx: AudioContext; interval: ReturnType<typeof setInterval> } | null>(null);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
+  // ── Pre-check media permissions before any call setup ──
+  useEffect(() => {
+    let cancelled = false;
+    const checkPermissions = async () => {
+      try {
+        const constraints: MediaStreamConstraints = callType === "video"
+          ? { audio: true, video: true }
+          : { audio: true };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getTracks().forEach(t => t.stop());
+      } catch (err: any) {
+        if (cancelled) return;
+        // If video fails, try audio only for video calls (camera might be unavailable)
+        if (callType === "video") {
+          try {
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioStream.getTracks().forEach(t => t.stop());
+            // Audio works — camera issue handled later by webrtcManager fallback
+            return;
+          } catch { /* fall through to denied */ }
+        }
+        setPermissionDenied(true);
+        setErrorMsg(t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون لإجراء المكالمة"));
+        setStatus("failed");
+      }
+    };
+    checkPermissions();
+    return () => { cancelled = true; };
+  }, [callType, t]);
 
   // Ringback tone for the caller while ringing
   useEffect(() => {
@@ -264,7 +295,7 @@ export function CallScreen() {
   // Ensure outgoing calls are created on server to trigger incoming-call notification.
   // Caller does NOT start WebRTC yet — waits for receiver to accept first.
   useEffect(() => {
-    if (!userId || isRandomMatch || callId) return;
+    if (!userId || isRandomMatch || callId || permissionDenied) return;
 
     let cancelled = false;
     setStatus("ringing");

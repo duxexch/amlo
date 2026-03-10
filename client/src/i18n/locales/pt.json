@@ -1739,5 +1739,10 @@
     "duration": "Duração",
     "resetFilters": "Redefinir",
     "searchCountry": "Buscar país..."
+  },
+  "permissions": {
+    "micDenied": "Por favor, permita o acesso ao microfone para fazer a chamada",
+    "cameraMicDenied": "Por favor, permita o acesso à câmera e ao microfone",
+    "locationDenied": "Por favor, permita o acesso à localização"
   }
 }

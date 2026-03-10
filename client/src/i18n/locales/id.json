@@ -1739,5 +1739,10 @@
     "duration": "Durasi",
     "resetFilters": "Atur Ulang",
     "searchCountry": "Cari negara..."
+  },
+  "permissions": {
+    "micDenied": "Harap izinkan akses mikrofon untuk melakukan panggilan",
+    "cameraMicDenied": "Harap izinkan akses kamera dan mikrofon",
+    "locationDenied": "Harap izinkan akses lokasi"
   }
 }

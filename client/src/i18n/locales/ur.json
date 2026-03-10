@@ -1739,5 +1739,10 @@
     "duration": "مدت",
     "resetFilters": "ری سیٹ",
     "searchCountry": "ملک تلاش کریں..."
+  },
+  "permissions": {
+    "micDenied": "کال کرنے کے لیے مائیکروفون تک رسائی کی اجازت دیں",
+    "cameraMicDenied": "کیمرے اور مائیکروفون تک رسائی کی اجازت دیں",
+    "locationDenied": "مقام تک رسائی کی اجازت دیں"
   }
 }

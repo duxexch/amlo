@@ -1731,5 +1731,10 @@
     "duration": "Dauer",
     "resetFilters": "Zurücksetzen",
     "searchCountry": "Land suchen..."
+  },
+  "permissions": {
+    "micDenied": "Bitte erlauben Sie den Mikrofonzugriff für den Anruf",
+    "cameraMicDenied": "Bitte erlauben Sie den Zugriff auf Kamera und Mikrofon",
+    "locationDenied": "Bitte erlauben Sie den Standortzugriff"
   }
 }

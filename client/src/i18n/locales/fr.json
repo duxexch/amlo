@@ -1739,5 +1739,10 @@
     "duration": "Durée",
     "resetFilters": "Réinitialiser",
     "searchCountry": "Rechercher un pays..."
+  },
+  "permissions": {
+    "micDenied": "Veuillez autoriser l'accès au microphone pour passer l'appel",
+    "cameraMicDenied": "Veuillez autoriser l'accès à la caméra et au microphone",
+    "locationDenied": "Veuillez autoriser l'accès à la localisation"
   }
 }

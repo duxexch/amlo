@@ -144,6 +144,16 @@ export function WorldExplore() {
   const currentUserId = useRef<string>("");
   const typingTimeoutRef = useRef<any>(null);
 
+  // ── Request geolocation for better country detection on mount ──
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      () => { /* Success — browser now has permission cached for future use */ },
+      () => { /* Denied or unavailable — locale-based fallback already in use */ },
+      { timeout: 8000, maximumAge: 300_000 }
+    );
+  }, []);
+
   // ── Load pricing + stats on mount ──
   useEffect(() => {
     worldApi.getPricing().then(data => setPricing(data || [])).catch(() => { });
@@ -258,8 +268,25 @@ export function WorldExplore() {
   };
 
   // Quick search with saved filters (no modal)
-  const handleQuickSearch = () => {
+  const handleQuickSearch = async () => {
     const filters = getSavedFilters();
+    // Request media permissions for voice/video chat types before searching
+    if (filters.chatType === "voice" || filters.chatType === "video") {
+      try {
+        const constraints: MediaStreamConstraints = filters.chatType === "video"
+          ? { audio: true, video: true }
+          : { audio: true };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getTracks().forEach(t => t.stop());
+      } catch {
+        toast.error(
+          filters.chatType === "video"
+            ? t("permissions.cameraMicDenied", "يرجى السماح بالوصول للكاميرا والميكروفون")
+            : t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون")
+        );
+        return;
+      }
+    }
     setSearchFilters(filters);
     handleStartSearch(filters);
   };
@@ -784,7 +811,24 @@ export function WorldExplore() {
       <FiltersModal
         isOpen={showFilters}
         onClose={handleCloseFilters}
-        onStart={(filters) => {
+        onStart={async (filters) => {
+          // Request media permissions for voice/video before starting search
+          if (filters.chatType === "voice" || filters.chatType === "video") {
+            try {
+              const constraints: MediaStreamConstraints = filters.chatType === "video"
+                ? { audio: true, video: true }
+                : { audio: true };
+              const stream = await navigator.mediaDevices.getUserMedia(constraints);
+              stream.getTracks().forEach(t => t.stop());
+            } catch {
+              toast.error(
+                filters.chatType === "video"
+                  ? t("permissions.cameraMicDenied", "يرجى السماح بالوصول للكاميرا والميكروفون")
+                  : t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون")
+              );
+              return;
+            }
+          }
           saveFilters(filters);
           handleCloseFilters();
           setSearchFilters(filters);

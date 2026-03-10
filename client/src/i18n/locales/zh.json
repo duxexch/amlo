@@ -1739,5 +1739,10 @@
     "duration": "通话时长",
     "resetFilters": "重置",
     "searchCountry": "搜索国家..."
+  },
+  "permissions": {
+    "micDenied": "请允许访问麦克风以进行通话",
+    "cameraMicDenied": "请允许访问摄像头和麦克风",
+    "locationDenied": "请允许访问位置信息"
   }
 }

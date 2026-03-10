@@ -2436,6 +2436,23 @@ export function LiveBroadcast() {
 
   const handleCreateStream = async () => {
     if (!createTitle.trim() || creating) return;
+
+    // Request media permissions before creating stream
+    try {
+      const constraints: MediaStreamConstraints = createType === "live"
+        ? { audio: true, video: true }
+        : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getTracks().forEach(t => t.stop());
+    } catch {
+      toast.error(
+        createType === "live"
+          ? t("permissions.cameraMicDenied", "يرجى السماح بالوصول للكاميرا والميكروفون")
+          : t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون")
+      );
+      return;
+    }
+
     setCreating(true);
     try {
       const tags = createTags.split(",").map(t => t.trim()).filter(Boolean);

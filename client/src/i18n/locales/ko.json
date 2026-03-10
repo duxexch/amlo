@@ -1739,5 +1739,10 @@
     "duration": "통화 시간",
     "resetFilters": "초기화",
     "searchCountry": "국가 검색..."
+  },
+  "permissions": {
+    "micDenied": "통화를 위해 마이크 접근을 허용해주세요",
+    "cameraMicDenied": "카메라와 마이크 접근을 허용해주세요",
+    "locationDenied": "위치 접근을 허용해주세요"
   }
 }

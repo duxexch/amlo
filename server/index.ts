@@ -1212,7 +1212,7 @@ app.use((req, res, next) => {
       "X-Frame-Options": "DENY",
       "X-XSS-Protection": "0",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Permissions-Policy": "camera=self, microphone=self, geolocation=()",
+      "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(self)",
       ...(process.env.NODE_ENV === "production" ? {
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
         "Content-Security-Policy": "default-src 'self'",
@@ -1369,7 +1369,7 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "0"); // modern browsers handle this
-  res.setHeader("Permissions-Policy", "camera=self, microphone=self, geolocation=()");
+  res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(self)");
   // Fast monotonic request ID (no crypto overhead)
   res.setHeader("X-Request-Id", `${Date.now().toString(36)}-${(reqIdCounter++).toString(36)}`);
   next();

@@ -1739,5 +1739,10 @@
     "duration": "Süre",
     "resetFilters": "Sıfırla",
     "searchCountry": "Ülke ara..."
+  },
+  "permissions": {
+    "micDenied": "Arama yapmak için mikrofon erişimine izin verin",
+    "cameraMicDenied": "Kamera ve mikrofon erişimine izin verin",
+    "locationDenied": "Konum erişimine izin verin"
   }
 }

@@ -213,17 +213,8 @@ function App() {
       }
     });
 
-    // Pre-request media permissions so they're ready for calls
-    if (navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true, video: true })
-        .then((stream) => { stream.getTracks().forEach((t) => t.stop()); })
-        .catch(() => {
-          // If video denied, try audio only
-          navigator.mediaDevices.getUserMedia({ audio: true })
-            .then((stream) => { stream.getTracks().forEach((t) => t.stop()); })
-            .catch(() => { /* user denied — will be asked again on call */ });
-        });
-    }
+    // Media permissions are now requested contextually in each feature
+    // (CallScreen, WorldExplore, LiveBroadcast) instead of on app mount
 
     let socket: any;
     import("@/lib/socketManager").then(({ getSocket }) => {
