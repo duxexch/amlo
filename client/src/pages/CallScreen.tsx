@@ -374,12 +374,20 @@ export function CallScreen() {
       setTimeout(() => navigate("/chat"), 1500);
     };
 
-    const onCallEnded = (data: { callId: string; coinsCharged?: number }) => {
+    const onCallEnded = (data: { callId: string; coinsCharged?: number; reason?: string; message?: string }) => {
       if (data?.callId !== callId) return;
       if (typeof data?.coinsCharged === "number") setChargedCoins(data.coinsCharged);
+      if (data?.reason === "balance_exhausted") {
+        setErrorMsg(data?.message || t("social.callEndedNoBalance", "انتهى الرصيد وتم إنهاء المكالمة"));
+      }
       webrtcManager.endCall();
       setStatus("ended");
       setTimeout(() => navigate("/chat"), 1200);
+    };
+
+    const onCallBalanceWarning = (data: { callId: string; secondsRemaining?: number; message?: string }) => {
+      if (data?.callId !== callId) return;
+      setErrorMsg(data?.message || t("social.callBalanceWarning", "تنبيه: رصيد المكالمة سينتهي قريباً"));
     };
 
     // Call timeout — if stays ringing/connecting for 30s, auto-end
@@ -395,12 +403,14 @@ export function CallScreen() {
     socket.on("call-rejected", onCallRejected);
     socket.on("call-ended", onCallEnded);
     socket.on("call-timeout", onCallTimeout);
+    socket.on("call-balance-warning", onCallBalanceWarning);
 
     return () => {
       socket.off("call-answered", onCallAnswered);
       socket.off("call-rejected", onCallRejected);
       socket.off("call-ended", onCallEnded);
       socket.off("call-timeout", onCallTimeout);
+      socket.off("call-balance-warning", onCallBalanceWarning);
     };
   }, [callId, navigate, status, t]);
 

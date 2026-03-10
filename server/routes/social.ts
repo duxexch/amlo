@@ -223,6 +223,12 @@ function queueLocalizedPush(job: LocalizedPushJob) {
 const FREE_CALLS_PER_24H = 2;
 const FREE_CALL_MINUTES_PER_CALL = 4;
 const FREE_CALL_WINDOW_SECONDS = 24 * 60 * 60;
+const CALL_BALANCE_WARNING_LEAD_SECONDS = 60;
+
+const callBalanceTimers = new Map<string, {
+  warningTimer?: ReturnType<typeof setTimeout>;
+  cutoffTimer?: ReturnType<typeof setTimeout>;
+}>();
 
 type FreeCallQuota = {
   applied: boolean;
@@ -233,6 +239,120 @@ type FreeCallQuota = {
 
 function emitToUser(userId: string, event: string, payload: unknown) {
   io.to(`user:${userId}`).emit(event, payload);
+}
+
+function clearCallBalanceTimers(callId: string) {
+  const t = callBalanceTimers.get(callId);
+  if (!t) return;
+  if (t.warningTimer) clearTimeout(t.warningTimer);
+  if (t.cutoffTimer) clearTimeout(t.cutoffTimer);
+  callBalanceTimers.delete(callId);
+}
+
+async function finalizeCallEnd(params: {
+  callId: string;
+  actorUserId: string;
+  reason?: "user_end" | "timeout" | "balance_exhausted";
+}) {
+  const db = getDb();
+  if (!db) return { ok: false as const, status: 500, message: "DB unavailable" };
+
+  const [call] = await db.select().from(schema.calls)
+    .where(
+      and(
+        eq(schema.calls.id, params.callId),
+        or(eq(schema.calls.callerId, params.actorUserId), eq(schema.calls.receiverId, params.actorUserId)),
+        or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
+      )
+    ).limit(1);
+
+  if (!call) return { ok: false as const, status: 404, message: "المكالمة غير موجودة" };
+
+  const endedAt = new Date();
+  let durationSeconds = 0;
+  let coinsCharged = 0;
+  let intendedCoinsCharge = 0;
+  const payerUserId = call.callerId;
+  let freeMinutesUsed = 0;
+
+  if (call.status === "active" && call.startedAt) {
+    durationSeconds = Math.ceil((endedAt.getTime() - call.startedAt.getTime()) / 1000);
+    const totalMinutes = Math.ceil(durationSeconds / 60);
+    const freeMinutesCap = await readCallFreeMinutes(call.id);
+    freeMinutesUsed = Math.min(totalMinutes, Math.max(0, freeMinutesCap));
+    const billableMinutes = Math.max(0, totalMinutes - freeMinutesUsed);
+    intendedCoinsCharge = billableMinutes * call.coinRate;
+
+    const [payer] = await db.select({ coins: schema.users.coins }).from(schema.users)
+      .where(eq(schema.users.id, payerUserId)).limit(1);
+    const availableCoins = Math.max(0, Number(payer?.coins || 0));
+    coinsCharged = Math.min(intendedCoinsCharge, availableCoins);
+  }
+
+  const updated = await db.transaction(async (tx: any) => {
+    const [ended] = await tx.update(schema.calls).set({
+      status: "ended",
+      endedAt,
+      durationSeconds,
+      coinsCharged,
+    }).where(
+      and(
+        eq(schema.calls.id, call.id),
+        or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
+      )
+    ).returning();
+
+    if (!ended) return null;
+
+    if (coinsCharged > 0) {
+      const charged = await chargeCoins(
+        payerUserId,
+        coinsCharged,
+        `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`,
+        call.id,
+        tx,
+      );
+      if (!charged) {
+        coinsCharged = 0;
+        await tx.update(schema.calls).set({ coinsCharged: 0 }).where(eq(schema.calls.id, call.id));
+      }
+    }
+
+    return ended;
+  });
+
+  if (!updated) return { ok: true as const, alreadyEnded: true as const };
+
+  await clearCallFreeMinutes(call.id);
+  clearCallBalanceTimers(call.id);
+
+  const otherId = call.callerId === params.actorUserId ? call.receiverId : call.callerId;
+  emitToUser(otherId, "call-ended", {
+    callId: call.id,
+    payerUserId,
+    durationSeconds,
+    coinsCharged,
+    freeMinutesUsed,
+    reason: params.reason || "user_end",
+    message: params.reason === "balance_exhausted" ? "انتهى الرصيد وتم إنهاء المكالمة" : undefined,
+  });
+
+  socialLog.info({
+    callId: call.id,
+    actorUserId: params.actorUserId,
+    payerUserId,
+    durationSeconds,
+    intendedCoinsCharge,
+    coinsCharged,
+    freeMinutesUsed,
+    type: call.type,
+    reason: params.reason || "user_end",
+  }, "Call ended");
+
+  return {
+    ok: true as const,
+    data: { ...updated, payerUserId, freeMinutesUsed, reason: params.reason || "user_end" },
+  };
 }
 
 async function reserveFreeCallQuota(userId: string, enabled: boolean): Promise<FreeCallQuota> {
@@ -1931,6 +2051,49 @@ router.post("/calls/:id/answer", async (req, res) => {
       .where(eq(schema.calls.id, call.id))
       .returning();
 
+    // Start budget timers for caller balance: warn before depletion, then force-end.
+    const freeMinutesCapOnAnswer = freeMinutesCap;
+    const callerBalanceRow = caller;
+    const callerCoins = Math.max(0, Number(callerBalanceRow?.coins || 0));
+    const paidSecondsBudget = call.coinRate > 0 ? Math.floor((callerCoins * 60) / call.coinRate) : Number.MAX_SAFE_INTEGER;
+    const totalBudgetSeconds = Math.max(0, freeMinutesCapOnAnswer * 60 + paidSecondsBudget);
+
+    clearCallBalanceTimers(call.id);
+    if (Number.isFinite(totalBudgetSeconds) && totalBudgetSeconds > 0) {
+      const timers: { warningTimer?: ReturnType<typeof setTimeout>; cutoffTimer?: ReturnType<typeof setTimeout> } = {};
+
+      if (totalBudgetSeconds > CALL_BALANCE_WARNING_LEAD_SECONDS) {
+        timers.warningTimer = setTimeout(() => {
+          emitToUser(call.callerId, "call-balance-warning", {
+            callId: call.id,
+            secondsRemaining: CALL_BALANCE_WARNING_LEAD_SECONDS,
+            message: "تنبيه: الرصيد المتاح للمكالمة سينتهي خلال دقيقة",
+          });
+        }, (totalBudgetSeconds - CALL_BALANCE_WARNING_LEAD_SECONDS) * 1000);
+      }
+
+      timers.cutoffTimer = setTimeout(async () => {
+        const result = await finalizeCallEnd({
+          callId: call.id,
+          actorUserId: call.callerId,
+          reason: "balance_exhausted",
+        });
+        if (result.ok && "data" in result) {
+          emitToUser(call.callerId, "call-ended", {
+            callId: call.id,
+            payerUserId: call.callerId,
+            durationSeconds: (result as any).data?.durationSeconds || 0,
+            coinsCharged: (result as any).data?.coinsCharged || 0,
+            freeMinutesUsed: (result as any).data?.freeMinutesUsed || 0,
+            reason: "balance_exhausted",
+            message: "انتهى الرصيد وتم إنهاء المكالمة",
+          });
+        }
+      }, totalBudgetSeconds * 1000);
+
+      callBalanceTimers.set(call.id, timers);
+    }
+
     // Notify caller
     const callerSocketId = await getUserSocketId(call.callerId);
     if (callerSocketId) {
@@ -1981,107 +2144,22 @@ router.post("/calls/:id/reject", async (req, res) => {
 router.post("/calls/:id/end", async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
-  const db = getDb();
-  if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
 
   try {
-    // Atomic status update — prevents double-end/double-charge race condition
-    const endedAt = new Date();
-
-    // First, get call info for charging calculation
-    const [call] = await db.select().from(schema.calls)
-      .where(
-        and(
-          eq(schema.calls.id, req.params.id),
-          or(eq(schema.calls.callerId, userId), eq(schema.calls.receiverId, userId)),
-          or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
-        )
-      ).limit(1);
-
-    if (!call) return res.status(404).json({ success: false, message: "المكالمة غير موجودة" });
-
-    let durationSeconds = 0;
-    let coinsCharged = 0;
-    let intendedCoinsCharge = 0;
-    const payerUserId = call.callerId;
-
-    let freeMinutesUsed = 0;
-
-    if (call.status === "active" && call.startedAt) {
-      durationSeconds = Math.ceil((endedAt.getTime() - call.startedAt.getTime()) / 1000);
-      const totalMinutes = Math.ceil(durationSeconds / 60);
-      const freeMinutesCap = await readCallFreeMinutes(call.id);
-      freeMinutesUsed = Math.min(totalMinutes, Math.max(0, freeMinutesCap));
-      const billableMinutes = Math.max(0, totalMinutes - freeMinutesUsed);
-      intendedCoinsCharge = billableMinutes * call.coinRate;
-
-      // Cap by available balance to prevent call-end failure while still deducting from wallet.
-      const [payer] = await db.select({ coins: schema.users.coins }).from(schema.users)
-        .where(eq(schema.users.id, payerUserId)).limit(1);
-      const availableCoins = Math.max(0, Number(payer?.coins || 0));
-      coinsCharged = Math.min(intendedCoinsCharge, availableCoins);
-    }
-
-    // Wrap status update + charge in a transaction for atomicity
-    const updated = await db.transaction(async (tx: any) => {
-      // Atomically end the call — only if still active (prevents double-ending)
-      const [ended] = await tx.update(schema.calls).set({
-        status: "ended",
-        endedAt,
-        durationSeconds,
-        coinsCharged,
-      }).where(
-        and(
-          eq(schema.calls.id, call.id),
-          or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
-        )
-      ).returning();
-
-      if (!ended) return null;
-
-      // Charge within same transaction after capping by current balance.
-      if (coinsCharged > 0) {
-        const charged = await chargeCoins(
-          payerUserId,
-          coinsCharged,
-          `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`,
-          call.id,
-          tx,
-        );
-        if (!charged) {
-          coinsCharged = 0;
-          await tx.update(schema.calls).set({ coinsCharged: 0 }).where(eq(schema.calls.id, call.id));
-        }
-      }
-
-      return ended;
+    const result = await finalizeCallEnd({
+      callId: req.params.id,
+      actorUserId: userId,
+      reason: "user_end",
     });
 
-    if (!updated) {
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, message: result.message });
+    }
+    if ((result as any).alreadyEnded) {
       return res.json({ success: true, message: "المكالمة منتهية بالفعل" });
     }
 
-    await clearCallFreeMinutes(call.id);
-
-    socialLog.info({
-      callId: call.id,
-      userId,
-      payerUserId,
-      durationSeconds,
-      intendedCoinsCharge,
-      coinsCharged,
-      freeMinutesUsed,
-      type: call.type,
-    }, "Call ended");
-
-    // Notify other party
-    const otherId = call.callerId === userId ? call.receiverId : call.callerId;
-    const otherSocketId = await getUserSocketId(otherId);
-    if (otherSocketId) {
-      io.to(`user:${otherId}`).emit("call-ended", { callId: call.id, payerUserId, durationSeconds, coinsCharged, freeMinutesUsed });
-    }
-
-    return res.json({ success: true, data: { ...updated, payerUserId, freeMinutesUsed } });
+    return res.json({ success: true, data: (result as any).data });
   } catch (err: any) {
     socialLog.error({ err, callId: req.params.id }, "Call end error");
     return res.status(500).json({ success: false, message: "خطأ" });
