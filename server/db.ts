@@ -211,6 +211,7 @@ export async function applyDatabaseConstraints(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS conv_active_p2_last_idx ON conversations (participant2_id, last_message_at DESC) WHERE is_active = true;`,
     `CREATE INDEX IF NOT EXISTS msg_conv_created_desc_idx ON messages (conversation_id, created_at DESC, id DESC);`,
     `CREATE INDEX IF NOT EXISTS msg_unread_conv_idx ON messages (conversation_id, is_read, created_at DESC) WHERE is_deleted = false;`,
+    `CREATE INDEX IF NOT EXISTS friendships_status_created_idx ON friendships (status, created_at DESC);`,
     // ── Daily missions tables (safe bootstrap) ──
     `CREATE TABLE IF NOT EXISTS user_daily_missions (
       id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,

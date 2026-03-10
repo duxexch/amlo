@@ -59,6 +59,7 @@ const DAILY_MISSIONS_FLAG_CACHE_TTL_MS = 5000;
 let lastStreamCacheInvalidationMs = 0;
 let liveFlagsCache: { value: LiveFeatureFlags; expiresAt: number } | null = null;
 let dailyMissionsFlagCache: { value: boolean; expiresAt: number } | null = null;
+const lockSkipStreak = new Map<number, number>();
 
 function lockMetricKeys(lockKey: number): { acquired: SocialStabilityMetricKey; skipped: SocialStabilityMetricKey } | null {
   if (lockKey === LOCK_KEY_SCHEDULED_STREAMS) {
@@ -74,10 +75,23 @@ async function tryAcquireJobLock(db: any, lockKey: number): Promise<boolean> {
   try {
     const result: any = await db.execute(sql`SELECT pg_try_advisory_lock(${lockKey}) AS locked`);
     const locked = !!result?.rows?.[0]?.locked;
+    const prevSkipStreak = lockSkipStreak.get(lockKey) || 0;
     const mk = lockMetricKeys(lockKey);
     if (mk) {
-      if (locked) stabilityMetrics[mk.acquired] += 1;
-      else stabilityMetrics[mk.skipped] += 1;
+      if (locked) {
+        stabilityMetrics[mk.acquired] += 1;
+        if (prevSkipStreak >= 5) {
+          socialLog.info({ lockKey, previousSkipStreak: prevSkipStreak }, "Periodic job lock contention recovered");
+        }
+        lockSkipStreak.set(lockKey, 0);
+      } else {
+        stabilityMetrics[mk.skipped] += 1;
+        const nextSkipStreak = prevSkipStreak + 1;
+        lockSkipStreak.set(lockKey, nextSkipStreak);
+        if (nextSkipStreak >= 5 && nextSkipStreak % 5 === 0) {
+          socialLog.warn({ lockKey, skipStreak: nextSkipStreak }, "High periodic job lock contention");
+        }
+      }
     }
     return locked;
   } catch {
@@ -1656,6 +1670,10 @@ router.get("/chat/metrics", async (req, res) => {
       scheduledLockSkipped: stabilityMetrics.scheduledLockSkipped,
       friendExpiryLockAcquired: stabilityMetrics.friendExpiryLockAcquired,
       friendExpiryLockSkipped: stabilityMetrics.friendExpiryLockSkipped,
+      streamAutoStartAttempts: stabilityMetrics.streamAutoStartAttempts,
+      streamAutoStartSucceeded: stabilityMetrics.streamAutoStartSucceeded,
+      streamAutoStartSkipped: stabilityMetrics.streamAutoStartSkipped,
+      streamAutoStartFailed: stabilityMetrics.streamAutoStartFailed,
       timestamp: new Date().toISOString(),
     },
   });
@@ -5575,6 +5593,7 @@ setInterval(async () => {
 
     for (const stream of dueStreams) {
       try {
+        stabilityMetrics.streamAutoStartAttempts += 1;
         const activated = await db.update(schema.streams)
           .set({ status: "active", startedAt: new Date() })
           .where(and(
@@ -5583,7 +5602,10 @@ setInterval(async () => {
             sql`${schema.streams.scheduledAt} <= NOW()`,
           ))
           .returning({ id: schema.streams.id });
-        if (activated.length === 0) continue;
+        if (activated.length === 0) {
+          stabilityMetrics.streamAutoStartSkipped += 1;
+          continue;
+        }
 
         await storage.addStreamViewer(stream.id, stream.userId, "host");
 
@@ -5609,7 +5631,9 @@ setInterval(async () => {
         }
 
         socialLog.info({ streamId: stream.id, userId: stream.userId }, "Scheduled stream auto-started");
+        stabilityMetrics.streamAutoStartSucceeded += 1;
       } catch (err: any) {
+        stabilityMetrics.streamAutoStartFailed += 1;
         socialLog.warn({ streamId: stream.id, err: err?.message }, "Failed to auto-start scheduled stream");
       }
     }

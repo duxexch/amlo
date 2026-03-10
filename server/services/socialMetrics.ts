@@ -10,6 +10,17 @@ export const socialStabilityMetrics = {
     scheduledLockSkipped: 0,
     friendExpiryLockAcquired: 0,
     friendExpiryLockSkipped: 0,
+    streamAutoStartAttempts: 0,
+    streamAutoStartSucceeded: 0,
+    streamAutoStartSkipped: 0,
+    streamAutoStartFailed: 0,
+    notificationQueueEnqueued: 0,
+    notificationQueueDeduplicated: 0,
+    notificationQueueRetries: 0,
+    notificationQueueDropped: 0,
+    notificationQueueDispatchSuccess: 0,
+    notificationQueueDispatchFailures: 0,
+    notificationQueueDeadLettered: 0,
 };
 
 export type SocialStabilityMetricKey = keyof typeof socialStabilityMetrics;

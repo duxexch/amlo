@@ -115,4 +115,48 @@ describe("notificationQueue dedup", () => {
 
         expect(ok).toBe(false);
     });
+
+    it("returns queue stats when Redis is available", async () => {
+        const redis = {
+            llen: vi.fn()
+                .mockResolvedValueOnce(7)
+                .mockResolvedValueOnce(2),
+        };
+
+        const redisMod = await import("../server/redis");
+        vi.mocked(redisMod.getRedis).mockReturnValue(redis as any);
+
+        const queueMod = await import("../server/services/notificationQueue");
+        const stats = await queueMod.getNotificationQueueStats();
+
+        expect(stats).toEqual({ mainQueueDepth: 7, deadLetterDepth: 2 });
+        expect(redis.llen).toHaveBeenCalledTimes(2);
+    });
+
+    it("increments dedup metric when duplicate notification is skipped", async () => {
+        const redis = {
+            set: vi.fn().mockResolvedValue(null),
+            lpush: vi.fn().mockResolvedValue(1),
+        };
+
+        const redisMod = await import("../server/redis");
+        vi.mocked(redisMod.getRedis).mockReturnValue(redis as any);
+
+        const metricsMod = await import("../server/services/socialMetrics");
+        metricsMod.socialStabilityMetrics.notificationQueueDeduplicated = 0;
+
+        const queueMod = await import("../server/services/notificationQueue");
+        const ok = await queueMod.enqueueNotificationJob({
+            userId: "u1",
+            preferenceKey: "messages",
+            kind: "message",
+            actorName: "Alice",
+            bodyPreview: "hello",
+            url: "/chat/c1",
+        });
+
+        expect(ok).toBe(true);
+        expect(metricsMod.socialStabilityMetrics.notificationQueueDeduplicated).toBe(1);
+        expect(redis.lpush).not.toHaveBeenCalled();
+    });
 });

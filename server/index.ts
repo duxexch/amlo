@@ -20,6 +20,7 @@ import { initRedis, createRedisSessionStore, getRedis, createRedisDuplicate } fr
 import { isDatabaseConnected, getPool, getDb } from "./db";
 import { logger, createLogger } from "./logger";
 import { socialStabilityMetrics } from "./services/socialMetrics";
+import { getNotificationQueueStats } from "./services/notificationQueue";
 import { and, eq, or, sql } from "drizzle-orm";
 import * as schema from "../shared/schema";
 
@@ -1535,6 +1536,7 @@ app.use((req, res, next) => {
     const cpu = process.cpuUsage();
     const pool = getPool();
     const onlineCount = await getOnlineUsersCount();
+    const notificationQueueStats = await getNotificationQueueStats();
 
     const ratioPercent = (hits: number, misses: number): number => {
       const total = hits + misses;
@@ -1622,6 +1624,45 @@ app.use((req, res, next) => {
       `# HELP ablox_social_friend_expiry_lock_skipped Total friend expiry lock skips`,
       `# TYPE ablox_social_friend_expiry_lock_skipped counter`,
       `ablox_social_friend_expiry_lock_skipped ${socialStabilityMetrics.friendExpiryLockSkipped}`,
+      `# HELP ablox_social_stream_auto_start_attempts Total scheduled stream auto-start attempts`,
+      `# TYPE ablox_social_stream_auto_start_attempts counter`,
+      `ablox_social_stream_auto_start_attempts ${socialStabilityMetrics.streamAutoStartAttempts}`,
+      `# HELP ablox_social_stream_auto_start_succeeded Total scheduled stream auto-start successes`,
+      `# TYPE ablox_social_stream_auto_start_succeeded counter`,
+      `ablox_social_stream_auto_start_succeeded ${socialStabilityMetrics.streamAutoStartSucceeded}`,
+      `# HELP ablox_social_stream_auto_start_skipped Total scheduled stream auto-start skips due to race/idempotency`,
+      `# TYPE ablox_social_stream_auto_start_skipped counter`,
+      `ablox_social_stream_auto_start_skipped ${socialStabilityMetrics.streamAutoStartSkipped}`,
+      `# HELP ablox_social_stream_auto_start_failed Total scheduled stream auto-start failures`,
+      `# TYPE ablox_social_stream_auto_start_failed counter`,
+      `ablox_social_stream_auto_start_failed ${socialStabilityMetrics.streamAutoStartFailed}`,
+      `# HELP ablox_notification_queue_enqueued Total notification jobs enqueued`,
+      `# TYPE ablox_notification_queue_enqueued counter`,
+      `ablox_notification_queue_enqueued ${socialStabilityMetrics.notificationQueueEnqueued}`,
+      `# HELP ablox_notification_queue_deduplicated Total notification jobs deduplicated before enqueue`,
+      `# TYPE ablox_notification_queue_deduplicated counter`,
+      `ablox_notification_queue_deduplicated ${socialStabilityMetrics.notificationQueueDeduplicated}`,
+      `# HELP ablox_notification_queue_retries Total notification job retries`,
+      `# TYPE ablox_notification_queue_retries counter`,
+      `ablox_notification_queue_retries ${socialStabilityMetrics.notificationQueueRetries}`,
+      `# HELP ablox_notification_queue_dropped Total notification jobs dropped after max attempts`,
+      `# TYPE ablox_notification_queue_dropped counter`,
+      `ablox_notification_queue_dropped ${socialStabilityMetrics.notificationQueueDropped}`,
+      `# HELP ablox_notification_queue_dispatch_success Total successful notification dispatches`,
+      `# TYPE ablox_notification_queue_dispatch_success counter`,
+      `ablox_notification_queue_dispatch_success ${socialStabilityMetrics.notificationQueueDispatchSuccess}`,
+      `# HELP ablox_notification_queue_dispatch_failures Total failed notification dispatches`,
+      `# TYPE ablox_notification_queue_dispatch_failures counter`,
+      `ablox_notification_queue_dispatch_failures ${socialStabilityMetrics.notificationQueueDispatchFailures}`,
+      `# HELP ablox_notification_queue_dead_lettered Total notification jobs moved to dead-letter queue`,
+      `# TYPE ablox_notification_queue_dead_lettered counter`,
+      `ablox_notification_queue_dead_lettered ${socialStabilityMetrics.notificationQueueDeadLettered}`,
+      `# HELP ablox_notification_queue_depth Current notification queue depth`,
+      `# TYPE ablox_notification_queue_depth gauge`,
+      `ablox_notification_queue_depth ${notificationQueueStats.mainQueueDepth}`,
+      `# HELP ablox_notification_dead_letter_depth Current dead-letter queue depth`,
+      `# TYPE ablox_notification_dead_letter_depth gauge`,
+      `ablox_notification_dead_letter_depth ${notificationQueueStats.deadLetterDepth}`,
     ];
 
     // DB pool metrics

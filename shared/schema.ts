@@ -413,6 +413,7 @@ export const friendships = pgTable(
     index("friendships_sender_idx").on(table.senderId),
     index("friendships_receiver_idx").on(table.receiverId),
     index("friendships_status_idx").on(table.status),
+    index("friendships_status_created_idx").on(table.status, table.createdAt),
     unique("uq_friendships").on(table.senderId, table.receiverId),
   ],
 );
