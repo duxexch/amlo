@@ -231,8 +231,9 @@ function translateTemplate(template: string, params?: Record<string, string | nu
 }
 
 function resolveText(entry: AppNotificationEntry, lang: string) {
-  const baseLang = lang.startsWith("ar") ? "ar" : "en";
-  const dict = MSG[baseLang] || MSG.en;
+  const normalized = String(lang || "en").toLowerCase();
+  const shortLang = normalized.split("-")[0];
+  const dict = MSG[normalized] || MSG[shortLang] || MSG.en;
 
   const titleTemplate = (entry.titleKey && dict[entry.titleKey]) || entry.title || "Ablox";
   const bodyTemplate = (entry.bodyKey && dict[entry.bodyKey]) || entry.body || "";

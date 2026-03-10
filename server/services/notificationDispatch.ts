@@ -19,7 +19,7 @@ export type NotificationPreferenceKey =
 export type LocalizedPushJob = {
     userId: string;
     preferenceKey: NotificationPreferenceKey;
-    kind: "message" | "call" | "friend";
+    kind: "message" | "call" | "friend" | "friend-accepted";
     actorName?: string;
     bodyPreview?: string;
     url: string;
@@ -107,11 +107,15 @@ export async function sendLocalizedPush(job: LocalizedPushJob): Promise<void> {
             title = en ? "Friend Request" : "طلب صداقة";
             body = en ? `${actor} sent you a friend request` : `${actor} أرسل لك طلب صداقة`;
             tag = "ablox-friend";
+        } else if (kind === "friend-accepted") {
+            title = en ? "Friend Request Accepted" : "تم قبول طلب الصداقة";
+            body = en ? `${actor} accepted your friend request` : `${actor} قبل طلب صداقتك`;
+            tag = "ablox-friend";
         }
 
         await appendToNotificationInbox({
             userId,
-            type: kind === "friend" ? "friend-request" : kind,
+            type: kind === "friend" || kind === "friend-accepted" ? "friend-request" : kind,
             title,
             body,
             url,

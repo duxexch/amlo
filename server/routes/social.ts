@@ -827,7 +827,7 @@ router.post("/friends/:id/accept", async (req, res) => {
       queueLocalizedPush({
         userId: friendship.senderId,
         preferenceKey: "friendRequests",
-        kind: "friend-accepted" as any,
+        kind: "friend-accepted",
         actorName: receiver.displayName || receiver.username || "User",
         url: "/friends",
       });

@@ -278,6 +278,58 @@ async function getStreamBannedWords(roomId: string): Promise<string[]> {
 const typingThrottle = new Map<string, number>(); // userId -> last emit timestamp
 const TYPING_THROTTLE_MS = 3000; // max 1 typing event per 3 seconds per user
 
+// ── Presence recipient cache (friends-only fanout) ──
+const friendPresenceRecipientsCache = new Map<string, { ids: string[]; expiresAt: number }>();
+const FRIEND_PRESENCE_RECIPIENTS_TTL_MS = 30_000;
+
+async function getFriendPresenceRecipients(userId: string): Promise<string[]> {
+  const cached = friendPresenceRecipientsCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.ids;
+
+  const db = getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({ senderId: schema.friendships.senderId, receiverId: schema.friendships.receiverId })
+    .from(schema.friendships)
+    .where(and(
+      or(
+        eq(schema.friendships.senderId, userId),
+        eq(schema.friendships.receiverId, userId),
+      ),
+      eq(schema.friendships.status, "accepted"),
+    ));
+
+  const ids = Array.from(new Set(
+    rows
+      .map((row) => (row.senderId === userId ? row.receiverId : row.senderId))
+      .filter((id): id is string => Boolean(id && id !== userId)),
+  ));
+
+  friendPresenceRecipientsCache.set(userId, {
+    ids,
+    expiresAt: Date.now() + FRIEND_PRESENCE_RECIPIENTS_TTL_MS,
+  });
+
+  return ids;
+}
+
+function invalidateFriendPresenceRecipients(userId: string) {
+  friendPresenceRecipientsCache.delete(userId);
+}
+
+async function emitPresenceUpdateToFriends(payload: { userId: string; isOnline: boolean; lastSeen: string | null; ts: number }) {
+  try {
+    const recipientIds = await getFriendPresenceRecipients(payload.userId);
+    if (recipientIds.length === 0) return;
+    for (const friendId of recipientIds) {
+      io.to(`user:${friendId}`).emit("presence-update", payload);
+    }
+  } catch (err: any) {
+    serverLog.warn({ err: err?.message || err, userId: payload.userId }, "presence-update friend fanout failed");
+  }
+}
+
 function isChatRateLimited(userId: string): boolean {
   const now = Date.now();
   const entry = chatThrottle.get(userId);
@@ -344,6 +396,10 @@ setInterval(() => {
   if (streamBannedWordsCache.size > 20_000) streamBannedWordsCache.clear();
   if (typingThrottle.size > 50_000) typingThrottle.clear();
   if (viewerCountDebounce.size > 10_000) viewerCountDebounce.clear();
+  for (const [userId, cached] of friendPresenceRecipientsCache) {
+    if (now > cached.expiresAt) friendPresenceRecipientsCache.delete(userId);
+  }
+  if (friendPresenceRecipientsCache.size > 100_000) friendPresenceRecipientsCache.clear();
 }, 30_000).unref();
 
 // ── Stream telemetry log every minute (non-blocking observability) ──
@@ -394,7 +450,7 @@ io.on("connection", (socket) => {
   if (isStr(sessionUserId, 100)) {
     socket.join(`user:${sessionUserId}`);
     void setUserOnline(sessionUserId, socket.id);
-    socket.broadcast.emit("presence-update", {
+    void emitPresenceUpdateToFriends({
       userId: sessionUserId,
       isOnline: true,
       lastSeen: null,
@@ -412,10 +468,11 @@ io.on("connection", (socket) => {
     }
     // Suppress duplicate calls — already online with same userId
     if (socket.data.userId === userId) return;
+    invalidateFriendPresenceRecipients(userId);
     await setUserOnline(userId, socket.id);
     socket.data.userId = userId;
     socket.join(`user:${userId}`);
-    socket.broadcast.emit("presence-update", {
+    void emitPresenceUpdateToFriends({
       userId,
       isOnline: true,
       lastSeen: null,
@@ -1041,12 +1098,14 @@ io.on("connection", (socket) => {
       await endRandomCall(userId);
       const stillConnected = (io.sockets.adapter.rooms.get(`user:${userId}`)?.size || 0) > 0;
       if (!stillConnected) {
+        invalidateFriendPresenceRecipients(userId);
         await removeUserOnline(userId);
+        const nowIso = new Date().toISOString();
         await setLastSeen(userId);
-        socket.broadcast.emit("presence-update", {
+        void emitPresenceUpdateToFriends({
           userId,
           isOnline: false,
-          lastSeen: new Date().toISOString(),
+          lastSeen: nowIso,
           ts: Date.now(),
         });
       }

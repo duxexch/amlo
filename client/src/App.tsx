@@ -13,7 +13,6 @@ import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { callsApi } from "@/lib/socialApi";
-import { authApi } from "@/lib/authApi";
 import { ensurePushSubscription } from "@/lib/pushNotifications";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -190,23 +189,6 @@ function App() {
     let socket: any;
     import("@/lib/socketManager").then(({ getSocket }) => {
       socket = getSocket();
-      let currentUserId: string | null = null;
-
-      const sendPresenceOnline = () => {
-        if (!currentUserId) return;
-        socket.emit("user-online", currentUserId);
-      };
-
-      void authApi.me()
-        .then((me) => {
-          const id = String(me?.data?.id || "").trim();
-          if (!id) return;
-          currentUserId = id;
-          sendPresenceOnline();
-        })
-        .catch(() => { });
-
-      socket.on("connect", sendPresenceOnline);
 
       const handleIncomingCall = (data: any) => {
         if (data && typeof data === "object") {
@@ -236,6 +218,9 @@ function App() {
       };
 
       const handleNewMessageGlobal = (data: any) => {
+        const onChatPage = window.location.pathname.startsWith("/friends") || window.location.pathname.startsWith("/chat");
+        if (onChatPage && !document.hidden) return;
+
         const senderName = data?.sender?.displayName || data?.sender?.username || "User";
         const preview = data?.message?.content || t("social.newMessage", "رسالة جديدة");
         const targetUserId = data?.sender?.id || data?.message?.senderId;
@@ -306,7 +291,6 @@ function App() {
       socket.on("finance-updated", handleFinanceUpdatedGlobal);
       // Store cleanup ref
       (window as any).__cleanupIncomingCall = () => {
-        socket.off("connect", sendPresenceOnline);
         socket.off("incoming-call", handleIncomingCall);
         socket.off("new-message", handleNewMessageGlobal);
         socket.off("friend-request", handleFriendRequestGlobal);
