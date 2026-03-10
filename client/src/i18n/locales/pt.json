@@ -1519,6 +1519,7 @@
     "profile2": "Perfil 2",
     "reconnecting": "Reconectando...",
     "switchToVoice": "Mudar para voz",
+    "switchToVideo": "Mudar para vídeo",
     "weakConnection": "Conexão fraca — qualidade de vídeo reduzida"
   },
   "world": {
@@ -1746,6 +1747,8 @@
   "permissions": {
     "micDenied": "Por favor, permita o acesso ao microfone para fazer a chamada",
     "cameraMicDenied": "Por favor, permita o acesso à câmera e ao microfone",
-    "locationDenied": "Por favor, permita o acesso à localização"
+    "locationDenied": "Por favor, permita o acesso à localização",
+    "micDeniedSettings": "Permissão do microfone negada. Ative nas configurações do navegador e tente novamente",
+    "cameraDenied": "Não foi possível acessar a câmera"
   }
 }

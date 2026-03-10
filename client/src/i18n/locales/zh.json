@@ -1519,6 +1519,7 @@
     "profile2": "资料 2",
     "reconnecting": "重新连接中...",
     "switchToVoice": "切换为语音",
+    "switchToVideo": "切换到视频",
     "weakConnection": "连接较弱 — 视频质量已自动降低"
   },
   "world": {
@@ -1746,6 +1747,8 @@
   "permissions": {
     "micDenied": "请允许访问麦克风以进行通话",
     "cameraMicDenied": "请允许访问摄像头和麦克风",
-    "locationDenied": "请允许访问位置信息"
+    "locationDenied": "请允许访问位置信息",
+    "micDeniedSettings": "麦克风权限被拒绝。请在浏览器设置中启用后重试",
+    "cameraDenied": "无法访问摄像头"
   }
 }

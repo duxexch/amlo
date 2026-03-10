@@ -1519,6 +1519,7 @@
     "profile2": "프로필 2",
     "reconnecting": "재연결 중...",
     "switchToVoice": "음성 통화로 전환",
+    "switchToVideo": "영상으로 전환",
     "weakConnection": "연결 약함 — 영상 품질 자동 조정"
   },
   "world": {
@@ -1746,6 +1747,8 @@
   "permissions": {
     "micDenied": "통화를 위해 마이크 접근을 허용해주세요",
     "cameraMicDenied": "카메라와 마이크 접근을 허용해주세요",
-    "locationDenied": "위치 접근을 허용해주세요"
+    "locationDenied": "위치 접근을 허용해주세요",
+    "micDeniedSettings": "마이크 권한이 거부되었습니다. 브라우저 설정에서 활성화한 후 다시 시도해주세요",
+    "cameraDenied": "카메라에 접근할 수 없습니다"
   }
 }

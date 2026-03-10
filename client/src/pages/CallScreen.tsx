@@ -156,6 +156,18 @@ export function CallScreen() {
     let cancelled = false;
     const checkPermissions = async () => {
       try {
+        // On modern Android (13+), check via Permissions API first for clear denied state
+        if (navigator.permissions) {
+          const micPerm = await navigator.permissions.query({ name: "microphone" as PermissionName });
+          if (micPerm.state === "denied") {
+            if (cancelled) return;
+            setPermissionDenied(true);
+            setErrorMsg(t("permissions.micDeniedSettings", "تم رفض إذن الميكروفون. يرجى تفعيله من إعدادات المتصفح ثم المحاولة مجدداً"));
+            setStatus("failed");
+            return;
+          }
+        }
+
         const constraints: MediaStreamConstraints = callType === "video"
           ? { audio: true, video: true }
           : { audio: true };
@@ -173,7 +185,11 @@ export function CallScreen() {
           } catch { /* fall through to denied */ }
         }
         setPermissionDenied(true);
-        setErrorMsg(t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون لإجراء المكالمة"));
+        const isDenied = err?.name === "NotAllowedError";
+        setErrorMsg(isDenied
+          ? t("permissions.micDeniedSettings", "تم رفض إذن الميكروفون. يرجى تفعيله من إعدادات المتصفح ثم المحاولة مجدداً")
+          : t("permissions.micDenied", "يرجى السماح بالوصول للميكروفون لإجراء المكالمة")
+        );
         setStatus("failed");
       }
     };
@@ -330,6 +346,10 @@ export function CallScreen() {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
+      // Sync isVideoOn with actual track state after acquireMedia fallback
+      const hasVideo = stream.getVideoTracks().some(t => t.enabled);
+      setIsVideoOn(hasVideo);
+      if (hasVideo) setCurrentCallType("video");
     },
     onRemoteStream: (stream) => {
       if (callType === "video" && remoteVideoRef.current) {
@@ -497,7 +517,20 @@ export function CallScreen() {
     setIsMuted(muted);
   };
 
-  const toggleVideo = () => {
+  const toggleVideo = async () => {
+    // If no video track exists, try to acquire camera
+    const hasVideo = webrtcManager.hasVideoTrack();
+    if (!hasVideo) {
+      try {
+        await webrtcManager.addVideoTrack();
+        setIsVideoOn(true);
+        setCurrentCallType("video");
+      } catch {
+        setErrorMsg(t("permissions.cameraDenied", "تعذر الوصول للكاميرا"));
+        setTimeout(() => setErrorMsg(null), 3000);
+      }
+      return;
+    }
     const off = webrtcManager.toggleVideo();
     setIsVideoOn(!off);
   };
@@ -515,6 +548,23 @@ export function CallScreen() {
     if (!off) webrtcManager.toggleVideo(); // ensure video is off
     setIsVideoOn(false);
     setCurrentCallType("voice");
+  };
+
+  const switchToVideo = async () => {
+    try {
+      const hasVideo = webrtcManager.hasVideoTrack();
+      if (!hasVideo) {
+        await webrtcManager.addVideoTrack();
+      } else {
+        const off = webrtcManager.toggleVideo();
+        if (off) webrtcManager.toggleVideo(); // ensure video is on
+      }
+      setIsVideoOn(true);
+      setCurrentCallType("video");
+    } catch {
+      setErrorMsg(t("permissions.cameraDenied", "تعذر الوصول للكاميرا"));
+      setTimeout(() => setErrorMsg(null), 3000);
+    }
   };
 
   const coinRate = currentCallType === "video"
@@ -683,16 +733,17 @@ export function CallScreen() {
               {isSpeaker ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
 
-            {/* Switch to voice (video calls only) */}
-            {currentCallType === "video" && (
-              <button
-                onClick={switchToVoice}
-                className="w-12 h-12 rounded-full flex items-center justify-center bg-white/10 text-white/70 border border-white/10 backdrop-blur-md transition-all"
-                title={t("social.switchToVoice", "تحويل لصوتية")}
-              >
-                <VideoOff className="w-5 h-5" />
-              </button>
-            )}
+            {/* Toggle video on/off */}
+            <button
+              onClick={currentCallType === "video" && isVideoOn ? switchToVoice : switchToVideo}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all backdrop-blur-md ${currentCallType === "video" && isVideoOn
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "bg-white/10 text-white/70 border border-white/10"
+                }`}
+              title={currentCallType === "video" && isVideoOn ? t("social.switchToVoice", "تحويل لصوتية") : t("social.switchToVideo", "تحويل لفيديو")}
+            >
+              {currentCallType === "video" && isVideoOn ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+            </button>
 
             {/* End call */}
             <motion.button

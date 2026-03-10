@@ -241,7 +241,7 @@ function App() {
             title: t("social.incomingCall", "مكالمة واردة"),
             body: `${callerName}`,
             url: "/friends",
-            persistent: true,
+            persistent: false,
             meta: { kind: "incoming-call" },
           });
         }

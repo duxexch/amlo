@@ -592,6 +592,40 @@ class WebRTCManager {
     return !video.enabled; // returns isVideoOff
   }
 
+  /** Check if local stream has any video track */
+  hasVideoTrack(): boolean {
+    return !!(this.localStream && this.localStream.getVideoTracks().length > 0 && this.localStream.getVideoTracks()[0].enabled);
+  }
+
+  /** Dynamically acquire camera and add video track to the call */
+  async addVideoTrack(): Promise<void> {
+    if (!this.localStream || !this.pc) throw new Error("No active call");
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: this.currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
+    });
+    const newTrack = newStream.getVideoTracks()[0];
+    if (!newTrack) throw new Error("No video track acquired");
+
+    // Remove any existing (disabled) video track
+    const oldTrack = this.localStream.getVideoTracks()[0];
+    if (oldTrack) {
+      this.localStream.removeTrack(oldTrack);
+      oldTrack.stop();
+      const sender = this.pc.getSenders().find(s => s.track?.kind === "video");
+      if (sender) {
+        await sender.replaceTrack(newTrack);
+        this.localStream.addTrack(newTrack);
+        this.handlers.onLocalStream?.(this.localStream);
+        return;
+      }
+    }
+
+    // Add new video track to stream and peer connection
+    this.localStream.addTrack(newTrack);
+    this.pc.addTrack(newTrack, this.localStream);
+    this.handlers.onLocalStream?.(this.localStream);
+  }
+
   /**
    * Switch between front and back camera
    * Returns the new facingMode

@@ -1519,6 +1519,7 @@
     "profile2": "Profil 2",
     "reconnecting": "Reconnexion...",
     "switchToVoice": "Passer en vocal",
+    "switchToVideo": "Passer en vidéo",
     "weakConnection": "Connexion faible — qualité vidéo réduite"
   },
   "world": {
@@ -1746,6 +1747,8 @@
   "permissions": {
     "micDenied": "Veuillez autoriser l'accès au microphone pour passer l'appel",
     "cameraMicDenied": "Veuillez autoriser l'accès à la caméra et au microphone",
-    "locationDenied": "Veuillez autoriser l'accès à la localisation"
+    "locationDenied": "Veuillez autoriser l'accès à la localisation",
+    "micDeniedSettings": "Permission du microphone refusée. Veuillez l'activer dans les paramètres du navigateur et réessayer",
+    "cameraDenied": "Impossible d'accéder à la caméra"
   }
 }

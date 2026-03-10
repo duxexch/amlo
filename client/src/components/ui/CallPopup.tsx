@@ -1,6 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, Video, X } from "lucide-react";
-import avatarImg from "@/assets/images/avatar-3d.png";
+import { Phone, PhoneOff, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef } from "react";
 
@@ -33,7 +32,6 @@ function useRingtone(isOpen: boolean) {
 
     const playRingBurst = () => {
       const now = ctx.currentTime;
-      // Two-tone burst: 440Hz + 480Hz (standard phone ring)
       for (const freq of [440, 480]) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -51,7 +49,7 @@ function useRingtone(isOpen: boolean) {
     };
 
     playRingBurst();
-    intervalRef.current = setInterval(playRingBurst, 3000); // ring every 3s
+    intervalRef.current = setInterval(playRingBurst, 3000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -62,61 +60,85 @@ function useRingtone(isOpen: boolean) {
   }, [isOpen]);
 }
 
+/**
+ * Compact top-of-screen incoming call banner.
+ * Overlays above the app without pushing layout, auto-dismisses after 30s.
+ */
 export function CallPopup({ isOpen, onAccept, onDecline, callerName, isVideo = true }: CallPopupProps) {
   const { t, i18n } = useTranslation();
   const dir = i18n.dir();
   const displayName = callerName || t("callPopup.defaultCaller");
+  const colors = ["from-primary to-secondary", "from-cyan-400 to-blue-500", "from-pink-400 to-rose-500", "from-amber-400 to-orange-500"];
+  const color = colors[Math.abs((displayName || "").charCodeAt(0)) % colors.length];
+  const initial = (displayName || "?")[0]?.toUpperCase();
   useRingtone(isOpen);
+
+  // Auto-decline after 30s (server timeout is ~35s)
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(onDecline, 30_000);
+    return () => clearTimeout(timer);
+  }, [isOpen, onDecline]);
+
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" dir={dir}>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ scale: 0.8, y: 50, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.8, y: 50, opacity: 0 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="relative w-full max-w-sm glass rounded-3xl p-6 border-primary/30 neon-border overflow-hidden"
-          >
-            {/* Pulsing background effect */}
-            <div className="absolute inset-0 bg-primary/10 animate-pulse pointer-events-none" />
+        <motion.div
+          dir={dir}
+          initial={{ y: -100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -100, opacity: 0 }}
+          transition={{ type: "spring", damping: 22, stiffness: 300 }}
+          className="fixed top-0 left-0 right-0 z-[100] pointer-events-none safe-area-top"
+        >
+          <div className="mx-3 mt-3 pointer-events-auto rounded-2xl bg-[#101028]/95 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
+            {/* Animated accent bar */}
+            <div className="h-[3px] bg-gradient-to-r from-primary via-secondary to-primary bg-[length:200%_100%] animate-[shimmer_2s_linear_infinite]" />
 
-            <div className="flex flex-col items-center text-center relative z-10">
-              <div className="relative mb-6">
-                <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary neon-border relative z-10">
-                  <img src={avatarImg} alt="Caller" className="w-full h-full object-cover" />
+            <div className="flex items-center gap-3 px-4 py-3">
+              {/* Caller avatar */}
+              <div className="relative shrink-0">
+                <motion.div
+                  className="absolute inset-0 rounded-xl bg-primary/20"
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0, 0.3] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                />
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-lg font-bold text-white relative z-10`}>
+                  {initial}
                 </div>
-                <div className="absolute inset-0 rounded-full animate-pulse-ring pointer-events-none" />
               </div>
 
-              <h3 className="text-2xl font-bold text-white mb-2">{displayName}</h3>
-              <p className="text-primary font-medium animate-pulse mb-8 text-lg">
-                {isVideo ? t("callPopup.incomingVideo") : t("callPopup.incomingAudio")}
-              </p>
+              {/* Caller info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-bold text-sm truncate">{displayName}</p>
+                <p className="text-white/50 text-xs flex items-center gap-1 mt-0.5">
+                  {isVideo
+                    ? <><Video className="w-3 h-3 text-blue-400" /> {t("callPopup.incomingVideo")}</>
+                    : <><Phone className="w-3 h-3 text-emerald-400" /> {t("callPopup.incomingAudio")}</>
+                  }
+                </p>
+              </div>
 
-              <div className="flex gap-6 w-full justify-center">
-                <button
+              {/* Action buttons */}
+              <div className="flex items-center gap-2.5 shrink-0">
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
                   onClick={onDecline}
-                  className="w-16 h-16 rounded-full bg-destructive flex items-center justify-center hover:bg-destructive/80 transition-colors shadow-[0_0_15px_rgba(220,38,38,0.5)]"
+                  className="w-11 h-11 rounded-full bg-red-500 flex items-center justify-center shadow-[0_0_12px_rgba(239,68,68,0.4)] active:bg-red-600"
                 >
-                  <X className="w-8 h-8 text-white" />
-                </button>
-                <button
+                  <PhoneOff className="w-5 h-5 text-white" />
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
                   onClick={onAccept}
-                  className="w-16 h-16 rounded-full bg-accent flex items-center justify-center hover:bg-accent/80 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.5)] animate-pulse-ring-accent relative"
+                  className="w-11 h-11 rounded-full bg-emerald-500 flex items-center justify-center shadow-[0_0_12px_rgba(52,211,153,0.4)] active:bg-emerald-600"
                 >
-                  {isVideo ? <Video className="w-8 h-8 text-white z-10" /> : <Phone className="w-8 h-8 text-white z-10" />}
-                </button>
+                  <Phone className="w-5 h-5 text-white" />
+                </motion.button>
               </div>
             </div>
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
       )}
     </AnimatePresence>
   );

@@ -1511,6 +1511,7 @@
     "profile2": "Profil 2",
     "reconnecting": "Verbindung wird wiederhergestellt...",
     "switchToVoice": "Zu Sprachanruf wechseln",
+    "switchToVideo": "Zu Video wechseln",
     "weakConnection": "Schwache Verbindung — Videoqualität reduziert"
   },
   "world": {
@@ -1738,6 +1739,8 @@
   "permissions": {
     "micDenied": "Bitte erlauben Sie den Mikrofonzugriff für den Anruf",
     "cameraMicDenied": "Bitte erlauben Sie den Zugriff auf Kamera und Mikrofon",
-    "locationDenied": "Bitte erlauben Sie den Standortzugriff"
+    "locationDenied": "Bitte erlauben Sie den Standortzugriff",
+    "micDeniedSettings": "Mikrofonberechtigung verweigert. Bitte in den Browsereinstellungen aktivieren und erneut versuchen",
+    "cameraDenied": "Kein Zugriff auf die Kamera"
   }
 }

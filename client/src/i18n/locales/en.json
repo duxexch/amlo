@@ -1589,6 +1589,7 @@
     "profile2": "Profile 2",
     "reconnecting": "Reconnecting...",
     "switchToVoice": "Switch to voice",
+    "switchToVideo": "Switch to video",
     "weakConnection": "Weak connection — video quality reduced"
   },
   "world": {
@@ -1780,6 +1781,8 @@
   "permissions": {
     "micDenied": "Please allow microphone access to make the call",
     "cameraMicDenied": "Please allow camera and microphone access",
-    "locationDenied": "Please allow location access"
+    "locationDenied": "Please allow location access",
+    "micDeniedSettings": "Microphone permission denied. Please enable it from browser settings and try again",
+    "cameraDenied": "Could not access camera"
   }
 }

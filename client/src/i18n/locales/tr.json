@@ -1519,6 +1519,7 @@
     "profile2": "Profil 2",
     "reconnecting": "Yeniden bağlanıyor...",
     "switchToVoice": "Sesli aramaya geç",
+    "switchToVideo": "Videoya geç",
     "weakConnection": "Zayıf bağlantı — video kalitesi düşürüldü"
   },
   "world": {
@@ -1746,6 +1747,8 @@
   "permissions": {
     "micDenied": "Arama yapmak için mikrofon erişimine izin verin",
     "cameraMicDenied": "Kamera ve mikrofon erişimine izin verin",
-    "locationDenied": "Konum erişimine izin verin"
+    "locationDenied": "Konum erişimine izin verin",
+    "micDeniedSettings": "Mikrofon izni reddedildi. Lütfen tarayıcı ayarlarından etkinleştirin ve tekrar deneyin",
+    "cameraDenied": "Kameraya erişilemedi"
   }
 }
