@@ -358,14 +358,40 @@ export function UserAuth() {
 
   const handleOtpChange = (index: number, value: string) => {
     const digits = normalizeOtpDigits(value);
-    const nextChar = digits.slice(0, 1);
-    const newOtp = [...otpValues];
-    newOtp[index] = nextChar;
-    setOtpValues(newOtp);
-    if (nextChar && index < 5) {
-      const next = document.getElementById(`otp-${index + 1}`);
-      next?.focus();
+    if (!digits) {
+      const newOtp = [...otpValues];
+      newOtp[index] = "";
+      setOtpValues(newOtp);
+      return;
     }
+
+    const newOtp = [...otpValues];
+    for (let i = 0; i < digits.length && index + i < 6; i++) {
+      newOtp[index + i] = digits[i];
+    }
+    setOtpValues(newOtp);
+
+    const focusIndex = Math.min(index + digits.length, 5);
+    document.getElementById(`otp-${focusIndex}`)?.focus();
+  };
+
+  const handleLoginOtpChange = (index: number, value: string) => {
+    const digits = normalizeOtpDigits(value);
+    if (!digits) {
+      const arr = [...loginOtpValues];
+      arr[index] = "";
+      setLoginOtpValues(arr);
+      return;
+    }
+
+    const arr = [...loginOtpValues];
+    for (let i = 0; i < digits.length && index + i < 6; i++) {
+      arr[index + i] = digits[i];
+    }
+    setLoginOtpValues(arr);
+
+    const focusIndex = Math.min(index + digits.length, 5);
+    document.getElementById(`login-otp-${focusIndex}`)?.focus();
   };
 
   const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>, mode: "register" | "login") => {
@@ -501,11 +527,8 @@ export function UserAuth() {
                     inputMode="numeric"
                     maxLength={1}
                     value={val}
-                    onChange={(e) => {
-                      const v = normalizeOtpDigits(e.target.value).slice(0, 1);
-                      const arr = [...loginOtpValues]; arr[i] = v; setLoginOtpValues(arr);
-                      if (v && i < 5) document.getElementById(`login-otp-${i + 1}`)?.focus();
-                    }}
+                    autoComplete="one-time-code"
+                    onChange={(e) => handleLoginOtpChange(i, e.target.value)}
                     onPaste={(e) => handleOtpPaste(e, "login")}
                     onKeyDown={(e) => {
                       if (e.key === "Backspace" && !loginOtpValues[i] && i > 0) document.getElementById(`login-otp-${i - 1}`)?.focus();
@@ -571,6 +594,7 @@ export function UserAuth() {
                     inputMode="numeric"
                     maxLength={1}
                     value={val}
+                    autoComplete="one-time-code"
                     onChange={(e) => handleOtpChange(i, e.target.value)}
                     onPaste={(e) => handleOtpPaste(e, "register")}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
