@@ -37,12 +37,22 @@ router.use(requireAuth);
 // ── Upload rate limiting (per IP) — prevents disk/bandwidth abuse ──
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 30,             // 30 uploads per minute per IP
+  max: 60,             // 60 direct uploads per minute per IP
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path.startsWith("/media/chunk"),
   message: { success: false, message: "عدد كبير من عمليات الرفع. حاول بعد دقيقة" },
 });
 router.use(uploadLimiter);
+
+// Chunk uploads are high-frequency by design (1 request per chunk).
+const uploadChunkLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 600,            // supports large resumable media uploads without false 429
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "حركة رفع الشرائح كبيرة جداً. حاول بعد دقيقة" },
+});
 
 // ── Magic bytes validation (prevents MIME spoofing) ──
 const MAGIC_BYTES: Record<string, Buffer[]> = {
@@ -467,7 +477,7 @@ router.post("/media", uploadMedia.single("file"), (req, res) => {
 });
 
 // ── Init resumable upload session ──
-router.post("/media/chunk/init", (req, res) => {
+router.post("/media/chunk/init", uploadChunkLimiter, (req, res) => {
   const userId = String((req.session as any)?.userId || "");
   const filename = String(req.body?.filename || "").trim();
   const mimetype = String(req.body?.mimetype || "").trim();
@@ -510,7 +520,7 @@ router.post("/media/chunk/init", (req, res) => {
 });
 
 // ── Upload one chunk ──
-router.post("/media/chunk/:uploadId", uploadChunk.single("chunk"), (req, res) => {
+router.post("/media/chunk/:uploadId", uploadChunkLimiter, uploadChunk.single("chunk"), (req, res) => {
   const userId = String((req.session as any)?.userId || "");
   const uploadId = String(req.params.uploadId || "").trim();
   const index = Number(req.body?.index);
@@ -551,7 +561,7 @@ router.post("/media/chunk/:uploadId", uploadChunk.single("chunk"), (req, res) =>
 });
 
 // ── Complete resumable upload and merge chunks ──
-router.post("/media/chunk/:uploadId/complete", (req, res) => {
+router.post("/media/chunk/:uploadId/complete", uploadChunkLimiter, (req, res) => {
   const userId = String((req.session as any)?.userId || "");
   const uploadId = String(req.params.uploadId || "").trim();
   if (!uploadId) {
@@ -624,7 +634,7 @@ router.post("/media/chunk/:uploadId/complete", (req, res) => {
 });
 
 // ── Abort resumable upload and cleanup temp chunks ──
-router.delete("/media/chunk/:uploadId", (req, res) => {
+router.delete("/media/chunk/:uploadId", uploadChunkLimiter, (req, res) => {
   const userId = String((req.session as any)?.userId || "");
   const uploadId = String(req.params.uploadId || "").trim();
   if (!uploadId) {

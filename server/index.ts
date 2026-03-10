@@ -223,7 +223,7 @@ const CHAT_WINDOW_MS = 10_000; // per 10 seconds
 
 // ── Call-signal throttle (prevents SDP/ICE flooding) ──
 const signalThrottle = new Map<string, { count: number; windowStart: number }>();
-const SIGNAL_MAX_EVENTS = 30; // max signal events (offers + answers + candidates)
+const SIGNAL_MAX_EVENTS = 180; // allow full ICE trickle bursts for voice/video calls
 const SIGNAL_WINDOW_MS = 10_000; // per 10 seconds
 
 // ── Gift throttle (separate from chat to stop gift flooding) ──

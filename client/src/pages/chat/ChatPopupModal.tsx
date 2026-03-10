@@ -273,15 +273,15 @@ const MessageBubble = memo(function MessageBubble({
             <p className="text-sm leading-snug whitespace-pre-wrap" dir="auto">{msg.content}</p>
           )}
           {hasTranslated && (
-            <div className="mt-1.5 pt-1.5 border-t border-white/10">
-              <p className="text-[10px] opacity-60 mb-1" dir="ltr">
+            <div className="mt-1 pt-1 border-t border-white/10 flex items-start gap-2">
+              <span className="shrink-0 text-[9px] leading-none px-1.5 py-1 rounded-md bg-white/10 opacity-70" dir="ltr">
                 {`${(detectedLang || "auto").toUpperCase()} -> ${targetLang.toUpperCase()}`}
-              </p>
-              <p className="text-sm leading-snug whitespace-pre-wrap opacity-90" dir="auto">{translationText}</p>
+              </span>
+              <p className="text-[13px] leading-tight whitespace-pre-wrap opacity-90 flex-1 min-w-0" dir="auto">{translationText}</p>
             </div>
           )}
           {!hasTranslated && translationLoading && msg.content && (
-            <div className="mt-1.5 pt-1.5 border-t border-white/10 flex items-center gap-1.5 text-[11px] opacity-70">
+            <div className="mt-1 pt-1 border-t border-white/10 flex items-center gap-1.5 text-[10px] opacity-70">
               <Loader2 className="w-3 h-3 animate-spin" />
               {t("chat.translating", "جاري الترجمة...")}
             </div>
