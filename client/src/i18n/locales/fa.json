@@ -41,6 +41,7 @@
     "adminPanel": "پنل مدیریت",
     "social": "ارتباطات",
     "download": "دانلود",
+    "cex": "CEX",
     "friends": "دوستان",
     "chat": "گفتگوها"
   },
@@ -424,7 +425,8 @@
         "pricing": "قیمت تماس‌ها",
         "milesPricing": "قیمت مایل‌ها",
         "worldPricing": "قیمت جهانی",
-        "appDownload": "دانلود اپلیکیشن"
+        "appDownload": "دانلود اپلیکیشن",
+        "contentLimits": "محدودیت محتوا"
       },
       "seo": {
         "metaTags": "تگ‌های متا",
@@ -1742,5 +1744,35 @@
     "locationDenied": "لطفاً اجازه دسترسی به موقعیت مکانی را بدهید",
     "micDeniedSettings": "مجوز میکروفون رد شد. لطفاً آن را از تنظیمات مرورگر فعال کنید و دوباره امتحان کنید",
     "cameraDenied": "دسترسی به دوربین ممکن نشد"
+  },
+  "cex": {
+    "newReel": "ریلز جدید",
+    "selectVideo": "یک ویدیو انتخاب کنید",
+    "captionPlaceholder": "توضیحات اضافه کنید...",
+    "fileTooLarge": "فایل خیلی بزرگ است (حداکثر 100MB)",
+    "invalidFileType": "لطفاً یک ویدیو انتخاب کنید",
+    "reelPublished": "ریلز با موفقیت منتشر شد!",
+    "uploadError": "خطا در آپلود",
+    "uploading": "در حال آپلود...",
+    "publish": "انتشار",
+    "noReels": "هنوز ریلزی وجود ندارد",
+    "createFirst": "اولین ریلز خود را بسازید"
+  },
+  "userProfile": {
+    "followers": "دنبال‌کنندگان",
+    "following": "دنبال می‌کند",
+    "posts": "پست‌ها",
+    "follow": "دنبال کردن",
+    "photos": "عکس‌ها",
+    "reels": "ریلز",
+    "noPosts": "هنوز پستی وجود ندارد",
+    "notFound": "کاربر یافت نشد",
+    "addPhoto": "افزودن عکس",
+    "addReel": "افزودن ریلز",
+    "newPhoto": "عکس جدید",
+    "selectImage": "یک تصویر انتخاب کنید",
+    "photoPublished": "عکس منتشر شد!",
+    "invalidImageType": "لطفاً یک تصویر انتخاب کنید",
+    "fileTooLarge": "فایل خیلی بزرگ است"
   }
 }

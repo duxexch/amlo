@@ -41,6 +41,7 @@
     "adminPanel": "Панель управления",
     "social": "Соцсети",
     "download": "Скачать",
+    "cex": "CEX",
     "friends": "Друзья",
     "chat": "Чат"
   },
@@ -424,7 +425,8 @@
         "pricing": "Цены на монеты",
         "milesPricing": "Цены на мили",
         "worldPricing": "Мировые цены",
-        "appDownload": "Скачать приложение"
+        "appDownload": "Скачать приложение",
+        "contentLimits": "Лимиты контента"
       },
       "seo": {
         "metaTags": "Мета-теги",
@@ -1750,5 +1752,35 @@
     "locationDenied": "Пожалуйста, разрешите доступ к местоположению",
     "micDeniedSettings": "Доступ к микрофону запрещён. Включите его в настройках браузера и попробуйте снова",
     "cameraDenied": "Не удалось получить доступ к камере"
+  },
+  "cex": {
+    "newReel": "Новый Reel",
+    "selectVideo": "Выберите видео",
+    "captionPlaceholder": "Добавить описание...",
+    "fileTooLarge": "Файл слишком большой (макс. 100МБ)",
+    "invalidFileType": "Выберите видео",
+    "reelPublished": "Рил опубликован!",
+    "uploadError": "Ошибка загрузки",
+    "uploading": "Загрузка...",
+    "publish": "Опубликовать",
+    "noReels": "Пока нет рилов",
+    "createFirst": "Создайте свой первый рил"
+  },
+  "userProfile": {
+    "followers": "Подписчики",
+    "following": "Подписки",
+    "posts": "Публикации",
+    "follow": "Подписаться",
+    "photos": "Фото",
+    "reels": "Рилы",
+    "noPosts": "Нет публикаций",
+    "notFound": "Пользователь не найден",
+    "addPhoto": "Добавить фото",
+    "addReel": "Добавить рил",
+    "newPhoto": "Новое фото",
+    "selectImage": "Выберите изображение",
+    "photoPublished": "Фото опубликовано!",
+    "invalidImageType": "Выберите изображение",
+    "fileTooLarge": "Файл слишком большой"
   }
 }

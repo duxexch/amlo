@@ -41,6 +41,7 @@
     "adminPanel": "Painel Admin",
     "social": "Social",
     "download": "Baixar",
+    "cex": "CEX",
     "friends": "Amigos",
     "chat": "Chat"
   },
@@ -424,7 +425,8 @@
         "pricing": "Preços de Moedas",
         "milesPricing": "Preços de Milhas",
         "worldPricing": "Preços Globais",
-        "appDownload": "Download do App"
+        "appDownload": "Download do App",
+        "contentLimits": "Limites de Conteúdo"
       },
       "seo": {
         "metaTags": "Meta Tags",
@@ -1750,5 +1752,35 @@
     "locationDenied": "Por favor, permita o acesso à localização",
     "micDeniedSettings": "Permissão do microfone negada. Ative nas configurações do navegador e tente novamente",
     "cameraDenied": "Não foi possível acessar a câmera"
+  },
+  "cex": {
+    "newReel": "Novo Reel",
+    "selectVideo": "Selecionar vídeo",
+    "captionPlaceholder": "Adicionar descrição...",
+    "fileTooLarge": "Arquivo muito grande (máx. 100MB)",
+    "invalidFileType": "Selecione um vídeo",
+    "reelPublished": "Reel publicado com sucesso!",
+    "uploadError": "Erro no upload",
+    "uploading": "Enviando...",
+    "publish": "Publicar",
+    "noReels": "Nenhum reel ainda",
+    "createFirst": "Crie seu primeiro reel"
+  },
+  "userProfile": {
+    "followers": "Seguidores",
+    "following": "Seguindo",
+    "posts": "Publicações",
+    "follow": "Seguir",
+    "photos": "Fotos",
+    "reels": "Reels",
+    "noPosts": "Sem publicações",
+    "notFound": "Usuário não encontrado",
+    "addPhoto": "Adicionar foto",
+    "addReel": "Adicionar reel",
+    "newPhoto": "Nova foto",
+    "selectImage": "Selecionar imagem",
+    "photoPublished": "Foto publicada!",
+    "invalidImageType": "Selecione uma imagem",
+    "fileTooLarge": "Arquivo muito grande"
   }
 }

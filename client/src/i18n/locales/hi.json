@@ -41,6 +41,7 @@
     "adminPanel": "एडमिन पैनल",
     "social": "सोशल",
     "download": "डाउनलोड",
+    "cex": "CEX",
     "friends": "दोस्त",
     "chat": "चैट"
   },
@@ -424,7 +425,8 @@
         "pricing": "सिक्कों की कीमत",
         "milesPricing": "माइल्स की कीमत",
         "worldPricing": "वैश्विक कीमत",
-        "appDownload": "ऐप डाउनलोड"
+        "appDownload": "ऐप डाउनलोड",
+        "contentLimits": "सामग्री सीमाएं"
       },
       "seo": {
         "metaTags": "मेटा टैग्स",
@@ -1750,5 +1752,35 @@
     "locationDenied": "कृपया लोकेशन एक्सेस की अनुमति दें",
     "micDeniedSettings": "माइक्रोफ़ोन अनुमति अस्वीकार। कृपया ब्राउज़र सेटिंग्स से सक्षम करें और पुनः प्रयास करें",
     "cameraDenied": "कैमरा एक्सेस नहीं हो सका"
+  },
+  "cex": {
+    "newReel": "नया रील",
+    "selectVideo": "वीडियो चुनें",
+    "captionPlaceholder": "विवरण जोड़ें...",
+    "fileTooLarge": "फ़ाइल बहुत बड़ी है (अधिकतम 100MB)",
+    "invalidFileType": "कृपया एक वीडियो चुनें",
+    "reelPublished": "रील सफलतापूर्वक प्रकाशित!",
+    "uploadError": "अपलोड त्रुटि",
+    "uploading": "अपलोड हो रहा है...",
+    "publish": "प्रकाशित करें",
+    "noReels": "अभी तक कोई रील नहीं",
+    "createFirst": "अपना पहला रील बनाएं"
+  },
+  "userProfile": {
+    "followers": "अनुयायी",
+    "following": "फॉलो कर रहे",
+    "posts": "पोस्ट",
+    "follow": "फॉलो करें",
+    "photos": "फोटो",
+    "reels": "रील्स",
+    "noPosts": "कोई पोस्ट नहीं",
+    "notFound": "उपयोगकर्ता नहीं मिला",
+    "addPhoto": "फोटो जोड़ें",
+    "addReel": "रील जोड़ें",
+    "newPhoto": "नई फोटो",
+    "selectImage": "एक चित्र चुनें",
+    "photoPublished": "फोटो प्रकाशित!",
+    "invalidImageType": "कृपया एक चित्र चुनें",
+    "fileTooLarge": "फ़ाइल बहुत बड़ी है"
   }
 }

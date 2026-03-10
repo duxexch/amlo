@@ -11,6 +11,7 @@ import userAuthRoutes from "./routes/userAuth";
 import uploadRoutes from "./routes/upload";
 import pushRoutes from "./routes/push";
 import storiesRoutes from "./routes/stories";
+import postsRoutes from "./routes/posts";
 import groupsRoutes from "./routes/groups";
 import paymentRoutes from "./routes/payments";
 import { createLogger } from "./logger";
@@ -60,6 +61,10 @@ export async function registerRoutes(
   // ── Stories (Moments) API ──
   v1.use("/social/stories", storiesRoutes);
   log("Stories routes registered at /api/v1/social/stories", "routes");
+
+  // ── Posts (Photos + Reels) API ──
+  v1.use("/social/posts", postsRoutes);
+  log("Posts routes registered at /api/v1/social/posts", "routes");
 
   // ── Group Chat API ──
   v1.use("/social/groups", groupsRoutes);

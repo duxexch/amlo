@@ -7,6 +7,7 @@ import {
   ChevronUp, ExternalLink, Copy, Plus, Trash2, AlertCircle, Radio,
   GripVertical, X, UserCheck, Video, Bell, MousePointerClick, Coins,
   Phone, Navigation, MapPin, Download, Link as LinkIcon, Info, Upload,
+  Film,
 } from "lucide-react";
 import { adminSettings, adminFeatured, adminAnnouncementPopup, adminPricing } from "@/lib/adminApi";
 import { worldAdminApi } from "@/lib/worldApi";
@@ -16,7 +17,7 @@ import { useTranslation } from "react-i18next";
 // TYPES
 // ══════════════════════════════════════════════════════════
 
-type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds" | "dailyMissions";
+type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds" | "dailyMissions" | "contentLimits";
 
 interface TabConfig {
   id: TabId;
@@ -2037,6 +2038,58 @@ function DailyMissionsTab({ data, onSave }: { data: any; onSave: (d: any) => Pro
 }
 
 // ══════════════════════════════════════════════════════════
+// TAB: CONTENT LIMITS — حدود المحتوى (ريلز + صور)
+// ══════════════════════════════════════════════════════════
+
+function ContentLimitsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+  const { t } = useTranslation();
+  const [form, setForm] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { if (data) setForm({ ...data }); }, [data]);
+
+  const update = (key: string, val: string) => setForm((f: any) => ({ ...f, [key]: parseInt(val) || 0 }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try { await onSave(form); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-5">
+      <SectionCard title={t("admin.settings.contentLimits.title", "حدود المحتوى اليومي")} icon={Film}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <InputField
+            label={t("admin.settings.contentLimits.maxDailyReels", "الحد الأقصى للريلز يومياً")}
+            value={String(form.maxDailyReels || 10)}
+            onChange={(v) => update("maxDailyReels", v)}
+            type="number"
+          />
+          <InputField
+            label={t("admin.settings.contentLimits.maxDailyPhotos", "الحد الأقصى للصور يومياً")}
+            value={String(form.maxDailyPhotos || 20)}
+            onChange={(v) => update("maxDailyPhotos", v)}
+            type="number"
+          />
+          <InputField
+            label={t("admin.settings.contentLimits.maxReelDuration", "حد مدة الريلز (ثانية)")}
+            value={String(form.maxReelDurationSec || 60)}
+            onChange={(v) => update("maxReelDurationSec", v)}
+            type="number"
+          />
+        </div>
+        <div className="flex justify-end pt-2">
+          <SaveButton saving={saving} saved={saved} onClick={handleSave} label={t("admin.settings.save", "حفظ")} />
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
 // MAIN SETTINGS PAGE
 // ══════════════════════════════════════════════════════════
 
@@ -2056,6 +2109,7 @@ const TABS: TabConfig[] = [
   { id: "appDownload", icon: Download, labelKey: "admin.settings.tabs.appDownload", fallbackLabel: "App Download" },
   { id: "notificationSounds", icon: Phone, labelKey: "admin.settings.tabs.notificationSounds", fallbackLabel: "النغمات" },
   { id: "dailyMissions", icon: Check, labelKey: "admin.settings.tabs.dailyMissions", fallbackLabel: "المهام اليومية" },
+  { id: "contentLimits", icon: Film, labelKey: "admin.settings.tabs.contentLimits", fallbackLabel: "حدود المحتوى" },
 ];
 
 export function SettingsPage() {
@@ -2067,12 +2121,17 @@ export function SettingsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [res, dailyRes] = await Promise.all([
+      const [res, dailyRes, contentLimitsRes] = await Promise.all([
         adminSettings.getAdvanced(),
         adminSettings.getDailyMissions(),
+        adminSettings.getContentLimits(),
       ]);
       if (res.success) {
-        setData({ ...res.data, dailyMissions: dailyRes.success ? dailyRes.data : null });
+        setData({
+          ...res.data,
+          dailyMissions: dailyRes.success ? dailyRes.data : null,
+          contentLimits: contentLimitsRes.success ? contentLimitsRes.data : null,
+        });
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -2090,6 +2149,7 @@ export function SettingsPage() {
   const handleSaveAppDownload = async (d: any) => { const res = await adminSettings.updateAppDownload(d); if (res.success) setData((prev: any) => ({ ...prev, appDownload: res.data })); };
   const handleSaveNotificationSounds = async (d: any) => { const res = await adminSettings.updateNotificationSounds(d); if (res.success) setData((prev: any) => ({ ...prev, notificationSounds: res.data })); };
   const handleSaveDailyMissions = async (d: any) => { const res = await adminSettings.updateDailyMissions(d); if (res.success) setData((prev: any) => ({ ...prev, dailyMissions: res.data })); };
+  const handleSaveContentLimits = async (d: any) => { const res = await adminSettings.updateContentLimits(d); if (res.success) setData((prev: any) => ({ ...prev, contentLimits: res.data })); };
 
   return (
     <div className="space-y-6">
@@ -2158,6 +2218,7 @@ export function SettingsPage() {
             {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} />}
             {activeTab === "notificationSounds" && <NotificationSoundsTab data={data?.notificationSounds} onSave={handleSaveNotificationSounds} />}
             {activeTab === "dailyMissions" && <DailyMissionsTab data={data?.dailyMissions} onSave={handleSaveDailyMissions} />}
+            {activeTab === "contentLimits" && <ContentLimitsTab data={data?.contentLimits} onSave={handleSaveContentLimits} />}
           </motion.div>
         </AnimatePresence>
       )}

@@ -41,6 +41,7 @@
     "adminPanel": "管理面板",
     "social": "社交",
     "download": "下载",
+    "cex": "CEX",
     "friends": "好友",
     "chat": "聊天"
   },
@@ -424,7 +425,8 @@
         "pricing": "金币定价",
         "milesPricing": "里程定价",
         "worldPricing": "全球定价",
-        "appDownload": "应用下载"
+        "appDownload": "应用下载",
+        "contentLimits": "内容限制"
       },
       "seo": {
         "metaTags": "Meta 标签",
@@ -1750,5 +1752,35 @@
     "locationDenied": "请允许访问位置信息",
     "micDeniedSettings": "麦克风权限被拒绝。请在浏览器设置中启用后重试",
     "cameraDenied": "无法访问摄像头"
+  },
+  "cex": {
+    "newReel": "新动态",
+    "selectVideo": "选择视频",
+    "captionPlaceholder": "添加描述...",
+    "fileTooLarge": "文件过大（最大100MB）",
+    "invalidFileType": "请选择视频",
+    "reelPublished": "动态已发布！",
+    "uploadError": "上传错误",
+    "uploading": "上传中...",
+    "publish": "发布",
+    "noReels": "暂无动态",
+    "createFirst": "创建你的第一个动态"
+  },
+  "userProfile": {
+    "followers": "粉丝",
+    "following": "关注",
+    "posts": "帖子",
+    "follow": "关注",
+    "photos": "照片",
+    "reels": "动态",
+    "noPosts": "暂无帖子",
+    "notFound": "用户未找到",
+    "addPhoto": "添加照片",
+    "addReel": "添加动态",
+    "newPhoto": "新照片",
+    "selectImage": "选择图片",
+    "photoPublished": "照片已发布！",
+    "invalidImageType": "请选择图片",
+    "fileTooLarge": "文件过大"
   }
 }

@@ -43,7 +43,8 @@
     "chat": "المحادثات",
     "adminPanel": "لوحة التحكم",
     "social": "تواصل",
-    "download": "تحميل"
+    "download": "تحميل",
+    "cex": "CEX"
   },
   "home": {
     "heroTitle": "عالم Ablox",
@@ -493,7 +494,8 @@
         "pricing": "تسعير المكالمات",
         "milesPricing": "تسعير الأميال",
         "worldPricing": "تسعير حول العالم",
-        "appDownload": "تحميل التطبيق"
+        "appDownload": "تحميل التطبيق",
+        "contentLimits": "حدود المحتوى"
       },
       "appDownload": {
         "sectionTitle": "إعدادات تحميل التطبيق",
@@ -1784,5 +1786,35 @@
     "locationDenied": "يرجى السماح بالوصول للموقع الجغرافي",
     "micDeniedSettings": "تم رفض إذن الميكروفون. يرجى تفعيله من إعدادات المتصفح ثم المحاولة مجدداً",
     "cameraDenied": "تعذر الوصول للكاميرا"
+  },
+  "cex": {
+    "newReel": "ريلز جديد",
+    "selectVideo": "اختر فيديو",
+    "captionPlaceholder": "أضف وصفاً...",
+    "fileTooLarge": "الملف كبير جداً (الحد 100MB)",
+    "invalidFileType": "يرجى اختيار فيديو",
+    "reelPublished": "تم نشر الريلز بنجاح!",
+    "uploadError": "خطأ في الرفع",
+    "uploading": "جاري الرفع...",
+    "publish": "نشر",
+    "noReels": "لا توجد ريلز بعد",
+    "createFirst": "أنشئ أول ريلز"
+  },
+  "userProfile": {
+    "followers": "المتابعون",
+    "following": "يتابع",
+    "posts": "المنشورات",
+    "follow": "متابعة",
+    "photos": "الصور",
+    "reels": "الريلز",
+    "noPosts": "لا توجد منشورات",
+    "notFound": "المستخدم غير موجود",
+    "addPhoto": "إضافة صورة",
+    "addReel": "إضافة ريلز",
+    "newPhoto": "صورة جديدة",
+    "selectImage": "اختر صورة",
+    "photoPublished": "تم نشر الصورة بنجاح!",
+    "invalidImageType": "يرجى اختيار صورة",
+    "fileTooLarge": "الملف كبير جداً"
   }
 }

@@ -2003,6 +2003,11 @@ const defaultAdvancedSettings: Record<string, any> = {
     admin: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
     system: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
   },
+  contentLimits: {
+    maxDailyReels: 10,
+    maxDailyPhotos: 20,
+    maxReelDurationSec: 60,
+  },
   dailyMissions: {
     enabled: true,
     missions: [
@@ -2121,6 +2126,29 @@ router.get("/settings/daily-missions", requireAdmin, async (_req, res) => {
     return res.json({ success: true, data: { enabled, missions } });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ في تحميل المهام اليومية" });
+  }
+});
+
+// ── Content Limits (reels & photos daily limits) ──
+router.get("/settings/content-limits", requireAdmin, async (_req, res) => {
+  try {
+    const cfg = await getAdvancedSettingsCategory("contentLimits");
+    return res.json({ success: true, data: cfg });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.put("/settings/content-limits", requireAdmin, async (req, res) => {
+  try {
+    const current = await getAdvancedSettingsCategory("contentLimits");
+    const allowed = ["maxDailyReels", "maxDailyPhotos", "maxReelDurationSec"];
+    for (const k of allowed) { if (req.body[k] !== undefined) current[k] = parseInt(req.body[k]) || current[k]; }
+    await storage.upsertSystemConfig("contentLimits", current, req.session.adminId);
+    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "content-limits", "Content limits updated");
+    return res.json({ success: true, data: current });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
 });
 

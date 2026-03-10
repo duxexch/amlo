@@ -41,6 +41,7 @@
     "adminPanel": "관리자 패널",
     "social": "소셜",
     "download": "다운로드",
+    "cex": "CEX",
     "friends": "친구",
     "chat": "채팅"
   },
@@ -424,7 +425,8 @@
         "pricing": "코인 가격",
         "milesPricing": "마일 가격",
         "worldPricing": "글로벌 가격",
-        "appDownload": "앱 다운로드"
+        "appDownload": "앱 다운로드",
+        "contentLimits": "콘텐츠 제한"
       },
       "seo": {
         "metaTags": "메타 태그",
@@ -1750,5 +1752,35 @@
     "locationDenied": "위치 접근을 허용해주세요",
     "micDeniedSettings": "마이크 권한이 거부되었습니다. 브라우저 설정에서 활성화한 후 다시 시도해주세요",
     "cameraDenied": "카메라에 접근할 수 없습니다"
+  },
+  "cex": {
+    "newReel": "새 릴",
+    "selectVideo": "동영상 선택",
+    "captionPlaceholder": "설명 추가...",
+    "fileTooLarge": "파일이 너무 큽니다 (최대 100MB)",
+    "invalidFileType": "동영상을 선택하세요",
+    "reelPublished": "릴이 게시되었습니다!",
+    "uploadError": "업로드 오류",
+    "uploading": "업로드 중...",
+    "publish": "게시",
+    "noReels": "아직 릴이 없습니다",
+    "createFirst": "첫 번째 릴을 만들어보세요"
+  },
+  "userProfile": {
+    "followers": "팔로워",
+    "following": "팔로잉",
+    "posts": "게시물",
+    "follow": "팔로우",
+    "photos": "사진",
+    "reels": "릴",
+    "noPosts": "게시물이 없습니다",
+    "notFound": "사용자를 찾을 수 없습니다",
+    "addPhoto": "사진 추가",
+    "addReel": "릴 추가",
+    "newPhoto": "새 사진",
+    "selectImage": "이미지 선택",
+    "photoPublished": "사진이 게시되었습니다!",
+    "invalidImageType": "이미지를 선택하세요",
+    "fileTooLarge": "파일이 너무 큽니다"
   }
 }

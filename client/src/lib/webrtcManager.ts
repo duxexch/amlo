@@ -7,8 +7,40 @@
  * - ICE candidate handling with TURN fallback
  * - Automatic quality degradation when bandwidth drops
  * - Reconnection on ICE failure
+ * - Cross-browser/device compatibility (adapter.js polyfill)
  */
 import { socketManager, type ConnectionQuality } from "./socketManager";
+
+// ── WebRTC adapter polyfill for cross-browser compatibility ──
+// Normalizes getUserMedia, RTCPeerConnection across Chrome, Firefox, Safari, Samsung Browser, WebView
+let adapterLoaded = false;
+async function ensureWebRTCAdapter(): Promise<void> {
+  if (adapterLoaded) return;
+  try {
+    // Polyfill navigator.mediaDevices for older devices
+    if (typeof navigator !== "undefined") {
+      if (!(navigator as any).mediaDevices) {
+        (navigator as any).mediaDevices = {} as MediaDevices;
+      }
+      if (!(navigator as any).mediaDevices.getUserMedia) {
+        (navigator as any).mediaDevices.getUserMedia = function (constraints: MediaStreamConstraints) {
+          const getUserMedia = (navigator as any).webkitGetUserMedia || (navigator as any).mozGetUserMedia;
+          if (!getUserMedia) {
+            return Promise.reject(new Error("getUserMedia غير مدعوم في هذا المتصفح"));
+          }
+          return new Promise((resolve, reject) => {
+            getUserMedia.call(navigator, constraints, resolve, reject);
+          });
+        };
+      }
+    }
+    adapterLoaded = true;
+  } catch {
+    adapterLoaded = true;
+  }
+}
+// Run on import
+ensureWebRTCAdapter();
 
 export type CallType = "voice" | "video";
 export type CallState = "idle" | "connecting" | "ringing" | "active" | "reconnecting" | "ended" | "failed";
@@ -265,41 +297,85 @@ class WebRTCManager {
   }
 
   /**
-   * Acquire local media stream
+   * Acquire local media stream — with progressive fallback for compatibility
+   * 1. Try full constraints (video+audio or audio)
+   * 2. If video fails → fallback to audio-only
+   * 3. If audio fails with constraints → try minimal audio { audio: true }
+   * 4. If getUserMedia not supported → throw clear error
    */
   private async acquireMedia(): Promise<void> {
+    await ensureWebRTCAdapter();
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("المتصفح لا يدعم المكالمات — يرجى استخدام Chrome أو Safari");
+    }
+
     const constraints = socketManager.getMediaConstraints(this.callType);
+
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.handlers.onLocalStream?.(this.localStream);
     } catch (err: any) {
       // If video fails, fall back to audio only
       if (this.callType === "video") {
-        console.warn("[WebRTC] Camera failed, falling back to audio-only");
+        console.warn("[WebRTC] Camera failed, falling back to audio-only:", err.message);
         this.callType = "voice";
-        const audioConstraints = socketManager.getMediaConstraints("voice");
-        this.localStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-        this.handlers.onLocalStream?.(this.localStream);
-        this.handlers.onError?.("الكاميرا غير متاحة — تم التحويل لمكالمة صوتية");
+        try {
+          const audioConstraints = socketManager.getMediaConstraints("voice");
+          this.localStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+          this.handlers.onLocalStream?.(this.localStream);
+          this.handlers.onError?.("الكاميرا غير متاحة — تم التحويل لمكالمة صوتية");
+        } catch (audioErr: any) {
+          // Minimal audio fallback for restrictive devices
+          console.warn("[WebRTC] Rich audio constraints failed, trying minimal:", audioErr.message);
+          try {
+            this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            this.handlers.onLocalStream?.(this.localStream);
+            this.handlers.onError?.("الكاميرا غير متاحة — تم التحويل لمكالمة صوتية");
+          } catch {
+            throw new Error("لا يمكن الوصول إلى الميكروفون — تأكد من الأذونات");
+          }
+        }
       } else {
-        throw err;
+        // Audio call failed — try minimal constraints
+        console.warn("[WebRTC] Audio constraints failed, trying minimal:", err.message);
+        try {
+          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          this.handlers.onLocalStream?.(this.localStream);
+        } catch {
+          throw new Error("لا يمكن الوصول إلى الميكروفون — تأكد من الأذونات");
+        }
       }
     }
   }
 
   /**
    * Create RTCPeerConnection with event handlers
+   * Includes TURN-only fallback for restrictive NATs/firewalls
    */
   private async createPeerConnection(): Promise<void> {
+    await ensureWebRTCAdapter();
+
+    if (typeof RTCPeerConnection === "undefined") {
+      throw new Error("المتصفح لا يدعم مكالمات WebRTC");
+    }
+
     // Fetch TURN credentials from server (with fallback)
     const iceServers = await getIceServers();
 
-    this.pc = new RTCPeerConnection({
+    const config: RTCConfiguration = {
       iceServers,
       iceCandidatePoolSize: 2,
       bundlePolicy: "max-bundle",
       rtcpMuxPolicy: "require",
-    });
+    };
+
+    // On mobile devices with restrictive NAT, force relay
+    if (this.reconnectAttempts > 0) {
+      config.iceTransportPolicy = "relay";
+    }
+
+    this.pc = new RTCPeerConnection(config);
 
     // ── ICE Candidates ──
     this.pc.onicecandidate = (event) => {

@@ -610,3 +610,25 @@ export const translateApi = {
       body: JSON.stringify({ text, targetLang, sourceLang }),
     }),
 };
+
+// ── Posts (Photos + Reels) — المنشورات ──
+export const postsApi = {
+  create: (data: { type: "photo" | "reel"; mediaUrl: string; thumbnailUrl?: string; caption?: string; duration?: number }) =>
+    request<any>("/posts", { method: "POST", body: JSON.stringify(data) }),
+  feed: (cursor?: string, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<{ data: any[]; nextCursor: string | null }>(`/posts/feed?${params}`) as any;
+  },
+  userPosts: (userId: string, type?: "photo" | "reel", cursor?: string, limit = 30) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (type) params.set("type", type);
+    if (cursor) params.set("cursor", cursor);
+    return request<{ user: any; posts: any[]; nextCursor: string | null }>(`/posts/user/${userId}?${params}`);
+  },
+  activeStories: () => request<any[]>("/posts/active-stories"),
+  get: (id: string) => request<any>(`/posts/${id}`),
+  delete: (id: string) => request(`/posts/${id}`, { method: "DELETE" }),
+  like: (id: string) => request<{ liked: boolean }>(`/posts/${id}/like`, { method: "POST" }),
+  view: (id: string) => request(`/posts/${id}/view`, { method: "POST" }),
+};

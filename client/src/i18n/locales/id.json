@@ -41,6 +41,7 @@
     "adminPanel": "Panel Admin",
     "social": "Sosial",
     "download": "Unduh",
+    "cex": "CEX",
     "friends": "Teman",
     "chat": "Obrolan"
   },
@@ -424,7 +425,8 @@
         "pricing": "Harga Koin",
         "milesPricing": "Harga Miles",
         "worldPricing": "Harga Global",
-        "appDownload": "Unduh Aplikasi"
+        "appDownload": "Unduh Aplikasi",
+        "contentLimits": "Batas Konten"
       },
       "seo": {
         "metaTags": "Meta Tag",
@@ -1750,5 +1752,35 @@
     "locationDenied": "Harap izinkan akses lokasi",
     "micDeniedSettings": "Izin mikrofon ditolak. Aktifkan melalui pengaturan browser lalu coba lagi",
     "cameraDenied": "Tidak dapat mengakses kamera"
+  },
+  "cex": {
+    "newReel": "Reel Baru",
+    "selectVideo": "Pilih video",
+    "captionPlaceholder": "Tambahkan deskripsi...",
+    "fileTooLarge": "File terlalu besar (maks 100MB)",
+    "invalidFileType": "Pilih video",
+    "reelPublished": "Reel berhasil dipublikasikan!",
+    "uploadError": "Gagal mengunggah",
+    "uploading": "Mengunggah...",
+    "publish": "Publikasikan",
+    "noReels": "Belum ada reel",
+    "createFirst": "Buat reel pertamamu"
+  },
+  "userProfile": {
+    "followers": "Pengikut",
+    "following": "Mengikuti",
+    "posts": "Postingan",
+    "follow": "Ikuti",
+    "photos": "Foto",
+    "reels": "Reels",
+    "noPosts": "Belum ada postingan",
+    "notFound": "Pengguna tidak ditemukan",
+    "addPhoto": "Tambah Foto",
+    "addReel": "Tambah Reel",
+    "newPhoto": "Foto Baru",
+    "selectImage": "Pilih gambar",
+    "photoPublished": "Foto dipublikasikan!",
+    "invalidImageType": "Pilih gambar",
+    "fileTooLarge": "File terlalu besar"
   }
 }

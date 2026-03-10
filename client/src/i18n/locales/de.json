@@ -41,6 +41,7 @@
     "adminPanel": "Adminbereich",
     "social": "Sozial",
     "download": "Herunterladen",
+    "cex": "CEX",
     "friends": "Freunde",
     "chat": "Chat"
   },
@@ -424,7 +425,8 @@
         "pricing": "Anrufpreise",
         "milesPricing": "Meilenpreise",
         "worldPricing": "Weltpreise",
-        "appDownload": "App-Download"
+        "appDownload": "App-Download",
+        "contentLimits": "Inhaltslimits"
       },
       "seo": {
         "metaTags": "Meta-Tags",
@@ -1742,5 +1744,35 @@
     "locationDenied": "Bitte erlauben Sie den Standortzugriff",
     "micDeniedSettings": "Mikrofonberechtigung verweigert. Bitte in den Browsereinstellungen aktivieren und erneut versuchen",
     "cameraDenied": "Kein Zugriff auf die Kamera"
+  },
+  "cex": {
+    "newReel": "Neues Reel",
+    "selectVideo": "Video auswählen",
+    "captionPlaceholder": "Beschreibung hinzufügen...",
+    "fileTooLarge": "Datei zu groß (max. 100MB)",
+    "invalidFileType": "Bitte wählen Sie ein Video",
+    "reelPublished": "Reel erfolgreich veröffentlicht!",
+    "uploadError": "Fehler beim Hochladen",
+    "uploading": "Wird hochgeladen...",
+    "publish": "Veröffentlichen",
+    "noReels": "Noch keine Reels",
+    "createFirst": "Erstelle dein erstes Reel"
+  },
+  "userProfile": {
+    "followers": "Follower",
+    "following": "Folgt",
+    "posts": "Beiträge",
+    "follow": "Folgen",
+    "photos": "Fotos",
+    "reels": "Reels",
+    "noPosts": "Noch keine Beiträge",
+    "notFound": "Benutzer nicht gefunden",
+    "addPhoto": "Foto hinzufügen",
+    "addReel": "Reel hinzufügen",
+    "newPhoto": "Neues Foto",
+    "selectImage": "Bild auswählen",
+    "photoPublished": "Foto veröffentlicht!",
+    "invalidImageType": "Bitte Bild auswählen",
+    "fileTooLarge": "Datei zu groß"
   }
 }

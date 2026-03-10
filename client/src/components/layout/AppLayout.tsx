@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, Wallet, Radio, User, MessageCircle, LogIn, Download } from "lucide-react";
+import { Home, Wallet, Radio, User, MessageCircle, LogIn, Download, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -47,6 +47,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { icon: Home, label: t("nav.home"), path: "/" },
     { icon: Radio, label: t("nav.liveStream"), path: "/live" },
+    { icon: Film, label: t("nav.cex"), path: "/cex" },
     { icon: MessageCircle, label: t("nav.social"), path: "/friends" },
     { icon: Wallet, label: t("nav.wallet"), path: "/wallet" },
     { icon: User, label: t("nav.profile"), path: "/profile" },

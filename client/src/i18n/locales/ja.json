@@ -41,6 +41,7 @@
     "adminPanel": "管理パネル",
     "social": "ソーシャル",
     "download": "ダウンロード",
+    "cex": "CEX",
     "friends": "友達",
     "chat": "チャット"
   },
@@ -424,7 +425,8 @@
         "pricing": "コイン価格設定",
         "milesPricing": "マイル価格設定",
         "worldPricing": "グローバル価格設定",
-        "appDownload": "アプリダウンロード"
+        "appDownload": "アプリダウンロード",
+        "contentLimits": "コンテンツ制限"
       },
       "seo": {
         "metaTags": "メタタグ",
@@ -1750,5 +1752,35 @@
     "locationDenied": "位置情報へのアクセスを許可してください",
     "micDeniedSettings": "マイクの許可が拒否されました。ブラウザの設定から有効にして再度お試しください",
     "cameraDenied": "カメラにアクセスできません"
+  },
+  "cex": {
+    "newReel": "新しいリール",
+    "selectVideo": "動画を選択",
+    "captionPlaceholder": "説明を追加...",
+    "fileTooLarge": "ファイルが大きすぎます（最大100MB）",
+    "invalidFileType": "動画を選択してください",
+    "reelPublished": "リールが公開されました！",
+    "uploadError": "アップロードエラー",
+    "uploading": "アップロード中...",
+    "publish": "公開",
+    "noReels": "まだリールはありません",
+    "createFirst": "最初のリールを作成"
+  },
+  "userProfile": {
+    "followers": "フォロワー",
+    "following": "フォロー中",
+    "posts": "投稿",
+    "follow": "フォローする",
+    "photos": "写真",
+    "reels": "リール",
+    "noPosts": "投稿はありません",
+    "notFound": "ユーザーが見つかりません",
+    "addPhoto": "写真を追加",
+    "addReel": "リールを追加",
+    "newPhoto": "新しい写真",
+    "selectImage": "画像を選択",
+    "photoPublished": "写真が公開されました！",
+    "invalidImageType": "画像を選択してください",
+    "fileTooLarge": "ファイルが大きすぎます"
   }
 }

@@ -43,7 +43,8 @@
     "chat": "Chat",
     "adminPanel": "Admin Panel",
     "social": "Social",
-    "download": "Download"
+    "download": "Download",
+    "cex": "CEX"
   },
   "home": {
     "heroTitle": "Ablox World",
@@ -493,7 +494,8 @@
         "pricing": "Call Pricing",
         "milesPricing": "Miles Pricing",
         "worldPricing": "World Pricing",
-        "appDownload": "App Download"
+        "appDownload": "App Download",
+        "contentLimits": "Content Limits"
       },
       "appDownload": {
         "sectionTitle": "App Download Settings",
@@ -1784,5 +1786,35 @@
     "locationDenied": "Please allow location access",
     "micDeniedSettings": "Microphone permission denied. Please enable it from browser settings and try again",
     "cameraDenied": "Could not access camera"
+  },
+  "cex": {
+    "newReel": "New Reel",
+    "selectVideo": "Select a video",
+    "captionPlaceholder": "Add a caption...",
+    "fileTooLarge": "File too large (max 100MB)",
+    "invalidFileType": "Please select a video",
+    "reelPublished": "Reel published successfully!",
+    "uploadError": "Upload error",
+    "uploading": "Uploading...",
+    "publish": "Publish",
+    "noReels": "No reels yet",
+    "createFirst": "Create your first reel"
+  },
+  "userProfile": {
+    "followers": "Followers",
+    "following": "Following",
+    "posts": "Posts",
+    "follow": "Follow",
+    "photos": "Photos",
+    "reels": "Reels",
+    "noPosts": "No posts yet",
+    "notFound": "User not found",
+    "addPhoto": "Add Photo",
+    "addReel": "Add Reel",
+    "newPhoto": "New Photo",
+    "selectImage": "Select an image",
+    "photoPublished": "Photo published!",
+    "invalidImageType": "Please select an image",
+    "fileTooLarge": "File too large"
   }
 }

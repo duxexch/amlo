@@ -1640,3 +1640,89 @@ export const sendGroupMessageSchema = z.object({
   mediaUrl: z.string().url().max(2048).optional(),
   giftId: z.string().max(100).optional(),
 });
+
+// ════════════════════════════════════════════════════════════
+// 41. USER_POSTS — منشورات المستخدمين (صور + ريلز)
+// ════════════════════════════════════════════════════════════
+export const userPosts = pgTable("user_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // photo | reel
+  mediaUrl: text("media_url").notNull(),
+  thumbnailUrl: text("thumbnail_url"), // for reels — first-frame poster
+  caption: text("caption"),
+  duration: integer("duration"), // reel duration in seconds
+  likeCount: integer("like_count").notNull().default(0),
+  viewCount: integer("view_count").notNull().default(0),
+  isStoryActive: boolean("is_story_active").notNull().default(false), // true during first 24h for reels
+  storyExpiresAt: timestamp("story_expires_at"), // when the 24h story period ends
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("user_posts_user_idx").on(table.userId),
+  index("user_posts_type_idx").on(table.type),
+  index("user_posts_story_active_idx").on(table.isStoryActive),
+  index("user_posts_story_expires_idx").on(table.storyExpiresAt),
+  index("user_posts_created_idx").on(table.createdAt),
+  index("user_posts_active_created_idx").on(table.isActive, table.createdAt),
+]);
+
+export type UserPost = typeof userPosts.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 42. USER_POST_LIKES — إعجابات المنشورات
+// ════════════════════════════════════════════════════════════
+export const userPostLikes = pgTable("user_post_likes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => userPosts.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("post_likes_post_idx").on(table.postId),
+  index("post_likes_user_idx").on(table.userId),
+  unique("uq_post_likes").on(table.postId, table.userId),
+]);
+
+export type UserPostLike = typeof userPostLikes.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 43. USER_POST_VIEWS — مشاهدات الريلز
+// ════════════════════════════════════════════════════════════
+export const userPostViews = pgTable("user_post_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => userPosts.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  viewedAt: timestamp("viewed_at").notNull().defaultNow(),
+}, (table) => [
+  index("post_views_post_idx").on(table.postId),
+  index("post_views_user_idx").on(table.userId),
+  unique("uq_post_views").on(table.postId, table.userId),
+]);
+
+export type UserPostView = typeof userPostViews.$inferSelect;
+
+// ── Posts Relations ──
+export const userPostsRelations = relations(userPosts, ({ one, many }) => ({
+  user: one(users, { fields: [userPosts.userId], references: [users.id] }),
+  likes: many(userPostLikes),
+  views: many(userPostViews),
+}));
+
+export const userPostLikesRelations = relations(userPostLikes, ({ one }) => ({
+  post: one(userPosts, { fields: [userPostLikes.postId], references: [userPosts.id] }),
+  user: one(users, { fields: [userPostLikes.userId], references: [users.id] }),
+}));
+
+export const userPostViewsRelations = relations(userPostViews, ({ one }) => ({
+  post: one(userPosts, { fields: [userPostViews.postId], references: [userPosts.id] }),
+  user: one(users, { fields: [userPostViews.userId], references: [users.id] }),
+}));
+
+// ── Posts Validation Schemas ──
+export const createPostSchema = z.object({
+  type: z.enum(["photo", "reel"]),
+  mediaUrl: z.string().max(2048),
+  thumbnailUrl: z.string().max(2048).optional(),
+  caption: z.string().max(500).optional(),
+  duration: z.number().int().positive().max(120).optional(),
+});

@@ -445,6 +445,9 @@ export const adminSettings = {
   updateNotificationSounds: (data: Record<string, any>) =>
     request("/settings/notification-sounds", { method: "PUT", body: JSON.stringify(data) }),
 
+  getContentLimits: () => request<{ maxDailyReels: number; maxDailyPhotos: number; maxReelDurationSec: number }>("/settings/content-limits"),
+  updateContentLimits: (data: Record<string, any>) =>
+    request("/settings/content-limits", { method: "PUT", body: JSON.stringify(data) }),
   getDailyMissions: () => request<{ enabled: boolean; missions: any[] }>("/settings/daily-missions"),
 
   updateDailyMissions: (data: { enabled?: boolean; missions: any[] }) =>

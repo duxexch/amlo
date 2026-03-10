@@ -41,6 +41,7 @@
     "adminPanel": "Panneau d'administration",
     "social": "Social",
     "download": "Télécharger",
+    "cex": "CEX",
     "friends": "Amis",
     "chat": "Chat"
   },
@@ -424,7 +425,8 @@
         "pricing": "Tarification des pièces",
         "milesPricing": "Tarification des Miles",
         "worldPricing": "Tarification mondiale",
-        "appDownload": "Téléchargement"
+        "appDownload": "Téléchargement",
+        "contentLimits": "Limites de contenu"
       },
       "seo": {
         "metaTags": "Balises Meta",
@@ -1750,5 +1752,35 @@
     "locationDenied": "Veuillez autoriser l'accès à la localisation",
     "micDeniedSettings": "Permission du microphone refusée. Veuillez l'activer dans les paramètres du navigateur et réessayer",
     "cameraDenied": "Impossible d'accéder à la caméra"
+  },
+  "cex": {
+    "newReel": "Nouveau Reel",
+    "selectVideo": "Sélectionner une vidéo",
+    "captionPlaceholder": "Ajouter une description...",
+    "fileTooLarge": "Fichier trop volumineux (max 100Mo)",
+    "invalidFileType": "Veuillez sélectionner une vidéo",
+    "reelPublished": "Reel publié avec succès !",
+    "uploadError": "Erreur de téléchargement",
+    "uploading": "Téléchargement...",
+    "publish": "Publier",
+    "noReels": "Pas encore de reels",
+    "createFirst": "Créez votre premier reel"
+  },
+  "userProfile": {
+    "followers": "Abonnés",
+    "following": "Abonnements",
+    "posts": "Publications",
+    "follow": "Suivre",
+    "photos": "Photos",
+    "reels": "Reels",
+    "noPosts": "Pas de publications",
+    "notFound": "Utilisateur introuvable",
+    "addPhoto": "Ajouter une photo",
+    "addReel": "Ajouter un reel",
+    "newPhoto": "Nouvelle photo",
+    "selectImage": "Sélectionner une image",
+    "photoPublished": "Photo publiée !",
+    "invalidImageType": "Veuillez sélectionner une image",
+    "fileTooLarge": "Fichier trop volumineux"
   }
 }

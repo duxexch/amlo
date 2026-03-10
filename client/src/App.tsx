@@ -40,6 +40,8 @@ const Friends = lazy(() => import("@/pages/Friends").then(m => ({ default: m.Fri
 const CallScreen = lazy(() => import("@/pages/CallScreen").then(m => ({ default: m.CallScreen })));
 const WorldExplore = lazy(() => import("@/pages/WorldExplore").then(m => ({ default: m.WorldExplore })));
 const LiveBroadcast = lazy(() => import("@/pages/LiveBroadcast").then(m => ({ default: m.LiveBroadcast })));
+const Cex = lazy(() => import("@/pages/Cex").then(m => ({ default: m.Cex })));
+const UserProfile = lazy(() => import("@/pages/UserProfile").then(m => ({ default: m.UserProfile })));
 
 // Admin Pages (separate chunk)
 const AdminProvider = lazy(() => import("@/pages/admin/AdminLayout").then(m => ({ default: m.AdminProvider })));
@@ -141,6 +143,8 @@ function UserRouter() {
           <Route path="/friends" component={Friends} />
           <Route path="/chat" component={Friends} />
           <Route path="/world" component={WorldExplore} />
+          <Route path="/cex" component={Cex} />
+          <Route path="/user/:id" component={UserProfile} />
           <Route path="/privacy" >{() => <Policy type="privacy" />}</Route>
           <Route path="/terms" >{() => <Policy type="terms" />}</Route>
           <Route component={NotFound} />

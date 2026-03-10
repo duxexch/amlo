@@ -41,6 +41,7 @@
     "adminPanel": "Yönetim Paneli",
     "social": "Sosyal",
     "download": "İndir",
+    "cex": "CEX",
     "friends": "Arkadaşlar",
     "chat": "Sohbet"
   },
@@ -424,7 +425,8 @@
         "pricing": "Jeton Fiyatlandırması",
         "milesPricing": "Mil Fiyatlandırması",
         "worldPricing": "Küresel Fiyatlandırma",
-        "appDownload": "Uygulama İndirme"
+        "appDownload": "Uygulama İndirme",
+        "contentLimits": "İçerik Sınırları"
       },
       "seo": {
         "metaTags": "Meta Etiketleri",
@@ -1750,5 +1752,35 @@
     "locationDenied": "Konum erişimine izin verin",
     "micDeniedSettings": "Mikrofon izni reddedildi. Lütfen tarayıcı ayarlarından etkinleştirin ve tekrar deneyin",
     "cameraDenied": "Kameraya erişilemedi"
+  },
+  "cex": {
+    "newReel": "Yeni Reel",
+    "selectVideo": "Video seçin",
+    "captionPlaceholder": "Açıklama ekle...",
+    "fileTooLarge": "Dosya çok büyük (maks. 100MB)",
+    "invalidFileType": "Lütfen bir video seçin",
+    "reelPublished": "Reel başarıyla yayınlandı!",
+    "uploadError": "Yükleme hatası",
+    "uploading": "Yükleniyor...",
+    "publish": "Yayınla",
+    "noReels": "Henüz reel yok",
+    "createFirst": "İlk reelini oluştur"
+  },
+  "userProfile": {
+    "followers": "Takipçiler",
+    "following": "Takip",
+    "posts": "Gönderiler",
+    "follow": "Takip Et",
+    "photos": "Fotoğraflar",
+    "reels": "Reels",
+    "noPosts": "Gönderi yok",
+    "notFound": "Kullanıcı bulunamadı",
+    "addPhoto": "Fotoğraf Ekle",
+    "addReel": "Reel Ekle",
+    "newPhoto": "Yeni Fotoğraf",
+    "selectImage": "Resim seçin",
+    "photoPublished": "Fotoğraf yayınlandı!",
+    "invalidImageType": "Lütfen bir resim seçin",
+    "fileTooLarge": "Dosya çok büyük"
   }
 }

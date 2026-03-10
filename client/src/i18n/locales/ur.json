@@ -41,6 +41,7 @@
     "adminPanel": "ایڈمن پینل",
     "social": "سوشل",
     "download": "ڈاؤن لوڈ",
+    "cex": "CEX",
     "friends": "دوست",
     "chat": "چیٹ"
   },
@@ -424,7 +425,8 @@
         "pricing": "سکوں کی قیمت",
         "milesPricing": "مائلز کی قیمت",
         "worldPricing": "عالمی قیمت",
-        "appDownload": "ایپ ڈاؤن لوڈ"
+        "appDownload": "ایپ ڈاؤن لوڈ",
+        "contentLimits": "مواد کی حدود"
       },
       "seo": {
         "metaTags": "میٹا ٹیگز",
@@ -1750,5 +1752,35 @@
     "locationDenied": "مقام تک رسائی کی اجازت دیں",
     "micDeniedSettings": "مائیکروفون کی اجازت مسترد ہوئی۔ براؤزر سیٹنگز سے فعال کریں اور دوبارہ کوشش کریں",
     "cameraDenied": "کیمرے تک رسائی نہیں ہو سکی"
+  },
+  "cex": {
+    "newReel": "نیا ریلز",
+    "selectVideo": "ویڈیو منتخب کریں",
+    "captionPlaceholder": "تفصیل شامل کریں...",
+    "fileTooLarge": "فائل بہت بڑی ہے (زیادہ سے زیادہ 100MB)",
+    "invalidFileType": "ویڈیو منتخب کریں",
+    "reelPublished": "ریلز کامیابی سے شائع ہوا!",
+    "uploadError": "اپلوڈ میں خرابی",
+    "uploading": "اپلوڈ ہو رہا ہے...",
+    "publish": "شائع کریں",
+    "noReels": "ابھی تک کوئی ریلز نہیں",
+    "createFirst": "اپنا پہلا ریلز بنائیں"
+  },
+  "userProfile": {
+    "followers": "فالوورز",
+    "following": "فالو کر رہے ہیں",
+    "posts": "پوسٹیں",
+    "follow": "فالو کریں",
+    "photos": "تصاویر",
+    "reels": "ریلز",
+    "noPosts": "کوئی پوسٹ نہیں",
+    "notFound": "صارف نہیں ملا",
+    "addPhoto": "تصویر شامل کریں",
+    "addReel": "ریلز شامل کریں",
+    "newPhoto": "نئی تصویر",
+    "selectImage": "تصویر منتخب کریں",
+    "photoPublished": "تصویر شائع ہو گئی!",
+    "invalidImageType": "تصویر منتخب کریں",
+    "fileTooLarge": "فائل بہت بڑی ہے"
   }
 }
