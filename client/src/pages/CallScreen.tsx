@@ -366,9 +366,9 @@ export function CallScreen() {
       if (status === "ringing") setStatus("connecting");
     };
 
-    const onCallRejected = (data: { callId: string }) => {
+    const onCallRejected = (data: { callId: string; reason?: string; message?: string }) => {
       if (data?.callId !== callId) return;
-      setErrorMsg(t("social.callRejected", "تم رفض المكالمة"));
+      setErrorMsg(data?.message || t("social.callRejected", "تم رفض المكالمة"));
       webrtcManager.endCall();
       setStatus("ended");
       setTimeout(() => navigate("/chat"), 1500);

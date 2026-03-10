@@ -1762,14 +1762,20 @@ router.post("/calls", async (req, res) => {
 
     const freeQuota = await reserveFreeCallQuota(userId, receiverOnline);
 
-    // Check coins (minimum 1 minute charge unless free call slot was reserved)
+    // Balance gate: do not block paying users with non-zero balance at call start.
+    // We settle exact charge on call end.
     const [caller] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-    const requiredCoins = freeQuota.applied ? 0 : coinRate;
-    if (!caller || caller.coins < requiredCoins) {
+    const hasSpendableBalance = Number(caller?.coins || 0) > 0;
+    if (!caller || (!freeQuota.applied && !hasSpendableBalance)) {
       if (freeQuota.applied) {
         await rollbackFreeCallQuota(freeQuota.counterKey);
       }
-      return res.status(402).json({ success: false, message: "رصيدك غير كافٍ للمكالمة", coinRate });
+      return res.status(402).json({
+        success: false,
+        message: "لا يمكن بدء المكالمة لأن رصيدك صفر",
+        code: "CALL_ZERO_BALANCE",
+        coinRate,
+      });
     }
 
     let call: any;
@@ -1892,6 +1898,34 @@ router.post("/calls/:id/answer", async (req, res) => {
 
     if (!call) return res.status(404).json({ success: false, message: "المكالمة غير موجودة" });
 
+    // Final gate on answer: if caller has zero balance and no free minutes for this call,
+    // reject with explicit reason to avoid hanging "connecting" states.
+    const freeMinutesCap = await readCallFreeMinutes(call.id);
+    const [caller] = await db.select({ coins: schema.users.coins }).from(schema.users)
+      .where(eq(schema.users.id, call.callerId)).limit(1);
+    if (freeMinutesCap <= 0 && Number(caller?.coins || 0) <= 0) {
+      await db.update(schema.calls)
+        .set({ status: "missed", endedAt: new Date() })
+        .where(and(eq(schema.calls.id, call.id), eq(schema.calls.status, "ringing")));
+
+      io.to(`user:${call.callerId}`).emit("call-rejected", {
+        callId: call.id,
+        reason: "caller_zero_balance",
+        message: "لا يمكن بدء المكالمة لأن رصيد المتصل صفر",
+      });
+      io.to(`user:${call.receiverId}`).emit("call-rejected", {
+        callId: call.id,
+        reason: "caller_zero_balance",
+        message: "تم إلغاء المكالمة بسبب رصيد المتصل",
+      });
+
+      return res.status(402).json({
+        success: false,
+        message: "لا يمكن قبول المكالمة لأن رصيد المتصل صفر",
+        code: "CALLER_ZERO_BALANCE",
+      });
+    }
+
     const [updated] = await db.update(schema.calls)
       .set({ status: "active", startedAt: new Date() })
       .where(eq(schema.calls.id, call.id))
@@ -1968,6 +2002,7 @@ router.post("/calls/:id/end", async (req, res) => {
 
     let durationSeconds = 0;
     let coinsCharged = 0;
+    let intendedCoinsCharge = 0;
     const payerUserId = call.callerId;
 
     let freeMinutesUsed = 0;
@@ -1978,7 +2013,13 @@ router.post("/calls/:id/end", async (req, res) => {
       const freeMinutesCap = await readCallFreeMinutes(call.id);
       freeMinutesUsed = Math.min(totalMinutes, Math.max(0, freeMinutesCap));
       const billableMinutes = Math.max(0, totalMinutes - freeMinutesUsed);
-      coinsCharged = billableMinutes * call.coinRate;
+      intendedCoinsCharge = billableMinutes * call.coinRate;
+
+      // Cap by available balance to prevent call-end failure while still deducting from wallet.
+      const [payer] = await db.select({ coins: schema.users.coins }).from(schema.users)
+        .where(eq(schema.users.id, payerUserId)).limit(1);
+      const availableCoins = Math.max(0, Number(payer?.coins || 0));
+      coinsCharged = Math.min(intendedCoinsCharge, availableCoins);
     }
 
     // Wrap status update + charge in a transaction for atomicity
@@ -1998,9 +2039,19 @@ router.post("/calls/:id/end", async (req, res) => {
 
       if (!ended) return null;
 
-      // Charge within same transaction — if charge fails, status update rolls back too
+      // Charge within same transaction after capping by current balance.
       if (coinsCharged > 0) {
-        await chargeCoins(payerUserId, coinsCharged, `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`, call.id, tx);
+        const charged = await chargeCoins(
+          payerUserId,
+          coinsCharged,
+          `مكالمة ${call.type === "video" ? "فيديو" : "صوتية"} (${Math.ceil(durationSeconds / 60)} دقيقة)`,
+          call.id,
+          tx,
+        );
+        if (!charged) {
+          coinsCharged = 0;
+          await tx.update(schema.calls).set({ coinsCharged: 0 }).where(eq(schema.calls.id, call.id));
+        }
       }
 
       return ended;
@@ -2012,7 +2063,16 @@ router.post("/calls/:id/end", async (req, res) => {
 
     await clearCallFreeMinutes(call.id);
 
-    socialLog.info({ callId: call.id, userId, payerUserId, durationSeconds, coinsCharged, freeMinutesUsed, type: call.type }, "Call ended");
+    socialLog.info({
+      callId: call.id,
+      userId,
+      payerUserId,
+      durationSeconds,
+      intendedCoinsCharge,
+      coinsCharged,
+      freeMinutesUsed,
+      type: call.type,
+    }, "Call ended");
 
     // Notify other party
     const otherId = call.callerId === userId ? call.receiverId : call.callerId;
