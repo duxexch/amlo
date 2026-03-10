@@ -1586,7 +1586,10 @@
     "freeCallApplied": "Free Call Applied",
     "profileVisibility": "Profile Visibility",
     "profile1": "Profile 1",
-    "profile2": "Profile 2"
+    "profile2": "Profile 2",
+    "reconnecting": "Reconnecting...",
+    "switchToVoice": "Switch to voice",
+    "weakConnection": "Weak connection — video quality reduced"
   },
   "world": {
     "title": "Around the World",

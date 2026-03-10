@@ -108,6 +108,7 @@ class WebRTCManager {
   private networkChangeHandler: (() => void) | null = null;
   private usingRelay = false;
   private lastPacketsReceived = 0;
+  private currentFacingMode: "user" | "environment" = "user";
 
   /**
    * Initialize a call (outgoing)
@@ -589,6 +590,42 @@ class WebRTCManager {
     if (!video) return true;
     video.enabled = !video.enabled;
     return !video.enabled; // returns isVideoOff
+  }
+
+  /**
+   * Switch between front and back camera
+   * Returns the new facingMode
+   */
+  async switchCamera(): Promise<"user" | "environment"> {
+    if (!this.localStream || !this.pc) return this.currentFacingMode;
+    const oldTrack = this.localStream.getVideoTracks()[0];
+    if (!oldTrack) return this.currentFacingMode;
+
+    const newFacing = this.currentFacingMode === "user" ? "environment" : "user";
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: newFacing } },
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      if (!newTrack) return this.currentFacingMode;
+
+      // Replace the track on the peer connection sender
+      const sender = this.pc.getSenders().find(s => s.track?.kind === "video");
+      if (sender) {
+        await sender.replaceTrack(newTrack);
+      }
+
+      // Replace track in local stream
+      this.localStream.removeTrack(oldTrack);
+      oldTrack.stop();
+      this.localStream.addTrack(newTrack);
+
+      this.currentFacingMode = newFacing;
+      this.handlers.onLocalStream?.(this.localStream);
+    } catch {
+      // Device may not have a back camera — silently fail
+    }
+    return this.currentFacingMode;
   }
 
   /**

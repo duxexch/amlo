@@ -1508,7 +1508,10 @@
     "freeCallApplied": "تماس رایگان اعمال شد",
     "profileVisibility": "نمایش پروفایل",
     "profile1": "پروفایل 1",
-    "profile2": "پروفایل 2"
+    "profile2": "پروفایل 2",
+    "reconnecting": "در حال اتصال مجدد...",
+    "switchToVoice": "تبدیل به صوتی",
+    "weakConnection": "اتصال ضعیف — کیفیت ویدیو کاهش یافت"
   },
   "world": {
     "title": "دور دنیا",

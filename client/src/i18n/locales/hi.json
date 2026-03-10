@@ -1516,7 +1516,10 @@
     "freeCallApplied": "मुफ्त कॉल लागू की गई",
     "profileVisibility": "प्रोफाइल दृश्यता",
     "profile1": "प्रोफाइल 1",
-    "profile2": "प्रोफाइल 2"
+    "profile2": "प्रोफाइल 2",
+    "reconnecting": "पुन: कनेक्ट हो रहा है...",
+    "switchToVoice": "वॉइस कॉल पर स्विच करें",
+    "weakConnection": "कमज़ोर कनेक्शन — वीडियो गुणवत्ता कम की गई"
   },
   "world": {
     "title": "दुनिया भर में",

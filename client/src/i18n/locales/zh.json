@@ -1516,7 +1516,10 @@
     "freeCallApplied": "已应用免费通话",
     "profileVisibility": "资料可见性",
     "profile1": "资料 1",
-    "profile2": "资料 2"
+    "profile2": "资料 2",
+    "reconnecting": "重新连接中...",
+    "switchToVoice": "切换为语音",
+    "weakConnection": "连接较弱 — 视频质量已自动降低"
   },
   "world": {
     "title": "环游世界",

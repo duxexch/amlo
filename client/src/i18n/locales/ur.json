@@ -1516,7 +1516,10 @@
     "freeCallApplied": "مفت کال لاگو کی گئی",
     "profileVisibility": "پروفائل کی نمائش",
     "profile1": "پروفائل 1",
-    "profile2": "پروفائل 2"
+    "profile2": "پروفائل 2",
+    "reconnecting": "دوبارہ جوڑ رہا ہے...",
+    "switchToVoice": "آواز پر تبدیل کریں",
+    "weakConnection": "کمزور کنکشن — ویڈیو کوالٹی کم کر دی گئی"
   },
   "world": {
     "title": "دنیا کے گرد",

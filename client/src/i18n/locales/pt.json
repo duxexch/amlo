@@ -1516,7 +1516,10 @@
     "freeCallApplied": "Chamada gratuita aplicada",
     "profileVisibility": "Visibilidade do perfil",
     "profile1": "Perfil 1",
-    "profile2": "Perfil 2"
+    "profile2": "Perfil 2",
+    "reconnecting": "Reconectando...",
+    "switchToVoice": "Mudar para voz",
+    "weakConnection": "Conexão fraca — qualidade de vídeo reduzida"
   },
   "world": {
     "title": "Ao redor do mundo",

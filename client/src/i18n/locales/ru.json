@@ -1516,7 +1516,10 @@
     "freeCallApplied": "Бесплатный звонок применён",
     "profileVisibility": "Видимость профиля",
     "profile1": "Профиль 1",
-    "profile2": "Профиль 2"
+    "profile2": "Профиль 2",
+    "reconnecting": "Переподключение...",
+    "switchToVoice": "Переключить на голос",
+    "weakConnection": "Слабое соединение — качество видео снижено"
   },
   "world": {
     "title": "Вокруг света",

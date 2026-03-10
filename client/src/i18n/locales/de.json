@@ -1508,7 +1508,10 @@
     "freeCallApplied": "Gratis-Anruf angewendet",
     "profileVisibility": "Profilsichtbarkeit",
     "profile1": "Profil 1",
-    "profile2": "Profil 2"
+    "profile2": "Profil 2",
+    "reconnecting": "Verbindung wird wiederhergestellt...",
+    "switchToVoice": "Zu Sprachanruf wechseln",
+    "weakConnection": "Schwache Verbindung — Videoqualität reduziert"
   },
   "world": {
     "title": "Rund um die Welt",

@@ -1516,7 +1516,10 @@
     "freeCallApplied": "Panggilan gratis diterapkan",
     "profileVisibility": "Visibilitas profil",
     "profile1": "Profil 1",
-    "profile2": "Profil 2"
+    "profile2": "Profil 2",
+    "reconnecting": "Menghubungkan ulang...",
+    "switchToVoice": "Beralih ke suara",
+    "weakConnection": "Koneksi lemah — kualitas video dikurangi"
   },
   "world": {
     "title": "Keliling Dunia",

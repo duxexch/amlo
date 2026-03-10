@@ -1586,7 +1586,10 @@
     "freeCallApplied": "تم تطبيق المكالمة المجانية",
     "profileVisibility": "ملف ظاهر",
     "profile1": "ملف 1",
-    "profile2": "ملف 2"
+    "profile2": "ملف 2",
+    "reconnecting": "إعادة الاتصال...",
+    "switchToVoice": "تحويل لصوتية",
+    "weakConnection": "الاتصال ضعيف — الفيديو مخفض تلقائياً"
   },
   "world": {
     "title": "حول العالم",

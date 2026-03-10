@@ -13,7 +13,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Phone, PhoneOff, Video, VideoOff, Mic, MicOff,
   Volume2, VolumeX, Coins, SkipForward,
-  WifiOff, Signal, SignalLow, SignalMedium, SignalHigh
+  WifiOff, Signal, SignalLow, SignalMedium, SignalHigh,
+  SwitchCamera
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { callsApi } from "@/lib/socialApi";
@@ -129,6 +130,8 @@ export function CallScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(callType === "video");
   const [isSpeaker, setIsSpeaker] = useState(false);
+  const [isFrontCamera, setIsFrontCamera] = useState(true);
+  const [currentCallType, setCurrentCallType] = useState(callType);
   const [callId, setCallId] = useState<string | null>(sessionId);
   const [pricing, setPricing] = useState<any>(null);
   const [callStats, setCallStats] = useState<CallStats | null>(null);
@@ -283,10 +286,6 @@ export function CallScreen() {
 
     return () => { socket.off("call-user-info", handleUserInfo); };
   }, [userId, isRandomMatch]);
-
-  const coinRate = callType === "video"
-    ? (pricing?.video_call_rate || 10)
-    : (pricing?.voice_call_rate || 5);
 
   useEffect(() => {
     callsApi.pricing().then(setPricing).catch(() => { });
@@ -505,69 +504,111 @@ export function CallScreen() {
 
   const toggleSpeaker = () => setIsSpeaker(!isSpeaker);
 
-  return (
-    <div className="fixed inset-0 z-50 bg-gradient-to-b from-[#0a0a1a] via-[#0d0d2b] to-[#0a0a1a] flex flex-col">
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full bg-primary/5 blur-[120px]" />
-        <div className="absolute bottom-1/4 left-1/3 w-64 h-64 rounded-full bg-violet-500/5 blur-[100px]" />
-      </div>
+  const handleSwitchCamera = async () => {
+    const facing = await webrtcManager.switchCamera();
+    setIsFrontCamera(facing === "user");
+  };
 
-      {/* Remote video background */}
-      {callType === "video" && status === "active" && (
+  const switchToVoice = () => {
+    // Disable video track and switch UI to voice mode
+    const off = webrtcManager.toggleVideo();
+    if (!off) webrtcManager.toggleVideo(); // ensure video is off
+    setIsVideoOn(false);
+    setCurrentCallType("voice");
+  };
+
+  const coinRate = currentCallType === "video"
+    ? (pricing?.video_call_rate || 10)
+    : (pricing?.voice_call_rate || 5);
+
+  const isVideoActive = currentCallType === "video" && isVideoOn && status === "active";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      {/* ── Full-screen remote video ── */}
+      {currentCallType === "video" && status === "active" && (
         <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover z-0" />
       )}
+
+      {/* ── Voice-only / pre-connect background ── */}
+      {!(currentCallType === "video" && status === "active") && (
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a1a] via-[#0d0d2b] to-[#0a0a1a]">
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full bg-primary/5 blur-[120px]" />
+        </div>
+      )}
+
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
-      {/* Top Bar */}
-      <div className="relative z-10 flex items-center justify-between p-4">
-        <button onClick={endCall} className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all backdrop-blur-sm">
-          <Phone className="w-5 h-5 text-white/60 rotate-[135deg]" />
-        </button>
+      {/* ── Top overlay: timer + quality + coins ── */}
+      <div className="relative z-10 flex items-center justify-between px-4 pt-3 pb-2 safe-area-top">
         <div className="flex items-center gap-2">
-          {callType === "video" ? <Video className="w-4 h-4 text-blue-400" /> : <Phone className="w-4 h-4 text-emerald-400" />}
-          <span className="text-white/60 text-sm font-bold">
-            {callType === "video" ? t("social.videoCall") : t("social.voiceCall")}
+          {currentCallType === "video" ? <Video className="w-4 h-4 text-blue-400" /> : <Phone className="w-4 h-4 text-emerald-400" />}
+          <span className="text-white/70 text-xs font-bold backdrop-blur-sm">
+            {currentCallType === "video" ? t("social.videoCall") : t("social.voiceCall")}
           </span>
         </div>
+
+        {status === "active" && (
+          <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md rounded-full px-3 py-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]" />
+            <span className="text-white text-sm font-mono font-bold">{formatDuration(duration)}</span>
+          </div>
+        )}
+
         <QualityBadge quality={connectionQuality} stats={callStats} />
       </div>
 
-      {/* Error toast */}
+      {/* Coins counter — active calls */}
+      {status === "active" && (
+        <div className="relative z-10 flex justify-center">
+          <CoinCounter rate={coinRate} duration={duration} freeMinutesCap={freeCallApplied ? freeMinutesCap : 0} />
+        </div>
+      )}
+
+      {/* ── Error toast ── */}
       <AnimatePresence>
         {errorMsg && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="relative z-10 mx-4 mb-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2 text-amber-400 text-xs text-center"
+            className="relative z-10 mx-4 mt-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2 text-amber-400 text-xs text-center backdrop-blur-sm"
           >
             {errorMsg}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Local video PIP */}
-      {callType === "video" && isVideoOn && (
+      {/* ── Local video PIP (small window) ── */}
+      {isVideoActive && (
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="absolute top-20 left-4 z-20 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl"
+          className="absolute top-20 right-4 z-20 w-[110px] h-[155px] rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl"
         >
-          <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
+          <video
+            ref={localVideoRef}
+            autoPlay playsInline muted
+            className="w-full h-full object-cover"
+            style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
+          />
         </motion.div>
       )}
 
-      {/* Main Content */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6">
-        {!(callType === "video" && status === "active" && isVideoOn) && (
-          <CallerAvatar user={otherUser || { displayName: "...", username: "..." }} />
+      {/* ── Center content (pre-connect / voice states) ── */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-4">
+        {/* Show avatar when not in active video */}
+        {!isVideoActive && (
+          <>
+            <CallerAvatar user={otherUser || { displayName: "...", username: "..." }} />
+            <div className="text-center">
+              <h2 className="text-white text-2xl font-black drop-shadow-lg">{otherUser?.displayName || "..."}</h2>
+              <p className="text-white/40 text-sm mt-1">@{otherUser?.username || "..."}</p>
+            </div>
+          </>
         )}
 
-        <div className="text-center">
-          <h2 className="text-white text-2xl font-black drop-shadow-lg">{otherUser?.displayName || "..."}</h2>
-          <p className="text-white/40 text-sm mt-1">@{otherUser?.username || "..."}</p>
-        </div>
-
+        {/* Status indicators */}
         <AnimatePresence mode="wait">
           <motion.div key={status} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="text-center">
             {status === "connecting" && (
@@ -585,17 +626,8 @@ export function CallScreen() {
             {status === "reconnecting" && (
               <p className="text-amber-400 text-sm flex items-center gap-2">
                 <motion.div className="w-2 h-2 rounded-full bg-amber-400" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 0.8, repeat: Infinity }} />
-                إعادة الاتصال...
+                {t("social.reconnecting", "إعادة الاتصال...")}
               </p>
-            )}
-            {status === "active" && (
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-                  <span className="text-2xl font-mono font-bold">{formatDuration(duration)}</span>
-                </div>
-                <CoinCounter rate={coinRate} duration={duration} freeMinutesCap={freeCallApplied ? freeMinutesCap : 0} />
-              </div>
             )}
             {(status === "ended" || status === "failed") && (
               <div className="text-center">
@@ -615,60 +647,78 @@ export function CallScreen() {
         </AnimatePresence>
       </div>
 
-      {/* Controls */}
+      {/* ── Controls — single horizontal row at bottom ── */}
       {status !== "ended" && status !== "failed" && (
-        <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="relative z-10 pb-12 pt-6">
-          <div className="flex items-center justify-center gap-5">
+        <motion.div
+          initial={{ y: 50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="relative z-10 pb-10 pt-4 safe-area-bottom"
+        >
+          <div className="flex items-center justify-center gap-3 px-4">
+            {/* Mute */}
             <button
               onClick={toggleMute}
-              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${isMuted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all backdrop-blur-md ${isMuted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/10 text-white/70 border border-white/10"
                 }`}
             >
-              {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+              {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
 
-            {callType === "video" && (
+            {/* Flip camera (video calls only) */}
+            {currentCallType === "video" && isVideoOn && (
               <button
-                onClick={toggleVideo}
-                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${!isVideoOn ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
-                  }`}
+                onClick={handleSwitchCamera}
+                className="w-12 h-12 rounded-full flex items-center justify-center bg-white/10 text-white/70 border border-white/10 backdrop-blur-md transition-all"
               >
-                {isVideoOn ? <Video className="w-6 h-6" /> : <VideoOff className="w-6 h-6" />}
+                <SwitchCamera className="w-5 h-5" />
               </button>
             )}
 
+            {/* Speaker */}
             <button
               onClick={toggleSpeaker}
-              className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all backdrop-blur-sm ${isSpeaker ? "bg-primary/20 text-primary border border-primary/30" : "bg-white/8 text-white/60 hover:bg-white/12 border border-white/5"
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all backdrop-blur-md ${isSpeaker ? "bg-primary/20 text-primary border border-primary/30" : "bg-white/10 text-white/70 border border-white/10"
                 }`}
             >
-              {isSpeaker ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
+              {isSpeaker ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
 
+            {/* Switch to voice (video calls only) */}
+            {currentCallType === "video" && (
+              <button
+                onClick={switchToVoice}
+                className="w-12 h-12 rounded-full flex items-center justify-center bg-white/10 text-white/70 border border-white/10 backdrop-blur-md transition-all"
+                title={t("social.switchToVoice", "تحويل لصوتية")}
+              >
+                <VideoOff className="w-5 h-5" />
+              </button>
+            )}
+
+            {/* End call */}
             <motion.button
               onClick={endCall}
               whileTap={{ scale: 0.9 }}
-              className="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center shadow-[0_0_30px_rgba(239,68,68,0.4)] hover:shadow-[0_0_40px_rgba(239,68,68,0.6)] transition-shadow"
+              className="w-14 h-14 rounded-full bg-red-500 text-white flex items-center justify-center shadow-[0_0_25px_rgba(239,68,68,0.4)] transition-shadow"
             >
-              <PhoneOff className="w-7 h-7" />
+              <PhoneOff className="w-6 h-6" />
             </motion.button>
 
-            {/* Next button for random matches */}
+            {/* Next (random matches only) */}
             {isRandomMatch && (
               <motion.button
                 onClick={handleNext}
                 whileTap={{ scale: 0.9 }}
-                className="w-14 h-14 rounded-2xl bg-primary/20 text-primary border border-primary/30 flex items-center justify-center hover:bg-primary/30 transition-all"
+                className="w-12 h-12 rounded-full bg-primary/20 text-primary border border-primary/30 flex items-center justify-center transition-all"
                 title={t("matching.nextPerson")}
               >
-                <SkipForward className="w-6 h-6" />
+                <SkipForward className="w-5 h-5" />
               </motion.button>
             )}
           </div>
 
-          {connectionQuality === "poor" && callType === "video" && (
+          {connectionQuality === "poor" && currentCallType === "video" && (
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-amber-400/60 text-[10px] mt-3">
-              ⚡ الاتصال ضعيف — الفيديو مخفض تلقائياً لتوفير البيانات
+              {t("social.weakConnection", "⚡ الاتصال ضعيف — الفيديو مخفض تلقائياً")}
             </motion.p>
           )}
         </motion.div>
@@ -676,8 +726,6 @@ export function CallScreen() {
     </div>
   );
 }
-
-// Incoming call popup component
 export function IncomingCallPopup({ caller, callType, onAccept, onReject }: {
   caller: { displayName: string; username: string; avatar?: string };
   callType: "voice" | "video";

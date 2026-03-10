@@ -1516,7 +1516,10 @@
     "freeCallApplied": "無料通話が適用されました",
     "profileVisibility": "プロフィールの表示",
     "profile1": "プロフィール 1",
-    "profile2": "プロフィール 2"
+    "profile2": "プロフィール 2",
+    "reconnecting": "再接続中...",
+    "switchToVoice": "音声通話に切替",
+    "weakConnection": "接続が弱い — 映像品質を自動調整中"
   },
   "world": {
     "title": "世界一周",

@@ -1516,7 +1516,10 @@
     "freeCallApplied": "무료 통화가 적용되었습니다",
     "profileVisibility": "프로필 공개",
     "profile1": "프로필 1",
-    "profile2": "프로필 2"
+    "profile2": "프로필 2",
+    "reconnecting": "재연결 중...",
+    "switchToVoice": "음성 통화로 전환",
+    "weakConnection": "연결 약함 — 영상 품질 자동 조정"
   },
   "world": {
     "title": "세계 일주",

@@ -1516,7 +1516,10 @@
     "freeCallApplied": "Ücretsiz arama uygulandı",
     "profileVisibility": "Profil görünürlüğü",
     "profile1": "Profil 1",
-    "profile2": "Profil 2"
+    "profile2": "Profil 2",
+    "reconnecting": "Yeniden bağlanıyor...",
+    "switchToVoice": "Sesli aramaya geç",
+    "weakConnection": "Zayıf bağlantı — video kalitesi düşürüldü"
   },
   "world": {
     "title": "Dünya Turu",
