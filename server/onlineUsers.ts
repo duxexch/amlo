@@ -157,7 +157,7 @@ export async function setLastSeen(userId: string): Promise<void> {
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.set(`${LAST_SEEN_PREFIX}${userId}`, Date.now().toString(), { EX: LAST_SEEN_TTL });
+      await redis.set(`${LAST_SEEN_PREFIX}${userId}`, Date.now().toString(), "EX", LAST_SEEN_TTL);
     } catch (err) {
       onlineLog.warn(`Redis setLastSeen failed for ${userId}: ${err}`);
     }
