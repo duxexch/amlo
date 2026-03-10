@@ -236,14 +236,23 @@ services:
     restart: unless-stopped
     network_mode: host
     command: >
-      /bin/sh -c "turnserver -c /etc/turnserver.conf
+      /bin/sh -c "TLS_ARGS='';
+      if [ -n \"$${TURN_TLS_CERT_FILE}\" ] && [ -n \"$${TURN_TLS_KEY_FILE}\" ] && [ -f \"$${TURN_TLS_CERT_FILE}\" ] && [ -f \"$${TURN_TLS_KEY_FILE}\" ]; then
+      TLS_ARGS=\"--cert=$${TURN_TLS_CERT_FILE} --pkey=$${TURN_TLS_KEY_FILE} --tls-listening-port=$${TURN_TLS_LISTEN_PORT}\";
+      fi;
+      turnserver -c /etc/turnserver.conf
       --static-auth-secret=$${TURN_SECRET}
-      $${TURN_EXTERNAL_IP:+--external-ip=$${TURN_EXTERNAL_IP}}"
+      $${TURN_EXTERNAL_IP:+--external-ip=$${TURN_EXTERNAL_IP}}
+      $${TLS_ARGS}"
     volumes:
       - ./config/turnserver.conf:/etc/turnserver.conf:ro
+      - ${TURN_CERTS_DIR:-./certs}:/etc/letsencrypt:ro
     environment:
       TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in .env}
       TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_TLS_CERT_FILE: ${TURN_TLS_CERT_FILE:-}
+      TURN_TLS_KEY_FILE: ${TURN_TLS_KEY_FILE:-}
+      TURN_TLS_LISTEN_PORT: ${TURN_TLS_LISTEN_PORT:-5349}
     healthcheck:
       test: ["CMD-SHELL", "pidof turnserver >/dev/null"]
       interval: 15s
