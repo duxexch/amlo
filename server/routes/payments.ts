@@ -636,6 +636,12 @@ router.get("/providers", async (req: Request, res: Response) => {
       },
     });
   } catch (err: any) {
+    log.error({
+      err,
+      userId,
+      query: req.query,
+      country: detectCountry(req),
+    }, "Payments providers endpoint failed");
     return res.status(500).json({ success: false, message: "تعذر تحميل مزودي الدفع" });
   }
 });

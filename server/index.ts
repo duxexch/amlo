@@ -1803,8 +1803,22 @@ app.use((req, res, next) => {
   process.on("SIGINT", () => shutdown("SIGINT"));
 
   // ── Unhandled rejection / uncaught exception safety nets ──
-  process.on("unhandledRejection", (reason) => {
-    serverLog.fatal({ reason: String(reason) }, "Unhandled Rejection");
+  process.on("unhandledRejection", (reason: unknown) => {
+    const structuredReason = (() => {
+      if (reason instanceof Error) {
+        return {
+          name: reason.name,
+          message: reason.message,
+          stack: reason.stack,
+        };
+      }
+      if (typeof reason === "object" && reason !== null) {
+        return reason;
+      }
+      return { value: String(reason) };
+    })();
+
+    serverLog.fatal({ reason: structuredReason }, "Unhandled Rejection");
   });
 
   process.on("uncaughtException", (err) => {

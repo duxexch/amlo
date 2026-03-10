@@ -224,10 +224,13 @@ const FREE_CALLS_PER_24H = 2;
 const FREE_CALL_MINUTES_PER_CALL = 4;
 const FREE_CALL_WINDOW_SECONDS = 24 * 60 * 60;
 const CALL_BALANCE_WARNING_LEAD_SECONDS = 60;
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+type CallTimerHandle = ReturnType<typeof setTimeout> | { cancel: () => void };
 
 const callBalanceTimers = new Map<string, {
-  warningTimer?: ReturnType<typeof setTimeout>;
-  cutoffTimer?: ReturnType<typeof setTimeout>;
+  warningTimer?: CallTimerHandle;
+  cutoffTimer?: CallTimerHandle;
 }>();
 
 type FreeCallQuota = {
@@ -244,9 +247,58 @@ function emitToUser(userId: string, event: string, payload: unknown) {
 function clearCallBalanceTimers(callId: string) {
   const t = callBalanceTimers.get(callId);
   if (!t) return;
-  if (t.warningTimer) clearTimeout(t.warningTimer);
-  if (t.cutoffTimer) clearTimeout(t.cutoffTimer);
+  const clearHandle = (handle?: CallTimerHandle) => {
+    if (!handle) return;
+    if (typeof handle === "object" && "cancel" in handle && typeof handle.cancel === "function") {
+      handle.cancel();
+      return;
+    }
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+  };
+  clearHandle(t.warningTimer);
+  clearHandle(t.cutoffTimer);
   callBalanceTimers.delete(callId);
+}
+
+function scheduleSafeTimeout(callback: () => void | Promise<void>, delayMs: number): CallTimerHandle {
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return setTimeout(() => {
+      void callback();
+    }, 0);
+  }
+
+  if (delayMs <= MAX_TIMEOUT_MS) {
+    return setTimeout(() => {
+      void callback();
+    }, Math.floor(delayMs));
+  }
+
+  let cancelled = false;
+  let remaining = Math.floor(delayMs);
+  let current: ReturnType<typeof setTimeout> | undefined;
+
+  const tick = () => {
+    if (cancelled) return;
+    if (remaining <= MAX_TIMEOUT_MS) {
+      current = setTimeout(() => {
+        if (cancelled) return;
+        void callback();
+      }, remaining);
+      return;
+    }
+
+    remaining -= MAX_TIMEOUT_MS;
+    current = setTimeout(tick, MAX_TIMEOUT_MS);
+  };
+
+  tick();
+
+  return {
+    cancel: () => {
+      cancelled = true;
+      if (current) clearTimeout(current);
+    },
+  };
 }
 
 async function finalizeCallEnd(params: {
@@ -262,11 +314,13 @@ async function finalizeCallEnd(params: {
       and(
         eq(schema.calls.id, params.callId),
         or(eq(schema.calls.callerId, params.actorUserId), eq(schema.calls.receiverId, params.actorUserId)),
-        or(eq(schema.calls.status, "active"), eq(schema.calls.status, "ringing")),
       )
     ).limit(1);
 
   if (!call) return { ok: false as const, status: 404, message: "المكالمة غير موجودة" };
+  if (call.status !== "active" && call.status !== "ringing") {
+    return { ok: true as const, alreadyEnded: true as const };
+  }
 
   const endedAt = new Date();
   let durationSeconds = 0;
@@ -2064,10 +2118,10 @@ router.post("/calls/:id/answer", async (req, res) => {
 
     clearCallBalanceTimers(call.id);
     if (Number.isFinite(totalBudgetSeconds) && totalBudgetSeconds > 0) {
-      const timers: { warningTimer?: ReturnType<typeof setTimeout>; cutoffTimer?: ReturnType<typeof setTimeout> } = {};
+      const timers: { warningTimer?: CallTimerHandle; cutoffTimer?: CallTimerHandle } = {};
 
       if (totalBudgetSeconds > CALL_BALANCE_WARNING_LEAD_SECONDS) {
-        timers.warningTimer = setTimeout(() => {
+        timers.warningTimer = scheduleSafeTimeout(() => {
           stabilityMetrics.callBalanceWarningsEmitted += 1;
           emitToUser(call.callerId, "call-balance-warning", {
             callId: call.id,
@@ -2077,7 +2131,7 @@ router.post("/calls/:id/answer", async (req, res) => {
         }, (totalBudgetSeconds - CALL_BALANCE_WARNING_LEAD_SECONDS) * 1000);
       }
 
-      timers.cutoffTimer = setTimeout(async () => {
+      timers.cutoffTimer = scheduleSafeTimeout(async () => {
         const result = await finalizeCallEnd({
           callId: call.id,
           actorUserId: call.callerId,
