@@ -10,12 +10,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { postsApi, followApi } from "@/lib/socialApi";
 import { startReelUpload, useReelUploadState } from "@/hooks/useReelUpload";
 import { authApi } from "@/lib/authApi";
+import { useReelCache } from "@/hooks/useReelCache";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 import {
     Heart, Eye, MessageCircle, Plus, Play, Volume2, VolumeX,
     Loader2, X, Upload, Camera, Bookmark, BookmarkCheck, UserPlus,
-    Globe, Lock, Send, Trash2, Film,
+    Globe, Lock, Send, Trash2, Film, Share2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -141,7 +142,7 @@ function CommentsPanel({
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 z-[90] bg-[#0c0c1d] rounded-t-3xl border-t border-white/10 max-h-[70vh] flex flex-col"
+            className="fixed bottom-0 left-0 right-0 z-[150] bg-[#0c0c1d] rounded-t-3xl border-t border-white/10 max-h-[70vh] flex flex-col"
             dir={dir}
             onClick={(e) => e.stopPropagation()}
         >
@@ -221,7 +222,9 @@ function ReelCard({
     onUserClick,
     onCommentClick,
     onFollow,
+    onShare,
     meId,
+    cachedUrl,
 }: {
     reel: any;
     isActive: boolean;
@@ -231,7 +234,9 @@ function ReelCard({
     onUserClick: (id: string) => void;
     onCommentClick: (id: string) => void;
     onFollow: (userId: string) => void;
+    onShare: (reel: any) => void;
     meId: string | null;
+    cachedUrl?: string | null;
 }) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [playing, setPlaying] = useState(false);
@@ -319,7 +324,7 @@ function ReelCard({
             style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none" } as any}>
             <video
                 ref={videoRef}
-                src={reel.mediaUrl}
+                src={cachedUrl || reel.mediaUrl}
                 poster={reel.thumbnailUrl || undefined}
                 className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                 loop muted={muted} playsInline preload="auto"
@@ -394,6 +399,10 @@ function ReelCard({
                     {saved
                         ? <BookmarkCheck className="w-6 h-6 text-yellow-400 fill-yellow-400" />
                         : <Bookmark className="w-6 h-6 text-white" />}
+                </button>
+
+                <button onClick={(e) => { e.stopPropagation(); onShare(reel); }} className="flex flex-col items-center gap-1">
+                    <Share2 className="w-6 h-6 text-white" />
                 </button>
 
                 <div className="flex flex-col items-center gap-1">
@@ -760,6 +769,21 @@ export function Cex() {
     const reels: any[] = Array.isArray(feedData) ? feedData : [];
     const hasMore = reels.length >= 20;
 
+    // ── Preload + 5-day cache ──
+    const { getCachedUrl, preloadAround } = useReelCache(reels);
+    const viewerCacheReels = viewerReels || [];
+    const { getCachedUrl: getViewerCachedUrl, preloadAround: preloadViewerAround } = useReelCache(viewerCacheReels);
+
+    // Preload around active reel in public feed
+    useEffect(() => {
+        if (activeTab === "public" && reels.length > 0) preloadAround(activeIndex);
+    }, [activeIndex, reels.length, activeTab, preloadAround]);
+
+    // Preload around active reel in viewer
+    useEffect(() => {
+        if (viewerReels && viewerReels.length > 0) preloadViewerAround(viewerIndex);
+    }, [viewerIndex, viewerReels?.length, preloadViewerAround]);
+
     useEffect(() => {
         if (activeTab !== "public") return;
         const container = containerRef.current;
@@ -804,6 +828,27 @@ export function Cex() {
     const handleFollow = useCallback((userId: string) => { followMut.mutate(userId); }, []);
     const handleUserClick = useCallback((userId: string) => { navigate(`/user/${userId}`); }, [navigate]);
     const handleCommentClick = useCallback((id: string) => { setCommentPostId(id); }, []);
+    const handleShare = useCallback(async (reel: any) => {
+        const url = `${window.location.origin}/reel/${reel.id}`;
+        const shareData = {
+            title: reel.caption || t("cex.shareReelTitle"),
+            text: reel.caption || t("cex.shareReelTitle"),
+            url,
+        };
+        try {
+            if (navigator.share) {
+                await navigator.share(shareData);
+            } else {
+                await navigator.clipboard.writeText(url);
+                toast.success(t("cex.linkCopied"));
+            }
+        } catch (err: any) {
+            if (err?.name !== "AbortError") {
+                await navigator.clipboard.writeText(url).catch(() => { });
+                toast.success(t("cex.linkCopied"));
+            }
+        }
+    }, [t]);
 
     if (banned) {
         return (
@@ -883,7 +928,9 @@ export function Cex() {
                                         onUserClick={handleUserClick}
                                         onCommentClick={handleCommentClick}
                                         onFollow={handleFollow}
+                                        onShare={handleShare}
                                         meId={meId}
+                                        cachedUrl={getCachedUrl(reel.mediaUrl)}
                                     />
                                 </div>
                             ))}
@@ -947,7 +994,9 @@ export function Cex() {
                                         onUserClick={handleUserClick}
                                         onCommentClick={handleCommentClick}
                                         onFollow={handleFollow}
+                                        onShare={handleShare}
                                         meId={meId}
+                                        cachedUrl={getViewerCachedUrl(reel.mediaUrl)}
                                     />
                                 </div>
                             ))}

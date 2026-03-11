@@ -1790,7 +1790,10 @@
     "madePrivate": "Reel agora é privado",
     "deleteReel": "Excluir Reel",
     "deleteReelConfirm": "Tem certeza de que deseja excluir este reel? Esta ação não pode ser desfeita.",
-    "reelDeleted": "Reel excluído com sucesso"
+    "reelDeleted": "Reel excluído com sucesso",
+    "shareReelTitle": "Assista a este reel no Ablox",
+    "linkCopied": "Link copiado!",
+    "reelNotFound": "Reel não encontrado"
   },
   "userProfile": {
     "followers": "Seguidores",

@@ -1790,7 +1790,10 @@
     "madePrivate": "Le reel est maintenant privé",
     "deleteReel": "Supprimer le reel",
     "deleteReelConfirm": "Êtes-vous sûr de vouloir supprimer ce reel ? Cette action est irréversible.",
-    "reelDeleted": "Reel supprimé avec succès"
+    "reelDeleted": "Reel supprimé avec succès",
+    "shareReelTitle": "Regarde ce reel sur Ablox",
+    "linkCopied": "Lien copié !",
+    "reelNotFound": "Reel introuvable"
   },
   "userProfile": {
     "followers": "Abonnés",

@@ -1790,7 +1790,10 @@
     "madePrivate": "रील अब निजी है",
     "deleteReel": "रील हटाएं",
     "deleteReelConfirm": "क्या आप वाकई इस रील को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
-    "reelDeleted": "रील सफलतापूर्वक हटाई गई"
+    "reelDeleted": "रील सफलतापूर्वक हटाई गई",
+    "shareReelTitle": "Ablox पर यह रील देखें",
+    "linkCopied": "लिंक कॉपी किया गया!",
+    "reelNotFound": "रील नहीं मिली"
   },
   "userProfile": {
     "followers": "अनुयायी",

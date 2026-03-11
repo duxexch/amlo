@@ -1790,7 +1790,10 @@
     "madePrivate": "릴이 비공개로 변경되었습니다",
     "deleteReel": "릴 삭제",
     "deleteReelConfirm": "이 릴을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-    "reelDeleted": "릴이 성공적으로 삭제되었습니다"
+    "reelDeleted": "릴이 성공적으로 삭제되었습니다",
+    "shareReelTitle": "Ablox에서 이 릴을 시청하세요",
+    "linkCopied": "링크가 복사되었습니다!",
+    "reelNotFound": "릴을 찾을 수 없습니다"
   },
   "userProfile": {
     "followers": "팔로워",

@@ -1790,7 +1790,10 @@
     "madePrivate": "Reel artık gizli",
     "deleteReel": "Reel'i Sil",
     "deleteReelConfirm": "Bu reel'i silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
-    "reelDeleted": "Reel başarıyla silindi"
+    "reelDeleted": "Reel başarıyla silindi",
+    "shareReelTitle": "Bu reeli Ablox'ta izle",
+    "linkCopied": "Bağlantı kopyalandı!",
+    "reelNotFound": "Reel bulunamadı"
   },
   "userProfile": {
     "followers": "Takipçiler",

@@ -1782,7 +1782,10 @@
     "madePrivate": "ریل اکنون خصوصی است",
     "deleteReel": "حذف ریل",
     "deleteReelConfirm": "آیا مطمئن هستید که می‌خواهید این ریل را حذف کنید؟ این عمل قابل بازگشت نیست.",
-    "reelDeleted": "ریل با موفقیت حذف شد"
+    "reelDeleted": "ریل با موفقیت حذف شد",
+    "shareReelTitle": "این ریل را در Ablox ببینید",
+    "linkCopied": "لینک کپی شد!",
+    "reelNotFound": "ریل یافت نشد"
   },
   "userProfile": {
     "followers": "دنبال‌کنندگان",

@@ -1790,7 +1790,10 @@
     "madePrivate": "Рилс теперь приватный",
     "deleteReel": "Удалить рилс",
     "deleteReelConfirm": "Вы уверены, что хотите удалить этот рилс? Это действие нельзя отменить.",
-    "reelDeleted": "Рилс успешно удалён"
+    "reelDeleted": "Рилс успешно удалён",
+    "shareReelTitle": "Смотрите этот рилс на Ablox",
+    "linkCopied": "Ссылка скопирована!",
+    "reelNotFound": "Рилс не найден"
   },
   "userProfile": {
     "followers": "Подписчики",

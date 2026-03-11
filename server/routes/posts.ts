@@ -180,7 +180,7 @@ router.get("/feed", async (req: Request, res: Response) => {
               ${savedClause}
        FROM user_posts p
        JOIN users u ON u.id = p.user_id
-       WHERE p.is_active = true AND p.type = 'reel' AND p.visibility = 'public'
+       WHERE p.is_active = true AND p.type = 'reel' AND COALESCE(p.visibility, 'public') = 'public'
        ORDER BY (
          (p.like_count * 3) +
          (p.view_count) +
@@ -491,7 +491,12 @@ router.get("/:id", async (req: Request, res: Response) => {
             idx++;
         }
         const result = await pool.query(
-            `SELECT p.*, u.username, u.display_name as "displayName", u.avatar,
+            `SELECT p.id, p.user_id as "userId", p.type, p.media_url as "mediaUrl",
+              p.thumbnail_url as "thumbnailUrl", p.caption, p.duration, p.visibility,
+              p.like_count as "likeCount", p.view_count as "viewCount",
+              p.comment_count as "commentCount", p.save_count as "saveCount",
+              p.is_story_active as "isStoryActive", p.created_at as "createdAt",
+              u.username, u.display_name as "displayName", u.avatar,
               u.country_code as "countryCode"
               ${likedClause}
               ${savedClause}
@@ -506,7 +511,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 
         // Private posts only visible to owner
         const post = result.rows[0];
-        if (post.visibility === "private" && post.user_id !== viewerId) {
+        if (post.visibility === "private" && post.userId !== viewerId) {
             return res.status(404).json({ success: false, message: "المنشور غير موجود" });
         }
 

@@ -1790,7 +1790,10 @@
     "madePrivate": "Reel sekarang privat",
     "deleteReel": "Hapus Reel",
     "deleteReelConfirm": "Apakah Anda yakin ingin menghapus reel ini? Tindakan ini tidak dapat dibatalkan.",
-    "reelDeleted": "Reel berhasil dihapus"
+    "reelDeleted": "Reel berhasil dihapus",
+    "shareReelTitle": "Tonton reel ini di Ablox",
+    "linkCopied": "Tautan disalin!",
+    "reelNotFound": "Reel tidak ditemukan"
   },
   "userProfile": {
     "followers": "Pengikut",

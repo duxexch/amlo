@@ -1790,7 +1790,10 @@
     "madePrivate": "短视频已设为私密",
     "deleteReel": "删除短视频",
     "deleteReelConfirm": "确定要删除这条短视频吗？此操作无法撤销。",
-    "reelDeleted": "短视频已成功删除"
+    "reelDeleted": "短视频已成功删除",
+    "shareReelTitle": "在Ablox上观看这个短视频",
+    "linkCopied": "链接已复制！",
+    "reelNotFound": "未找到短视频"
   },
   "userProfile": {
     "followers": "粉丝",

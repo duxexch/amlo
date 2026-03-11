@@ -1790,7 +1790,10 @@
     "madePrivate": "リールが非公開になりました",
     "deleteReel": "リールを削除",
     "deleteReelConfirm": "このリールを削除してもよろしいですか？この操作は元に戻せません。",
-    "reelDeleted": "リールが正常に削除されました"
+    "reelDeleted": "リールが正常に削除されました",
+    "shareReelTitle": "Abloxでこのリールを見る",
+    "linkCopied": "リンクをコピーしました！",
+    "reelNotFound": "リールが見つかりません"
   },
   "userProfile": {
     "followers": "フォロワー",

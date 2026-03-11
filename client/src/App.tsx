@@ -41,6 +41,7 @@ const CallScreen = lazy(() => import("@/pages/CallScreen").then(m => ({ default:
 const WorldExplore = lazy(() => import("@/pages/WorldExplore").then(m => ({ default: m.WorldExplore })));
 const LiveBroadcast = lazy(() => import("@/pages/LiveBroadcast").then(m => ({ default: m.LiveBroadcast })));
 const Cex = lazy(() => import("@/pages/Cex").then(m => ({ default: m.Cex })));
+const ReelView = lazy(() => import("@/pages/ReelView").then(m => ({ default: m.ReelView })));
 const UserProfile = lazy(() => import("@/pages/UserProfile").then(m => ({ default: m.UserProfile })));
 
 // Admin Pages (separate chunk)
@@ -144,6 +145,7 @@ function UserRouter() {
           <Route path="/chat" component={Friends} />
           <Route path="/world" component={WorldExplore} />
           <Route path="/cex" component={Cex} />
+          <Route path="/reel/:id" component={ReelView} />
           <Route path="/user/:id" component={UserProfile} />
           <Route path="/privacy" >{() => <Policy type="privacy" />}</Route>
           <Route path="/terms" >{() => <Policy type="terms" />}</Route>
