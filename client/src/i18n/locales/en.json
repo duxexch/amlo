@@ -1819,7 +1819,9 @@
     "screenshotBannedDesc": "You have been temporarily blocked from viewing reels due to repeated screenshot attempts. Please try again later.",
     "uploadingInBackground": "Uploading your reel in the background...",
     "uploadComplete": "Reel published!",
-    "uploadFailed": "Upload failed. Tap to dismiss"
+    "uploadFailed": "Upload failed. Tap to dismiss",
+    "madePublic": "Reel is now public",
+    "madePrivate": "Reel is now private"
   },
   "userProfile": {
     "followers": "Followers",

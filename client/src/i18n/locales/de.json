@@ -1777,7 +1777,9 @@
     "screenshotBannedDesc": "Du wurdest vorübergehend gesperrt, weil du wiederholt Screenshots gemacht hast. Bitte versuche es später erneut.",
     "uploadingInBackground": "Dein Reel wird im Hintergrund hochgeladen...",
     "uploadComplete": "Reel veröffentlicht!",
-    "uploadFailed": "Upload fehlgeschlagen. Tippe zum Schließen"
+    "uploadFailed": "Upload fehlgeschlagen. Tippe zum Schließen",
+    "madePublic": "Reel ist jetzt öffentlich",
+    "madePrivate": "Reel ist jetzt privat"
   },
   "userProfile": {
     "followers": "Follower",

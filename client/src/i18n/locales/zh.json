@@ -1785,7 +1785,9 @@
     "screenshotBannedDesc": "由于多次截图尝试，你已被临时封禁查看动态。请稍后再试。",
     "uploadingInBackground": "你的短视频正在后台上传...",
     "uploadComplete": "短视频已发布！",
-    "uploadFailed": "上传失败。点击关闭"
+    "uploadFailed": "上传失败。点击关闭",
+    "madePublic": "短视频已设为公开",
+    "madePrivate": "短视频已设为私密"
   },
   "userProfile": {
     "followers": "粉丝",

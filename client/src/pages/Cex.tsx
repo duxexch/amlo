@@ -514,13 +514,14 @@ function PrivateTab({ onCreateClick }: { onCreateClick: () => void }) {
     const { t, i18n } = useTranslation();
     const dir = i18n.dir();
     const [sub, setSub] = useState<"my" | "saved">("my");
+    const queryClient = useQueryClient();
 
     const { data: myData, isLoading: myLoading } = useQuery({
         queryKey: ["my-reels"],
         queryFn: () => postsApi.myReels(),
         staleTime: 60_000,
     });
-    const myReels = (myData as any)?.data || [];
+    const myReels: any[] = Array.isArray(myData) ? myData : [];
 
     const { data: savedData, isLoading: savedLoading } = useQuery({
         queryKey: ["saved-reels"],
@@ -528,7 +529,18 @@ function PrivateTab({ onCreateClick }: { onCreateClick: () => void }) {
         staleTime: 60_000,
         enabled: sub === "saved",
     });
-    const savedReels = (savedData as any)?.data || [];
+    const savedReels: any[] = Array.isArray(savedData) ? savedData : [];
+
+    const toggleVisMut = useMutation({
+        mutationFn: ({ id, visibility }: { id: string; visibility: "public" | "private" }) =>
+            postsApi.toggleVisibility(id, visibility),
+        onSuccess: (_data, { visibility }) => {
+            queryClient.invalidateQueries({ queryKey: ["my-reels"] });
+            queryClient.invalidateQueries({ queryKey: ["cex-feed"] });
+            toast.success(visibility === "public" ? t("cex.madePublic") : t("cex.madePrivate"));
+        },
+        onError: () => toast.error(t("cex.uploadError")),
+    });
 
     const items = sub === "my" ? myReels : savedReels;
     const loading = sub === "my" ? myLoading : savedLoading;
@@ -566,10 +578,20 @@ function PrivateTab({ onCreateClick }: { onCreateClick: () => void }) {
                             <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors flex items-center justify-center">
                                 <Play className="w-6 h-6 text-white/70" />
                             </div>
+                            {sub === "my" && (
+                                <button
+                                    onClick={() => toggleVisMut.mutate({ id: reel.id, visibility: reel.visibility === "public" ? "private" : "public" })}
+                                    className="absolute top-1.5 end-1.5 bg-black/60 rounded-full p-1.5 z-10"
+                                    disabled={toggleVisMut.isPending}
+                                >
+                                    {reel.visibility === "public"
+                                        ? <Globe className="w-3.5 h-3.5 text-primary" />
+                                        : <Lock className="w-3.5 h-3.5 text-orange-400" />}
+                                </button>
+                            )}
                             <div className="absolute bottom-1 left-1 right-1 flex items-center gap-1">
                                 <Eye className="w-3 h-3 text-white/70" />
                                 <span className="text-[10px] text-white/70 font-bold">{reel.viewCount || 0}</span>
-                                {reel.visibility === "private" && <Lock className="w-3 h-3 text-orange-400 ms-auto" />}
                             </div>
                         </div>
                     ))}
@@ -612,8 +634,8 @@ export function Cex() {
         staleTime: 0,
         enabled: activeTab === "public",
     });
-    const reels = (feedData as any)?.data || [];
-    const hasMore = (feedData as any)?.hasMore;
+    const reels: any[] = Array.isArray(feedData) ? feedData : [];
+    const hasMore = reels.length >= 20;
 
     useEffect(() => {
         if (activeTab !== "public") return;

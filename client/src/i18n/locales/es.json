@@ -1777,7 +1777,9 @@
     "screenshotBannedDesc": "Has sido bloqueado temporalmente por intentos repetidos de captura de pantalla. Inténtalo más tarde.",
     "uploadingInBackground": "Subiendo tu reel en segundo plano...",
     "uploadComplete": "¡Reel publicado!",
-    "uploadFailed": "Error al subir. Toca para cerrar"
+    "uploadFailed": "Error al subir. Toca para cerrar",
+    "madePublic": "El reel ahora es público",
+    "madePrivate": "El reel ahora es privado"
   },
   "userProfile": {
     "followers": "Seguidores",

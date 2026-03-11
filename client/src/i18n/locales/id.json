@@ -1785,7 +1785,9 @@
     "screenshotBannedDesc": "Kamu diblokir sementara karena percobaan screenshot berulang. Silakan coba lagi nanti.",
     "uploadingInBackground": "Reel kamu sedang diunggah di latar belakang...",
     "uploadComplete": "Reel dipublikasikan!",
-    "uploadFailed": "Gagal mengunggah. Ketuk untuk menutup"
+    "uploadFailed": "Gagal mengunggah. Ketuk untuk menutup",
+    "madePublic": "Reel sekarang publik",
+    "madePrivate": "Reel sekarang privat"
   },
   "userProfile": {
     "followers": "Pengikut",

@@ -782,4 +782,36 @@ router.delete("/comments/:commentId", async (req: Request, res: Response) => {
     }
 });
 
+// ── PATCH /:id/visibility — Toggle visibility (own posts only) ──
+router.patch("/:id/visibility", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
+
+    const pool = getPool();
+    if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+
+    try {
+        const visibility = req.body?.visibility;
+        if (visibility !== "public" && visibility !== "private") {
+            return res.status(400).json({ success: false, message: "القيمة غير صالحة" });
+        }
+
+        const result = await pool.query(
+            `UPDATE user_posts SET visibility = $1 WHERE id = $2 AND user_id = $3 AND is_active = true
+       RETURNING id, visibility`,
+            [visibility, req.params.id, userId],
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "المنشور غير موجود" });
+        }
+
+        postLog.info(`Post ${req.params.id} visibility changed to ${visibility} by ${userId}`);
+        return res.json({ success: true, data: result.rows[0] });
+    } catch (err: any) {
+        postLog.error(`Visibility toggle error: ${err.message}`);
+        return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+    }
+});
+
 export default router;

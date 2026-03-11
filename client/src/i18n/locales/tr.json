@@ -1785,7 +1785,9 @@
     "screenshotBannedDesc": "Tekrarlanan ekran görüntüsü denemeleri nedeniyle geçici olarak engellendiniz. Lütfen daha sonra tekrar deneyin.",
     "uploadingInBackground": "Reelin arka planda yükleniyor...",
     "uploadComplete": "Reel yayınlandı!",
-    "uploadFailed": "Yükleme başarısız. Kapatmak için dokun"
+    "uploadFailed": "Yükleme başarısız. Kapatmak için dokun",
+    "madePublic": "Reel artık herkese açık",
+    "madePrivate": "Reel artık gizli"
   },
   "userProfile": {
     "followers": "Takipçiler",
