@@ -1652,8 +1652,12 @@ export const userPosts = pgTable("user_posts", {
   thumbnailUrl: text("thumbnail_url"), // for reels — first-frame poster
   caption: text("caption"),
   duration: integer("duration"), // reel duration in seconds
+  visibility: text("visibility").notNull().default("public"), // public | private
   likeCount: integer("like_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
+  commentCount: integer("comment_count").notNull().default(0),
+  saveCount: integer("save_count").notNull().default(0),
+  totalWatchSec: integer("total_watch_sec").notNull().default(0), // cumulative watch seconds for scoring
   isStoryActive: boolean("is_story_active").notNull().default(false), // true during first 24h for reels
   storyExpiresAt: timestamp("story_expires_at"), // when the 24h story period ends
   isActive: boolean("is_active").notNull().default(true),
@@ -1661,6 +1665,7 @@ export const userPosts = pgTable("user_posts", {
 }, (table) => [
   index("user_posts_user_idx").on(table.userId),
   index("user_posts_type_idx").on(table.type),
+  index("user_posts_visibility_idx").on(table.visibility),
   index("user_posts_story_active_idx").on(table.isStoryActive),
   index("user_posts_story_expires_idx").on(table.storyExpiresAt),
   index("user_posts_created_idx").on(table.createdAt),
@@ -1701,11 +1706,64 @@ export const userPostViews = pgTable("user_post_views", {
 
 export type UserPostView = typeof userPostViews.$inferSelect;
 
+// ════════════════════════════════════════════════════════════
+// 44. USER_POST_COMMENTS — تعليقات المنشورات
+// ════════════════════════════════════════════════════════════
+export const userPostComments = pgTable("user_post_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => userPosts.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("post_comments_post_idx").on(table.postId),
+  index("post_comments_user_idx").on(table.userId),
+  index("post_comments_created_idx").on(table.createdAt),
+]);
+
+export type UserPostComment = typeof userPostComments.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 45. USER_POST_SAVES — حفظ المنشورات
+// ════════════════════════════════════════════════════════════
+export const userPostSaves = pgTable("user_post_saves", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => userPosts.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("post_saves_post_idx").on(table.postId),
+  index("post_saves_user_idx").on(table.userId),
+  unique("uq_post_saves").on(table.postId, table.userId),
+]);
+
+export type UserPostSave = typeof userPostSaves.$inferSelect;
+
+// ════════════════════════════════════════════════════════════
+// 46. SCREENSHOT_VIOLATIONS — انتهاكات لقطات الشاشة
+// ════════════════════════════════════════════════════════════
+export const screenshotViolations = pgTable("screenshot_violations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  count: integer("count").notNull().default(1),
+  bannedUntil: timestamp("banned_until"), // null = not currently banned
+  lastAttemptAt: timestamp("last_attempt_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("uq_screenshot_user").on(table.userId),
+  index("screenshot_violations_user_idx").on(table.userId),
+]);
+
+export type ScreenshotViolation = typeof screenshotViolations.$inferSelect;
+
 // ── Posts Relations ──
 export const userPostsRelations = relations(userPosts, ({ one, many }) => ({
   user: one(users, { fields: [userPosts.userId], references: [users.id] }),
   likes: many(userPostLikes),
   views: many(userPostViews),
+  comments: many(userPostComments),
+  saves: many(userPostSaves),
 }));
 
 export const userPostLikesRelations = relations(userPostLikes, ({ one }) => ({
@@ -1718,6 +1776,16 @@ export const userPostViewsRelations = relations(userPostViews, ({ one }) => ({
   user: one(users, { fields: [userPostViews.userId], references: [users.id] }),
 }));
 
+export const userPostCommentsRelations = relations(userPostComments, ({ one }) => ({
+  post: one(userPosts, { fields: [userPostComments.postId], references: [userPosts.id] }),
+  user: one(users, { fields: [userPostComments.userId], references: [users.id] }),
+}));
+
+export const userPostSavesRelations = relations(userPostSaves, ({ one }) => ({
+  post: one(userPosts, { fields: [userPostSaves.postId], references: [userPosts.id] }),
+  user: one(users, { fields: [userPostSaves.userId], references: [users.id] }),
+}));
+
 // ── Posts Validation Schemas ──
 export const createPostSchema = z.object({
   type: z.enum(["photo", "reel"]),
@@ -1725,4 +1793,9 @@ export const createPostSchema = z.object({
   thumbnailUrl: z.string().max(2048).optional(),
   caption: z.string().max(500).optional(),
   duration: z.number().int().positive().max(120).optional(),
+  visibility: z.enum(["public", "private"]).optional().default("public"),
+});
+
+export const createCommentSchema = z.object({
+  text: z.string().min(1).max(500),
 });

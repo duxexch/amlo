@@ -613,12 +613,21 @@ export const translateApi = {
 
 // ── Posts (Photos + Reels) — المنشورات ──
 export const postsApi = {
-  create: (data: { type: "photo" | "reel"; mediaUrl: string; thumbnailUrl?: string; caption?: string; duration?: number }) =>
+  create: (data: { type: "photo" | "reel"; mediaUrl: string; thumbnailUrl?: string; caption?: string; duration?: number; visibility?: "public" | "private" }) =>
     request<any>("/posts", { method: "POST", body: JSON.stringify(data) }),
-  feed: (cursor?: string, limit = 20) => {
+  feed: (offset = 0, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return request<{ data: any[]; hasMore: boolean }>(`/posts/feed?${params}`) as any;
+  },
+  myReels: (cursor?: string, limit = 30) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (cursor) params.set("cursor", cursor);
-    return request<{ data: any[]; nextCursor: string | null }>(`/posts/feed?${params}`) as any;
+    return request<{ data: any[]; nextCursor: string | null }>(`/posts/my?${params}`) as any;
+  },
+  savedReels: (cursor?: string, limit = 30) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<{ data: any[]; nextCursor: string | null }>(`/posts/saved?${params}`) as any;
   },
   userPosts: (userId: string, type?: "photo" | "reel", cursor?: string, limit = 30) => {
     const params = new URLSearchParams({ limit: String(limit) });
@@ -630,5 +639,19 @@ export const postsApi = {
   get: (id: string) => request<any>(`/posts/${id}`),
   delete: (id: string) => request(`/posts/${id}`, { method: "DELETE" }),
   like: (id: string) => request<{ liked: boolean }>(`/posts/${id}/like`, { method: "POST" }),
-  view: (id: string) => request(`/posts/${id}/view`, { method: "POST" }),
+  view: (id: string, watchSec = 0) => request(`/posts/${id}/view`, { method: "POST", body: JSON.stringify({ watchSec }) }),
+  save: (id: string) => request<{ saved: boolean }>(`/posts/${id}/save`, { method: "POST" }),
+  getComments: (id: string, cursor?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    return request<{ data: any[]; nextCursor: string | null }>(`/posts/${id}/comments?${params}`);
+  },
+  addComment: (id: string, text: string) =>
+    request<any>(`/posts/${id}/comments`, { method: "POST", body: JSON.stringify({ text }) }),
+  deleteComment: (commentId: string) =>
+    request(`/posts/comments/${commentId}`, { method: "DELETE" }),
+  reportScreenshot: () =>
+    request<{ banned: boolean; count: number; warning?: boolean; bannedUntil?: string }>("/posts/screenshot-violation", { method: "POST" }),
+  getScreenshotStatus: () =>
+    request<{ banned: boolean; count: number; bannedUntil?: string | null }>("/posts/screenshot-status"),
 };
