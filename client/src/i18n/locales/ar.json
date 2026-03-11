@@ -1828,7 +1828,8 @@
     "reelDeleted": "تم حذف الريلز بنجاح",
     "shareReelTitle": "شاهد هذا الريلز على Ablox",
     "linkCopied": "تم نسخ الرابط!",
-    "reelNotFound": "الريلز غير موجود"
+    "reelNotFound": "الريلز غير موجود",
+    "durationTooLong": "الحد الأقصى لمدة الريلز {{max}} ثانية"
   },
   "userProfile": {
     "followers": "المتابعون",

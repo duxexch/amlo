@@ -19,6 +19,7 @@ import rateLimit from "express-rate-limit";
 import { createLogger } from "../logger";
 import { getPool } from "../db";
 import { storage } from "../storage";
+import { uploadToBunnyAsync, deleteFromBunnyAsync } from "../services/bunnyCdn";
 
 const uploadLog = createLogger("upload");
 const router = Router();
@@ -337,7 +338,7 @@ const uploadAvatar = multer({
 
 const uploadMedia = multer({
   storage: mediaStorage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
   fileFilter: (_req, file, cb) => {
     if (ALL_MIMES.includes(file.mimetype)) cb(null, true);
     else cb(new Error("نوع الملف غير مدعوم"));
@@ -397,6 +398,9 @@ router.post("/avatar", uploadAvatar.single("file"), async (req, res) => {
   const url = `/uploads/avatars/${req.file.filename}`;
   uploadLog.info(`Avatar uploaded: ${req.file.filename} (${(req.file.size / 1024).toFixed(1)}KB) by user ${userId}`);
 
+  // ── Push to BunnyCDN in background ──
+  uploadToBunnyAsync(filePath, `uploads/avatars/${req.file.filename}`);
+
   // ── Delete old avatar file if it's a local upload ──
   if (userId) {
     try {
@@ -408,7 +412,8 @@ router.post("/avatar", uploadAvatar.single("file"), async (req, res) => {
           const oldPath = path.join(AVATAR_DIR, path.basename(oldAvatar));
           if (fs.existsSync(oldPath) && oldPath !== filePath) {
             fs.unlinkSync(oldPath);
-            uploadLog.info(`Old avatar deleted: ${path.basename(oldAvatar)} (user ${userId})`);
+            deleteFromBunnyAsync(`uploads/avatars/${path.basename(oldAvatar)}`);
+            uploadLog.info(`Old avatar deleted: ${path.basename(oldAvatar)} (user ${userId})`)
           }
         }
       }
@@ -444,6 +449,9 @@ router.post("/media", uploadMedia.single("file"), (req, res) => {
   const url = `/uploads/media/${req.file.filename}`;
   const mediaType = isVoice ? "voice" : (isVideo ? "video" : "image");
   uploadLog.info(`Media uploaded: ${req.file.filename} (${mediaType}, ${(req.file.size / 1024).toFixed(1)}KB) by user ${userId}`);
+
+  // Push to BunnyCDN in background
+  uploadToBunnyAsync(filePath, `uploads/media/${req.file.filename}`);
 
   return res.json({
     success: true,
@@ -594,6 +602,9 @@ router.post("/media/chunk/:uploadId/complete", uploadChunkLimiter, (req, res) =>
 
     cleanupUploadTempDir(userId, uploadId);
     uploadLog.info(`Resumable media completed: ${finalName} (${mediaType}, ${(stat.size / 1024).toFixed(1)}KB) by user ${userId}`);
+
+    // Push to BunnyCDN in background
+    uploadToBunnyAsync(finalPath, `uploads/media/${finalName}`);
 
     return res.json({
       success: true,

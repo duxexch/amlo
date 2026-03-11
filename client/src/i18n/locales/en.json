@@ -1828,7 +1828,8 @@
     "reelDeleted": "Reel deleted successfully",
     "shareReelTitle": "Watch this reel on Ablox",
     "linkCopied": "Link copied!",
-    "reelNotFound": "Reel not found"
+    "reelNotFound": "Reel not found",
+    "durationTooLong": "Maximum reel duration is {{max}} seconds"
   },
   "userProfile": {
     "followers": "Followers",

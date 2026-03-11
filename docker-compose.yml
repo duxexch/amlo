@@ -55,6 +55,10 @@ services:
       STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-https://mrco.live/wallet?status=cancelled}
       # ── CDN ──
       CDN_URL: ${CDN_URL:-}
+      # ── BunnyCDN Storage (optional) ──
+      BUNNY_STORAGE_API_KEY: ${BUNNY_STORAGE_API_KEY:-}
+      BUNNY_STORAGE_ZONE: ${BUNNY_STORAGE_ZONE:-}
+      BUNNY_STORAGE_REGION: ${BUNNY_STORAGE_REGION:-}
       # ── TWA / Android App ──
       TWA_SHA256_FINGERPRINT: ${TWA_SHA256_FINGERPRINT:-}
       PLAY_SHA256_FINGERPRINT: ${PLAY_SHA256_FINGERPRINT:-}

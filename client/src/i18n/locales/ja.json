@@ -1794,7 +1794,8 @@
     "reelDeleted": "リールが正常に削除されました",
     "shareReelTitle": "Abloxでこのリールを見る",
     "linkCopied": "リンクをコピーしました！",
-    "reelNotFound": "リールが見つかりません"
+    "reelNotFound": "リールが見つかりません",
+    "durationTooLong": "リールの最大長は{{max}}秒です"
   },
   "userProfile": {
     "followers": "フォロワー",

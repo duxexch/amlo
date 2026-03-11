@@ -1794,7 +1794,8 @@
     "reelDeleted": "Reel berhasil dihapus",
     "shareReelTitle": "Tonton reel ini di Ablox",
     "linkCopied": "Tautan disalin!",
-    "reelNotFound": "Reel tidak ditemukan"
+    "reelNotFound": "Reel tidak ditemukan",
+    "durationTooLong": "Durasi reel maksimal {{max}} detik"
   },
   "userProfile": {
     "followers": "Pengikut",

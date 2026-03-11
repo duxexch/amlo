@@ -1794,7 +1794,8 @@
     "reelDeleted": "Reel supprimé avec succès",
     "shareReelTitle": "Regarde ce reel sur Ablox",
     "linkCopied": "Lien copié !",
-    "reelNotFound": "Reel introuvable"
+    "reelNotFound": "Reel introuvable",
+    "durationTooLong": "La durée maximale du reel est de {{max}} secondes"
   },
   "userProfile": {
     "followers": "Abonnés",

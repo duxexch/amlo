@@ -1792,7 +1792,7 @@ export const createPostSchema = z.object({
   mediaUrl: z.string().max(2048),
   thumbnailUrl: z.string().max(2048).optional(),
   caption: z.string().max(500).optional(),
-  duration: z.number().int().positive().max(120).optional(),
+  duration: z.number().int().positive().max(3600).optional(),
   visibility: z.enum(["public", "private"]).optional().default("public"),
 });
 

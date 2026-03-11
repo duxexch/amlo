@@ -177,7 +177,11 @@ export async function uploadMedia(
       return await uploadMediaResumable(effectiveFile, onProgress, signal);
     } catch (err) {
       if (isAbortError(err)) throw err;
-      return uploadMediaSimple(file, filename, onProgress, signal);
+      // Only fall back to simple upload if the file is small enough for the server limit
+      if (effectiveFile.size <= 100 * 1024 * 1024) {
+        return uploadMediaSimple(file, filename, onProgress, signal);
+      }
+      throw err;
     }
   }
 
@@ -613,6 +617,8 @@ export const translateApi = {
 
 // ── Posts (Photos + Reels) — المنشورات ──
 export const postsApi = {
+  getLimits: () =>
+    request<{ maxDailyReels: number; maxDailyPhotos: number; maxReelDurationSec: number }>("/posts/limits"),
   create: (data: { type: "photo" | "reel"; mediaUrl: string; thumbnailUrl?: string; caption?: string; duration?: number; visibility?: "public" | "private" }) =>
     request<any>("/posts", { method: "POST", body: JSON.stringify(data) }),
   feed: (offset = 0, limit = 20) => {

@@ -1794,7 +1794,8 @@
     "reelDeleted": "릴이 성공적으로 삭제되었습니다",
     "shareReelTitle": "Ablox에서 이 릴을 시청하세요",
     "linkCopied": "링크가 복사되었습니다!",
-    "reelNotFound": "릴을 찾을 수 없습니다"
+    "reelNotFound": "릴을 찾을 수 없습니다",
+    "durationTooLong": "릴 최대 길이는 {{max}}초입니다"
   },
   "userProfile": {
     "followers": "팔로워",

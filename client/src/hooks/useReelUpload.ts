@@ -9,6 +9,7 @@
 import { useSyncExternalStore } from "react";
 import { uploadMedia, postsApi } from "@/lib/socialApi";
 import { useQueryClient } from "@tanstack/react-query";
+import i18n from "i18next";
 
 export interface ReelUploadJob {
     id: string;
@@ -61,13 +62,27 @@ export function startReelUpload(
                 v.src = URL.createObjectURL(file);
             });
 
-            // 2. Upload video (0→70%)
+            // 2. Pre-validate: check duration limit BEFORE uploading
+            if (duration > 0) {
+                let durationError: string | null = null;
+                try {
+                    const limits = await postsApi.getLimits();
+                    if (limits?.maxReelDurationSec && duration > limits.maxReelDurationSec) {
+                        durationError = i18n.t("cex.durationTooLong", { max: limits.maxReelDurationSec });
+                    }
+                } catch {
+                    // If limits endpoint fails, proceed and let server validate
+                }
+                if (durationError) throw new Error(durationError);
+            }
+
+            // 3. Upload video (0→70%)
             set({ phase: "uploading", progress: 2 });
             const mediaUrl = await uploadMedia(file, file.name, (p) => {
                 set({ progress: Math.round(p.percent * 0.7) });
             });
 
-            // 3. Thumbnail (70→85%)
+            // 4. Thumbnail (70→85%)
             set({ phase: "thumbnail", progress: 72 });
             let thumbnailUrl: string | undefined;
             try {
@@ -91,7 +106,7 @@ export function startReelUpload(
                 }
             } catch { /* thumbnail is optional */ }
 
-            // 4. Create post (85→100%)
+            // 5. Create post (85→100%)
             set({ phase: "publishing", progress: 88 });
             await postsApi.create({
                 type: "reel",

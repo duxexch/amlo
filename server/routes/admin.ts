@@ -40,11 +40,13 @@ import { getDb } from "../db";
 import { eq, asc, desc, count, sql, and, ne, gte, sum, inArray } from "drizzle-orm";
 import * as schema from "../../shared/schema";
 import { getAllPricing, invalidatePricingCache } from "../pricingService";
+import { invalidateResponseCache } from "../index";
 import { getQueueStats } from "../matchingEngine";
 import { paramStr } from "./socialHelpers";
 import { io } from "../index";
 import { getUserSocketId } from "../onlineUsers";
 import { decryptMessage } from "../utils/encryption";
+import { uploadToBunnyAsync } from "../services/bunnyCdn";
 
 const router = Router();
 
@@ -605,6 +607,7 @@ router.post("/gifts", requireAdmin, async (req, res) => {
     });
 
     await storage.addAdminLog(req.session.adminId!, "create_gift", "gift", gift.id, `Created gift: ${parsed.data.name}`);
+    invalidateResponseCache("/api/social/gifts");
 
     return res.status(201).json({ success: true, data: gift });
   } catch (err: any) {
@@ -623,6 +626,7 @@ router.patch("/gifts/:id", requireAdmin, async (req, res) => {
     if (!updated) return res.status(404).json({ success: false, message: "الهدية غير موجودة" });
 
     await storage.addAdminLog(req.session.adminId!, "update_gift", "gift", paramStr(req.params.id), JSON.stringify(req.body));
+    invalidateResponseCache("/api/social/gifts");
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
@@ -636,6 +640,7 @@ router.delete("/gifts/:id", requireAdmin, async (req, res) => {
     if (!deleted) return res.status(404).json({ success: false, message: "الهدية غير موجودة" });
 
     await storage.addAdminLog(req.session.adminId!, "delete_gift", "gift", paramStr(req.params.id), "Gift deleted");
+    invalidateResponseCache("/api/social/gifts");
 
     return res.json({ success: true, message: "تم حذف الهدية" });
   } catch (err: any) {
@@ -2345,6 +2350,7 @@ router.put("/settings/app-download", requireAdmin, async (req, res) => {
     }
     await storage.upsertSystemConfig("appDownload", current, req.session.adminId);
     await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "app-download", "App download settings updated");
+    invalidateResponseCache("/api/app-download");
     return res.json({ success: true, data: current });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -2394,6 +2400,9 @@ router.post("/settings/notification-sounds/upload", requireAdmin, uploadNotifica
       ? "video"
       : (mimetype === "audio/webm" || mimetype === "audio/ogg" ? "voice" : "audio");
     const url = `/uploads/media/${req.file.filename}`;
+
+    // Push to BunnyCDN in background
+    uploadToBunnyAsync(req.file.path, `media/${req.file.filename}`);
 
     await storage.addAdminLog(req.session.adminId!, "upload_notification_sound", "setting", req.file.filename, `${mimetype} (${req.file.size} bytes)`);
     return res.json({
@@ -2450,6 +2459,7 @@ router.post("/featured-streams", requireAdmin, async (req, res) => {
     });
 
     await storage.addAdminLog(req.session.adminId!, "create_featured_stream", "featured_stream", featured?.id || "", `Created featured stream`);
+    invalidateResponseCache("/api/featured-streams");
 
     return res.status(201).json({ success: true, data: featured });
   } catch (err: any) {
@@ -2467,6 +2477,7 @@ router.patch("/featured-streams/:id", requireAdmin, async (req, res) => {
 
     const updated = await storage.updateFeaturedStream(paramStr(req.params.id), updateData);
     if (!updated) return res.status(404).json({ success: false, message: "البث المميز غير موجود" });
+    invalidateResponseCache("/api/featured-streams");
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {
@@ -2477,6 +2488,7 @@ router.patch("/featured-streams/:id", requireAdmin, async (req, res) => {
 router.delete("/featured-streams/:id", requireAdmin, async (req, res) => {
   try {
     await storage.deleteFeaturedStream(paramStr(req.params.id));
+    invalidateResponseCache("/api/featured-streams");
     return res.json({ success: true, message: "تم إزالة البث المميز" });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -2490,6 +2502,7 @@ router.put("/featured-streams/reorder", requireAdmin, async (req, res) => {
 
     const orderedIds = order.sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((item: any) => item.id);
     await storage.reorderFeaturedStreams(orderedIds);
+    invalidateResponseCache("/api/featured-streams");
 
     return res.json({ success: true, message: "تم إعادة الترتيب" });
   } catch (err: any) {
@@ -2546,6 +2559,7 @@ router.put("/announcement-popup", requireAdmin, async (req, res) => {
     });
 
     await storage.addAdminLog(req.session.adminId!, "update_announcement_popup", "setting", "popup", JSON.stringify(req.body));
+    invalidateResponseCache("/api/announcement-popup");
 
     return res.json({ success: true, data: updated });
   } catch (err: any) {

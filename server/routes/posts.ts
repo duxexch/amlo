@@ -65,6 +65,19 @@ async function getDailyLimits(pool: any): Promise<{ maxDailyReels: number; maxDa
     return { maxDailyReels: 10, maxDailyPhotos: 20, maxReelDurationSec: 60 };
 }
 
+// ── Cached column existence check for total_watch_sec ──
+let _hasWatchSecColumn: boolean | null = null;
+async function checkHasWatchSec(pool: any): Promise<boolean> {
+    if (_hasWatchSecColumn !== null) return _hasWatchSecColumn;
+    try {
+        const colCheck = await pool.query(
+            `SELECT 1 FROM information_schema.columns WHERE table_name='user_posts' AND column_name='total_watch_sec' LIMIT 1`
+        );
+        _hasWatchSecColumn = colCheck.rows.length > 0;
+    } catch { _hasWatchSecColumn = false; }
+    return _hasWatchSecColumn;
+}
+
 // ── One-time backfill: set NULL visibility to 'public' ──
 let _visibilityBackfilled = false;
 async function backfillNullVisibility(pool: any) {
@@ -81,6 +94,14 @@ async function backfillNullVisibility(pool: any) {
         postLog.error(`Visibility backfill failed: ${err.message}`);
     }
 }
+
+// ── GET /limits — Return current upload limits (for client pre-validation) ──
+router.get("/limits", async (req: Request, res: Response) => {
+    const pool = getPool();
+    if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+    const limits = await getDailyLimits(pool);
+    return res.json({ success: true, data: limits });
+});
 
 // ── POST / — Create a post ──
 router.post("/", postCreateLimiter, async (req: Request, res: Response) => {
@@ -175,17 +196,8 @@ router.get("/feed", async (req: Request, res: Response) => {
             idx++;
         }
 
-        // Algorithm: score-based ordering with randomization within tiers
-        // - Newer posts get a recency bonus (decays over 48h)
-        // - Random factor shuffles posts of similar score on each request
-        // Check if total_watch_sec column exists (may not be pushed yet)
-        let hasWatchSec = true;
-        try {
-            const colCheck = await pool.query(
-                `SELECT 1 FROM information_schema.columns WHERE table_name='user_posts' AND column_name='total_watch_sec' LIMIT 1`
-            );
-            hasWatchSec = colCheck.rows.length > 0;
-        } catch { hasWatchSec = false; }
+        // Check if total_watch_sec column exists (cached after first check)
+        const hasWatchSec = await checkHasWatchSec(pool);
 
         const watchSecExpr = hasWatchSec ? "(COALESCE(p.total_watch_sec, 0)::float / 10)" : "0";
 
@@ -196,19 +208,19 @@ router.get("/feed", async (req: Request, res: Response) => {
               p.comment_count as "commentCount", p.save_count as "saveCount",
               p.is_story_active as "isStoryActive", p.created_at as "createdAt",
               u.username, u.display_name as "displayName", u.avatar,
-              u.country_code as "countryCode"
+              u.country as "countryCode"
               ${likedClause}
               ${savedClause}
        FROM user_posts p
        JOIN users u ON u.id = p.user_id
        WHERE p.is_active = true AND p.type = 'reel' AND COALESCE(p.visibility, 'public') = 'public'
+         AND u.is_banned = false
        ORDER BY (
          (p.like_count * 3) +
          (p.view_count) +
          ${watchSecExpr} +
          (p.comment_count * 2) +
          (GREATEST(0, 100 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 1728))
-         + (RANDOM() * 20)
        ) DESC
        LIMIT $1 OFFSET $2`,
             params,
@@ -446,11 +458,11 @@ router.get("/user/:id", async (req: Request, res: Response) => {
 
         const userResult = await pool.query(
             `SELECT u.id, u.username, u.display_name as "displayName", u.avatar, u.bio,
-              u.country_code as "countryCode", u.gender, u.created_at as "joinedAt",
+              u.country as "countryCode", u.gender, u.created_at as "joinedAt",
               EXISTS(SELECT 1 FROM user_posts up WHERE up.user_id = u.id AND up.type = 'reel'
                 AND up.is_story_active = true AND up.story_expires_at > NOW() AND up.is_active = true
               ) as "hasActiveStory"
-       FROM users u WHERE u.id = $1 AND u.is_active = true`,
+       FROM users u WHERE u.id = $1 AND u.is_banned = false`,
             [targetUserId],
         );
 
@@ -482,6 +494,7 @@ router.get("/active-stories", async (req: Request, res: Response) => {
        FROM user_posts p
        JOIN users u ON u.id = p.user_id
        WHERE p.is_story_active = true AND p.story_expires_at > NOW() AND p.is_active = true
+         AND u.is_banned = false
        ORDER BY u.username
        LIMIT 200`,
         );
@@ -518,11 +531,11 @@ router.get("/:id", async (req: Request, res: Response) => {
               p.comment_count as "commentCount", p.save_count as "saveCount",
               p.is_story_active as "isStoryActive", p.created_at as "createdAt",
               u.username, u.display_name as "displayName", u.avatar,
-              u.country_code as "countryCode"
+              u.country as "countryCode"
               ${likedClause}
               ${savedClause}
        FROM user_posts p JOIN users u ON u.id = p.user_id
-       WHERE p.id = $1 AND p.is_active = true`,
+       WHERE p.id = $1 AND p.is_active = true AND u.is_banned = false`,
             params,
         );
 
@@ -574,39 +587,48 @@ router.post("/:id/like", async (req: Request, res: Response) => {
 
     try {
         const postId = req.params.id;
-        const existingLike = await pool.query(
-            `SELECT id FROM user_post_likes WHERE post_id = $1 AND user_id = $2`,
+        // Atomic toggle: try DELETE first; if nothing deleted, INSERT
+        const deleteResult = await pool.query(
+            `WITH removed AS (
+                DELETE FROM user_post_likes WHERE post_id = $1 AND user_id = $2 RETURNING id
+            )
+            UPDATE user_posts SET like_count = GREATEST(like_count - 1, 0)
+            WHERE id = $1 AND (SELECT COUNT(*) FROM removed) > 0
+            RETURNING id`,
             [postId, userId],
         );
 
-        if (existingLike.rows.length > 0) {
-            await pool.query(`DELETE FROM user_post_likes WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
-            await pool.query(`UPDATE user_posts SET like_count = GREATEST(like_count - 1, 0) WHERE id = $1`, [postId]);
+        if (deleteResult.rows.length > 0) {
             return res.json({ success: true, liked: false });
-        } else {
-            await pool.query(
-                `INSERT INTO user_post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                [postId, userId],
-            );
-            await pool.query(`UPDATE user_posts SET like_count = like_count + 1 WHERE id = $1`, [postId]);
-
-            // Notify post owner
-            const postOwner = await pool.query(`SELECT user_id, caption FROM user_posts WHERE id = $1`, [postId]);
-            if (postOwner.rows.length > 0 && postOwner.rows[0].user_id !== userId) {
-                const actor = await pool.query(`SELECT display_name, username FROM users WHERE id = $1`, [userId]);
-                const actorName = actor.rows[0]?.display_name || actor.rows[0]?.username || "";
-                enqueueNotificationJob({
-                    userId: postOwner.rows[0].user_id,
-                    preferenceKey: "systemUpdates",
-                    kind: "friend" as any,
-                    actorName,
-                    bodyPreview: "❤️",
-                    url: `/cex`,
-                });
-            }
-
-            return res.json({ success: true, liked: true });
         }
+
+        // Not yet liked — insert and increment atomically
+        await pool.query(
+            `WITH inserted AS (
+                INSERT INTO user_post_likes (post_id, user_id) VALUES ($1, $2)
+                ON CONFLICT DO NOTHING RETURNING id
+            )
+            UPDATE user_posts SET like_count = like_count + 1
+            WHERE id = $1 AND (SELECT COUNT(*) FROM inserted) > 0`,
+            [postId, userId],
+        );
+
+        // Notify post owner
+        const postOwner = await pool.query(`SELECT user_id, caption FROM user_posts WHERE id = $1`, [postId]);
+        if (postOwner.rows.length > 0 && postOwner.rows[0].user_id !== userId) {
+            const actor = await pool.query(`SELECT display_name, username FROM users WHERE id = $1`, [userId]);
+            const actorName = actor.rows[0]?.display_name || actor.rows[0]?.username || "";
+            enqueueNotificationJob({
+                userId: postOwner.rows[0].user_id,
+                preferenceKey: "systemUpdates",
+                kind: "friend" as any,
+                actorName,
+                bodyPreview: "❤️",
+                url: `/cex`,
+            });
+        }
+
+        return res.json({ success: true, liked: true });
     } catch (err: any) {
         postLog.error(`Like error: ${err.message}`);
         return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -660,23 +682,33 @@ router.post("/:id/save", async (req: Request, res: Response) => {
 
     try {
         const postId = req.params.id;
-        const existing = await pool.query(
-            `SELECT id FROM user_post_saves WHERE post_id = $1 AND user_id = $2`,
+        // Atomic toggle: try DELETE first; if nothing deleted, INSERT
+        const deleteResult = await pool.query(
+            `WITH removed AS (
+                DELETE FROM user_post_saves WHERE post_id = $1 AND user_id = $2 RETURNING id
+            )
+            UPDATE user_posts SET save_count = GREATEST(save_count - 1, 0)
+            WHERE id = $1 AND (SELECT COUNT(*) FROM removed) > 0
+            RETURNING id`,
             [postId, userId],
         );
 
-        if (existing.rows.length > 0) {
-            await pool.query(`DELETE FROM user_post_saves WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
-            await pool.query(`UPDATE user_posts SET save_count = GREATEST(save_count - 1, 0) WHERE id = $1`, [postId]);
+        if (deleteResult.rows.length > 0) {
             return res.json({ success: true, saved: false });
-        } else {
-            await pool.query(
-                `INSERT INTO user_post_saves (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                [postId, userId],
-            );
-            await pool.query(`UPDATE user_posts SET save_count = save_count + 1 WHERE id = $1`, [postId]);
-            return res.json({ success: true, saved: true });
         }
+
+        // Not yet saved — insert and increment atomically
+        await pool.query(
+            `WITH inserted AS (
+                INSERT INTO user_post_saves (post_id, user_id) VALUES ($1, $2)
+                ON CONFLICT DO NOTHING RETURNING id
+            )
+            UPDATE user_posts SET save_count = save_count + 1
+            WHERE id = $1 AND (SELECT COUNT(*) FROM inserted) > 0`,
+            [postId, userId],
+        );
+
+        return res.json({ success: true, saved: true });
     } catch (err: any) {
         postLog.error(`Save error: ${err.message}`);
         return res.status(500).json({ success: false, message: "خطأ في الخادم" });

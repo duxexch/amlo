@@ -1794,7 +1794,8 @@
     "reelDeleted": "ریل کامیابی سے حذف ہو گئی",
     "shareReelTitle": "Ablox پر یہ ریل دیکھیں",
     "linkCopied": "لنک کاپی ہو گیا!",
-    "reelNotFound": "ریل نہیں ملی"
+    "reelNotFound": "ریل نہیں ملی",
+    "durationTooLong": "ریل کی زیادہ سے زیادہ مدت {{max}} سیکنڈ ہے"
   },
   "userProfile": {
     "followers": "فالوورز",

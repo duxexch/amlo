@@ -1794,7 +1794,8 @@
     "reelDeleted": "Reel başarıyla silindi",
     "shareReelTitle": "Bu reeli Ablox'ta izle",
     "linkCopied": "Bağlantı kopyalandı!",
-    "reelNotFound": "Reel bulunamadı"
+    "reelNotFound": "Reel bulunamadı",
+    "durationTooLong": "Maksimum reel süresi {{max}} saniyedir"
   },
   "userProfile": {
     "followers": "Takipçiler",

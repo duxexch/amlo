@@ -39,6 +39,12 @@ const envSchema = z.object({
   // ── Admin defaults ──
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
+
+  // ── BunnyCDN (optional — enables CDN storage) ──
+  BUNNY_STORAGE_API_KEY: z.string().optional(),
+  BUNNY_STORAGE_ZONE: z.string().optional(),
+  BUNNY_STORAGE_REGION: z.string().optional(),
+  CDN_URL: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

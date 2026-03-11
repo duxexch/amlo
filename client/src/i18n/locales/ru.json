@@ -1794,7 +1794,8 @@
     "reelDeleted": "Рилс успешно удалён",
     "shareReelTitle": "Смотрите этот рилс на Ablox",
     "linkCopied": "Ссылка скопирована!",
-    "reelNotFound": "Рилс не найден"
+    "reelNotFound": "Рилс не найден",
+    "durationTooLong": "Максимальная длительность рилса — {{max}} секунд"
   },
   "userProfile": {
     "followers": "Подписчики",
