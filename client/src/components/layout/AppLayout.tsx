@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { authApi } from "@/lib/authApi";
 import { useReelUploadState, dismissReelUpload } from "@/hooks/useReelUpload";
@@ -169,11 +169,29 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 // ═══════════════════════════════════════════════
-// ── Floating Reel Upload Indicator ──
+// ── Floating Reel Upload Indicator (Draggable) ──
 // ═══════════════════════════════════════════════
+const PILL_SIZE = 48;
+const CARD_W = 280;
+const CARD_H = 100;
+const EDGE_PAD = 8;
+
 function ReelUploadIndicator() {
   const job = useReelUploadState();
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
+  const pillRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Initialize position (bottom-right, above mobile nav)
+  useEffect(() => {
+    if (job && !pos) {
+      setPos({ x: window.innerWidth - PILL_SIZE - 16, y: window.innerHeight - 140 });
+    }
+    if (!job) { setPos(null); setExpanded(false); }
+  }, [job, pos]);
 
   // Auto-dismiss 3s after success
   useEffect(() => {
@@ -183,63 +201,161 @@ function ReelUploadIndicator() {
     }
   }, [job?.phase]);
 
-  if (!job) return null;
+  // Close expanded card on outside click
+  useEffect(() => {
+    if (!expanded) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (cardRef.current?.contains(target)) return;
+      if (pillRef.current?.contains(target)) return;
+      setExpanded(false);
+    };
+    document.addEventListener("mousedown", handler, true);
+    document.addEventListener("touchstart", handler, true);
+    return () => {
+      document.removeEventListener("mousedown", handler, true);
+      document.removeEventListener("touchstart", handler, true);
+    };
+  }, [expanded]);
+
+  // Clamp helper
+  const clamp = useCallback((x: number, y: number) => ({
+    x: Math.max(EDGE_PAD, Math.min(x, window.innerWidth - PILL_SIZE - EDGE_PAD)),
+    y: Math.max(EDGE_PAD, Math.min(y, window.innerHeight - PILL_SIZE - EDGE_PAD)),
+  }), []);
+
+  // Drag handlers (pointer events for unified touch+mouse)
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, originX: pos!.x, originY: pos!.y, moved: false };
+  }, [pos]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.moved = true;
+    setPos(clamp(dragRef.current.originX + dx, dragRef.current.originY + dy));
+    if (expanded) setExpanded(false);
+  }, [clamp, expanded]);
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const wasDrag = dragRef.current.moved;
+    dragRef.current = null;
+    // Snap to nearest horizontal edge
+    setPos((p) => {
+      if (!p) return p;
+      const mid = window.innerWidth / 2;
+      return { x: p.x + PILL_SIZE / 2 < mid ? EDGE_PAD : window.innerWidth - PILL_SIZE - EDGE_PAD, y: p.y };
+    });
+    if (!wasDrag) setExpanded((v) => !v);
+  }, []);
+
+  if (!job || !pos) return null;
 
   const isDone = job.phase === "done";
   const isError = job.phase === "error";
   const isActive = !isDone && !isError;
 
+  // Smart card placement: keep within viewport
+  const computeCardStyle = (): React.CSSProperties => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let cx = pos.x + PILL_SIZE / 2 - CARD_W / 2;
+    let cy = pos.y - CARD_H - 12;
+    // Horizontal clamp
+    if (cx < EDGE_PAD) cx = EDGE_PAD;
+    if (cx + CARD_W > vw - EDGE_PAD) cx = vw - CARD_W - EDGE_PAD;
+    // Vertical: if no room above, show below
+    if (cy < EDGE_PAD) cy = pos.y + PILL_SIZE + 12;
+    // If still out of bounds below, clamp
+    if (cy + CARD_H > vh - EDGE_PAD) cy = vh - CARD_H - EDGE_PAD;
+    return { position: "fixed" as const, left: cx, top: cy, width: CARD_W, zIndex: 201 };
+  };
+
+  // Progress ring (SVG)
+  const radius = 18;
+  const circ = 2 * Math.PI * radius;
+  const strokeOff = circ - (circ * (job.progress / 100));
+
   return (
-    <AnimatePresence>
-      <motion.div
-        key={job.id}
-        initial={{ y: 80, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 80, opacity: 0 }}
-        className="fixed bottom-24 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-80 z-[200]"
+    <>
+      {/* Draggable pill */}
+      <div
+        ref={pillRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        style={{ position: "fixed", left: pos.x, top: pos.y, width: PILL_SIZE, height: PILL_SIZE, zIndex: 200, touchAction: "none" }}
+        className="cursor-grab active:cursor-grabbing select-none"
       >
-        <div
-          className={cn(
-            "rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl flex items-center gap-3",
-            isDone && "bg-green-950/80 border-green-500/30",
-            isError && "bg-red-950/80 border-red-500/30 cursor-pointer",
-            isActive && "bg-[#0c0c1d]/90 border-white/10",
+        <div className={cn(
+          "w-full h-full rounded-full shadow-2xl flex items-center justify-center border-2 transition-colors",
+          isDone && "bg-green-950/90 border-green-500/50",
+          isError && "bg-red-950/90 border-red-500/50",
+          isActive && "bg-[#0c0c1d]/95 border-primary/50",
+        )}>
+          {isActive && (
+            <svg width={PILL_SIZE} height={PILL_SIZE} className="absolute">
+              <circle cx={PILL_SIZE / 2} cy={PILL_SIZE / 2} r={radius} fill="none" stroke="currentColor" strokeWidth={3}
+                className="text-white/10" />
+              <circle cx={PILL_SIZE / 2} cy={PILL_SIZE / 2} r={radius} fill="none" stroke="currentColor" strokeWidth={3}
+                strokeDasharray={circ} strokeDashoffset={strokeOff} strokeLinecap="round"
+                className="text-primary transition-all duration-300" style={{ transform: "rotate(-90deg)", transformOrigin: "center" }} />
+            </svg>
           )}
-          onClick={isError ? dismissReelUpload : isDone ? dismissReelUpload : undefined}
-        >
-          {/* Icon */}
-          {isActive && <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0" />}
-          {isDone && <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
-          {isError && <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />}
-
-          {/* Text + progress */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white truncate">
-              {isDone && t("cex.uploadComplete")}
-              {isError && t("cex.uploadFailed")}
-              {isActive && t("cex.uploadingInBackground")}
-            </p>
-            {isActive && (
-              <div className="mt-1.5 w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                <motion.div
-                  className="h-full bg-primary rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${job.progress}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Percentage / dismiss */}
-          {isActive && <span className="text-xs text-white/50 tabular-nums shrink-0">{job.progress}%</span>}
-          {(isDone || isError) && (
-            <button onClick={dismissReelUpload} className="text-white/40 hover:text-white shrink-0">
-              <Upload className="w-4 h-4 rotate-180" />
-            </button>
-          )}
+          {isActive && <Upload className="w-5 h-5 text-primary" />}
+          {isDone && <CheckCircle2 className="w-5 h-5 text-green-400" />}
+          {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
         </div>
-      </motion.div>
-    </AnimatePresence>
+      </div>
+
+      {/* Expanded card */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            ref={cardRef}
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ duration: 0.15 }}
+            style={computeCardStyle()}
+          >
+            <div className={cn(
+              "rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl flex items-center gap-3",
+              isDone && "bg-green-950/90 border-green-500/30",
+              isError && "bg-red-950/90 border-red-500/30",
+              isActive && "bg-[#0c0c1d]/95 border-white/10",
+            )}>
+              {isActive && <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0" />}
+              {isDone && <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
+              {isError && <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />}
+
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white truncate">
+                  {isDone && t("cex.uploadComplete")}
+                  {isError && t("cex.uploadFailed")}
+                  {isActive && t("cex.uploadingInBackground")}
+                </p>
+                {isActive && (
+                  <div className="mt-1.5 w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                    <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${job.progress}%` }} />
+                  </div>
+                )}
+              </div>
+
+              {isActive && <span className="text-xs text-white/50 tabular-nums shrink-0">{job.progress}%</span>}
+              {(isDone || isError) && (
+                <button onClick={() => { setExpanded(false); dismissReelUpload(); }} className="text-white/40 hover:text-white shrink-0">
+                  <Upload className="w-4 h-4 rotate-180" />
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
