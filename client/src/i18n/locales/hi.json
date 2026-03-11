@@ -1787,7 +1787,10 @@
     "uploadComplete": "रील प्रकाशित!",
     "uploadFailed": "अपलोड विफल। बंद करने के लिए टैप करें",
     "madePublic": "रील अब सार्वजनिक है",
-    "madePrivate": "रील अब निजी है"
+    "madePrivate": "रील अब निजी है",
+    "deleteReel": "रील हटाएं",
+    "deleteReelConfirm": "क्या आप वाकई इस रील को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
+    "reelDeleted": "रील सफलतापूर्वक हटाई गई"
   },
   "userProfile": {
     "followers": "अनुयायी",

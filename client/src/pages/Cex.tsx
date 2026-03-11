@@ -530,6 +530,7 @@ function PrivateTab({ onCreateClick, onReelClick }: { onCreateClick: () => void;
     const { t, i18n } = useTranslation();
     const dir = i18n.dir();
     const [sub, setSub] = useState<"my" | "saved">("my");
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
     const queryClient = useQueryClient();
 
     const { data: myData, isLoading: myLoading } = useQuery({
@@ -554,6 +555,17 @@ function PrivateTab({ onCreateClick, onReelClick }: { onCreateClick: () => void;
             queryClient.invalidateQueries({ queryKey: ["my-reels"] });
             queryClient.invalidateQueries({ queryKey: ["cex-feed"] });
             toast.success(visibility === "public" ? t("cex.madePublic") : t("cex.madePrivate"));
+        },
+        onError: () => toast.error(t("cex.uploadError")),
+    });
+
+    const deleteMut = useMutation({
+        mutationFn: (id: string) => postsApi.delete(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["my-reels"] });
+            queryClient.invalidateQueries({ queryKey: ["cex-feed"] });
+            toast.success(t("cex.reelDeleted"));
+            setDeleteTarget(null);
         },
         onError: () => toast.error(t("cex.uploadError")),
     });
@@ -596,15 +608,23 @@ function PrivateTab({ onCreateClick, onReelClick }: { onCreateClick: () => void;
                                 <Play className="w-6 h-6 text-white/70" />
                             </div>
                             {sub === "my" && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); toggleVisMut.mutate({ id: reel.id, visibility: reel.visibility === "public" ? "private" : "public" }); }}
-                                    className="absolute top-1.5 end-1.5 bg-black/60 rounded-full p-1.5 z-10"
-                                    disabled={toggleVisMut.isPending}
-                                >
-                                    {reel.visibility === "public"
-                                        ? <Globe className="w-3.5 h-3.5 text-primary" />
-                                        : <Lock className="w-3.5 h-3.5 text-orange-400" />}
-                                </button>
+                                <div className="absolute top-1.5 end-1.5 flex flex-col gap-1 z-10">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); toggleVisMut.mutate({ id: reel.id, visibility: reel.visibility === "public" ? "private" : "public" }); }}
+                                        className="bg-black/60 rounded-full p-1.5"
+                                        disabled={toggleVisMut.isPending}
+                                    >
+                                        {reel.visibility === "public"
+                                            ? <Globe className="w-3.5 h-3.5 text-primary" />
+                                            : <Lock className="w-3.5 h-3.5 text-orange-400" />}
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(reel.id); }}
+                                        className="bg-black/60 rounded-full p-1.5"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                    </button>
+                                </div>
                             )}
                             <div className="absolute bottom-1 left-1 right-1 flex items-center gap-1">
                                 <Eye className="w-3 h-3 text-white/70" />
@@ -614,6 +634,47 @@ function PrivateTab({ onCreateClick, onReelClick }: { onCreateClick: () => void;
                     ))}
                 </div>
             )}
+
+            {/* Delete Confirmation Dialog */}
+            <AnimatePresence>
+                {deleteTarget && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-6"
+                        onClick={() => setDeleteTarget(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-[#0c0c1d] rounded-2xl border border-white/10 p-6 w-full max-w-sm text-center"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <Trash2 className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                            <h3 className="text-white font-bold text-lg mb-2">{t("cex.deleteReel")}</h3>
+                            <p className="text-white/50 text-sm mb-6">{t("cex.deleteReelConfirm")}</p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setDeleteTarget(null)}
+                                    className="flex-1 py-3 rounded-xl bg-white/10 text-white font-bold text-sm"
+                                >
+                                    {t("common.cancel")}
+                                </button>
+                                <button
+                                    onClick={() => deleteMut.mutate(deleteTarget)}
+                                    disabled={deleteMut.isPending}
+                                    className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {deleteMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                    {t("cex.deleteReel")}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

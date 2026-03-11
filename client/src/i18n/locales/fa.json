@@ -1779,7 +1779,10 @@
     "uploadComplete": "ریل منتشر شد!",
     "uploadFailed": "آپلود ناموفق. برای بستن لمس کنید",
     "madePublic": "ریل اکنون عمومی است",
-    "madePrivate": "ریل اکنون خصوصی است"
+    "madePrivate": "ریل اکنون خصوصی است",
+    "deleteReel": "حذف ریل",
+    "deleteReelConfirm": "آیا مطمئن هستید که می‌خواهید این ریل را حذف کنید؟ این عمل قابل بازگشت نیست.",
+    "reelDeleted": "ریل با موفقیت حذف شد"
   },
   "userProfile": {
     "followers": "دنبال‌کنندگان",

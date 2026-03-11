@@ -1787,7 +1787,10 @@
     "uploadComplete": "릴이 게시되었습니다!",
     "uploadFailed": "업로드 실패. 탭하여 닫기",
     "madePublic": "릴이 공개로 변경되었습니다",
-    "madePrivate": "릴이 비공개로 변경되었습니다"
+    "madePrivate": "릴이 비공개로 변경되었습니다",
+    "deleteReel": "릴 삭제",
+    "deleteReelConfirm": "이 릴을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "reelDeleted": "릴이 성공적으로 삭제되었습니다"
   },
   "userProfile": {
     "followers": "팔로워",

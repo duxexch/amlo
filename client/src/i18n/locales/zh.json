@@ -1787,7 +1787,10 @@
     "uploadComplete": "短视频已发布！",
     "uploadFailed": "上传失败。点击关闭",
     "madePublic": "短视频已设为公开",
-    "madePrivate": "短视频已设为私密"
+    "madePrivate": "短视频已设为私密",
+    "deleteReel": "删除短视频",
+    "deleteReelConfirm": "确定要删除这条短视频吗？此操作无法撤销。",
+    "reelDeleted": "短视频已成功删除"
   },
   "userProfile": {
     "followers": "粉丝",

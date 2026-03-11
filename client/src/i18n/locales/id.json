@@ -1787,7 +1787,10 @@
     "uploadComplete": "Reel dipublikasikan!",
     "uploadFailed": "Gagal mengunggah. Ketuk untuk menutup",
     "madePublic": "Reel sekarang publik",
-    "madePrivate": "Reel sekarang privat"
+    "madePrivate": "Reel sekarang privat",
+    "deleteReel": "Hapus Reel",
+    "deleteReelConfirm": "Apakah Anda yakin ingin menghapus reel ini? Tindakan ini tidak dapat dibatalkan.",
+    "reelDeleted": "Reel berhasil dihapus"
   },
   "userProfile": {
     "followers": "Pengikut",

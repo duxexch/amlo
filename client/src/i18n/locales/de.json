@@ -1779,7 +1779,10 @@
     "uploadComplete": "Reel veröffentlicht!",
     "uploadFailed": "Upload fehlgeschlagen. Tippe zum Schließen",
     "madePublic": "Reel ist jetzt öffentlich",
-    "madePrivate": "Reel ist jetzt privat"
+    "madePrivate": "Reel ist jetzt privat",
+    "deleteReel": "Reel löschen",
+    "deleteReelConfirm": "Bist du sicher, dass du dieses Reel löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "reelDeleted": "Reel erfolgreich gelöscht"
   },
   "userProfile": {
     "followers": "Follower",

@@ -1787,7 +1787,10 @@
     "uploadComplete": "ریل شائع ہو گئی!",
     "uploadFailed": "اپلوڈ ناکام۔ بند کرنے کے لیے تھپتھپائیں",
     "madePublic": "ریل اب عوامی ہے",
-    "madePrivate": "ریل اب نجی ہے"
+    "madePrivate": "ریل اب نجی ہے",
+    "deleteReel": "ریل حذف کریں",
+    "deleteReelConfirm": "کیا آپ واقعی اس ریل کو حذف کرنا چاہتے ہیں؟ یہ عمل واپس نہیں ہو سکتا۔",
+    "reelDeleted": "ریل کامیابی سے حذف ہو گئی"
   },
   "userProfile": {
     "followers": "فالوورز",

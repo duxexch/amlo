@@ -1787,7 +1787,10 @@
     "uploadComplete": "Reel publié !",
     "uploadFailed": "Échec du téléchargement. Appuyez pour fermer",
     "madePublic": "Le reel est maintenant public",
-    "madePrivate": "Le reel est maintenant privé"
+    "madePrivate": "Le reel est maintenant privé",
+    "deleteReel": "Supprimer le reel",
+    "deleteReelConfirm": "Êtes-vous sûr de vouloir supprimer ce reel ? Cette action est irréversible.",
+    "reelDeleted": "Reel supprimé avec succès"
   },
   "userProfile": {
     "followers": "Abonnés",

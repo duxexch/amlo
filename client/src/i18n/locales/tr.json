@@ -1787,7 +1787,10 @@
     "uploadComplete": "Reel yayınlandı!",
     "uploadFailed": "Yükleme başarısız. Kapatmak için dokun",
     "madePublic": "Reel artık herkese açık",
-    "madePrivate": "Reel artık gizli"
+    "madePrivate": "Reel artık gizli",
+    "deleteReel": "Reel'i Sil",
+    "deleteReelConfirm": "Bu reel'i silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "reelDeleted": "Reel başarıyla silindi"
   },
   "userProfile": {
     "followers": "Takipçiler",

@@ -1821,7 +1821,10 @@
     "uploadComplete": "تم نشر الريلز!",
     "uploadFailed": "فشل الرفع. اضغط للإغلاق",
     "madePublic": "الريلز الآن عام",
-    "madePrivate": "الريلز الآن خاص"
+    "madePrivate": "الريلز الآن خاص",
+    "deleteReel": "حذف الريلز",
+    "deleteReelConfirm": "هل أنت متأكد من حذف هذا الريلز؟ لا يمكن التراجع عن هذا الإجراء.",
+    "reelDeleted": "تم حذف الريلز بنجاح"
   },
   "userProfile": {
     "followers": "المتابعون",

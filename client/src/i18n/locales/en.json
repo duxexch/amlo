@@ -1821,7 +1821,10 @@
     "uploadComplete": "Reel published!",
     "uploadFailed": "Upload failed. Tap to dismiss",
     "madePublic": "Reel is now public",
-    "madePrivate": "Reel is now private"
+    "madePrivate": "Reel is now private",
+    "deleteReel": "Delete Reel",
+    "deleteReelConfirm": "Are you sure you want to delete this reel? This action cannot be undone.",
+    "reelDeleted": "Reel deleted successfully"
   },
   "userProfile": {
     "followers": "Followers",
