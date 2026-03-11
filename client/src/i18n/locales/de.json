@@ -1774,7 +1774,10 @@
     "screenshotWarning": "Screenshots sind nicht erlaubt",
     "screenshotBanned": "Du wurdest vorübergehend gesperrt",
     "screenshotBannedTitle": "Zugang eingeschränkt",
-    "screenshotBannedDesc": "Du wurdest vorübergehend gesperrt, weil du wiederholt Screenshots gemacht hast. Bitte versuche es später erneut."
+    "screenshotBannedDesc": "Du wurdest vorübergehend gesperrt, weil du wiederholt Screenshots gemacht hast. Bitte versuche es später erneut.",
+    "uploadingInBackground": "Dein Reel wird im Hintergrund hochgeladen...",
+    "uploadComplete": "Reel veröffentlicht!",
+    "uploadFailed": "Upload fehlgeschlagen. Tippe zum Schließen"
   },
   "userProfile": {
     "followers": "Follower",

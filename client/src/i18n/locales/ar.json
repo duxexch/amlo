@@ -1816,7 +1816,10 @@
     "screenshotWarning": "التقاط الشاشة غير مسموح",
     "screenshotBanned": "تم حظرك مؤقتاً",
     "screenshotBannedTitle": "الوصول مقيّد",
-    "screenshotBannedDesc": "تم حظرك مؤقتاً من مشاهدة الريلز بسبب محاولات متكررة لالتقاط الشاشة. يرجى المحاولة لاحقاً."
+    "screenshotBannedDesc": "تم حظرك مؤقتاً من مشاهدة الريلز بسبب محاولات متكررة لالتقاط الشاشة. يرجى المحاولة لاحقاً.",
+    "uploadingInBackground": "جاري رفع الريلز في الخلفية...",
+    "uploadComplete": "تم نشر الريلز!",
+    "uploadFailed": "فشل الرفع. اضغط للإغلاق"
   },
   "userProfile": {
     "followers": "المتابعون",

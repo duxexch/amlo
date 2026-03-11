@@ -1782,7 +1782,10 @@
     "screenshotWarning": "Ekran görüntüsü almak yasaktır",
     "screenshotBanned": "Geçici olarak engellendiniz",
     "screenshotBannedTitle": "Erişim Kısıtlandı",
-    "screenshotBannedDesc": "Tekrarlanan ekran görüntüsü denemeleri nedeniyle geçici olarak engellendiniz. Lütfen daha sonra tekrar deneyin."
+    "screenshotBannedDesc": "Tekrarlanan ekran görüntüsü denemeleri nedeniyle geçici olarak engellendiniz. Lütfen daha sonra tekrar deneyin.",
+    "uploadingInBackground": "Reelin arka planda yükleniyor...",
+    "uploadComplete": "Reel yayınlandı!",
+    "uploadFailed": "Yükleme başarısız. Kapatmak için dokun"
   },
   "userProfile": {
     "followers": "Takipçiler",

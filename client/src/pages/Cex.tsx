@@ -7,7 +7,8 @@
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { postsApi, followApi, uploadMedia } from "@/lib/socialApi";
+import { postsApi, followApi } from "@/lib/socialApi";
+import { startReelUpload, useReelUploadState } from "@/hooks/useReelUpload";
 import { authApi } from "@/lib/authApi";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
@@ -413,10 +414,10 @@ function CreateReelModal({ open, onClose }: { open: boolean; onClose: () => void
     const [preview, setPreview] = useState("");
     const [caption, setCaption] = useState("");
     const [visibility, setVisibility] = useState<"public" | "private">("public");
-    const [uploading, setUploading] = useState(false);
-    const [progress, setProgress] = useState(0);
     const fileRef = useRef<HTMLInputElement>(null);
     const queryClient = useQueryClient();
+    const bgUpload = useReelUploadState();
+    const isBusy = bgUpload && bgUpload.phase !== "done" && bgUpload.phase !== "error";
 
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0];
@@ -427,48 +428,22 @@ function CreateReelModal({ open, onClose }: { open: boolean; onClose: () => void
         setPreview(URL.createObjectURL(f));
     };
 
-    const handleUpload = async () => {
-        if (!file) return;
-        setUploading(true);
-        try {
-            const duration = await new Promise<number>((resolve) => {
-                const v = document.createElement("video");
-                v.preload = "metadata";
-                v.onloadedmetadata = () => { resolve(Math.round(v.duration)); URL.revokeObjectURL(v.src); };
-                v.onerror = () => resolve(0);
-                v.src = URL.createObjectURL(file);
-            });
-
-            const mediaUrl = await uploadMedia(file, file.name, (p) => setProgress(p.percent));
-
-            let thumbnailUrl: string | undefined;
-            try {
-                const canvas = document.createElement("canvas");
-                const v = document.createElement("video");
-                v.src = mediaUrl; v.crossOrigin = "anonymous"; v.preload = "auto";
-                await new Promise<void>((res, rej) => { v.onloadeddata = () => res(); v.onerror = () => rej(); setTimeout(res, 3000); });
-                v.currentTime = 0.5;
-                await new Promise<void>((r) => { v.onseeked = () => r(); setTimeout(r, 2000); });
-                canvas.width = v.videoWidth || 360; canvas.height = v.videoHeight || 640;
-                canvas.getContext("2d")?.drawImage(v, 0, 0, canvas.width, canvas.height);
-                const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.7));
-                if (blob) thumbnailUrl = await uploadMedia(blob, "thumbnail.jpg");
-            } catch { }
-
-            await postsApi.create({
-                type: "reel", mediaUrl, thumbnailUrl,
-                caption: caption.trim() || undefined,
-                duration: duration || undefined,
-                visibility,
-            });
-
-            queryClient.invalidateQueries({ queryKey: ["cex-feed"] });
-            queryClient.invalidateQueries({ queryKey: ["my-reels"] });
-            toast.success(t("cex.reelPublished"));
-            setFile(null); setPreview(""); setCaption(""); setVisibility("public");
-            onClose();
-        } catch (err: any) { toast.error(err?.message || t("cex.uploadError")); }
-        finally { setUploading(false); setProgress(0); }
+    const handleUpload = () => {
+        if (!file || isBusy) return;
+        startReelUpload(
+            file,
+            caption.trim() || undefined,
+            visibility,
+            () => {
+                queryClient.invalidateQueries({ queryKey: ["cex-feed"] });
+                queryClient.invalidateQueries({ queryKey: ["my-reels"] });
+                toast.success(t("cex.reelPublished"));
+            },
+            (msg) => toast.error(msg || t("cex.uploadError")),
+        );
+        toast.info(t("cex.uploadingInBackground"));
+        setFile(null); setPreview(""); setCaption(""); setVisibility("public");
+        onClose();
     };
 
     useEffect(() => { return () => { if (preview) URL.revokeObjectURL(preview); }; }, [preview]);
@@ -521,19 +496,10 @@ function CreateReelModal({ open, onClose }: { open: boolean; onClose: () => void
                         </button>
                     </div>
 
-                    {uploading && (
-                        <div className="space-y-2">
-                            <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden">
-                                <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
-                            </div>
-                            <p className="text-xs text-white/40 text-center">{progress}%</p>
-                        </div>
-                    )}
-
-                    <button onClick={handleUpload} disabled={!file || uploading}
+                    <button onClick={handleUpload} disabled={!file || !!isBusy}
                         className="w-full h-12 rounded-xl bg-primary text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2">
-                        {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
-                        {uploading ? t("cex.uploading") : t("cex.publish")}
+                        <Upload className="w-5 h-5" />
+                        {t("cex.publish")}
                     </button>
                 </div>
             </div>

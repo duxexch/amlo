@@ -1782,7 +1782,10 @@
     "screenshotWarning": "Les captures d'écran ne sont pas autorisées",
     "screenshotBanned": "Vous avez été temporairement bloqué",
     "screenshotBannedTitle": "Accès restreint",
-    "screenshotBannedDesc": "Vous avez été temporairement bloqué en raison de tentatives répétées de capture d'écran. Veuillez réessayer plus tard."
+    "screenshotBannedDesc": "Vous avez été temporairement bloqué en raison de tentatives répétées de capture d'écran. Veuillez réessayer plus tard.",
+    "uploadingInBackground": "Votre reel est en cours de téléchargement...",
+    "uploadComplete": "Reel publié !",
+    "uploadFailed": "Échec du téléchargement. Appuyez pour fermer"
   },
   "userProfile": {
     "followers": "Abonnés",

@@ -1782,7 +1782,10 @@
     "screenshotWarning": "스크린샷은 허용되지 않습니다",
     "screenshotBanned": "일시적으로 차단되었습니다",
     "screenshotBannedTitle": "접근 제한",
-    "screenshotBannedDesc": "반복적인 스크린샷 시도로 인해 일시적으로 차단되었습니다. 나중에 다시 시도해 주세요."
+    "screenshotBannedDesc": "반복적인 스크린샷 시도로 인해 일시적으로 차단되었습니다. 나중에 다시 시도해 주세요.",
+    "uploadingInBackground": "릴이 백그라운드에서 업로드 중...",
+    "uploadComplete": "릴이 게시되었습니다!",
+    "uploadFailed": "업로드 실패. 탭하여 닫기"
   },
   "userProfile": {
     "followers": "팔로워",

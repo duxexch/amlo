@@ -1782,7 +1782,10 @@
     "screenshotWarning": "スクリーンショットは禁止されています",
     "screenshotBanned": "一時的にブロックされました",
     "screenshotBannedTitle": "アクセス制限",
-    "screenshotBannedDesc": "スクリーンショットの繰り返しにより一時的にブロックされました。後でもう一度お試しください。"
+    "screenshotBannedDesc": "スクリーンショットの繰り返しにより一時的にブロックされました。後でもう一度お試しください。",
+    "uploadingInBackground": "リールをバックグラウンドでアップロード中...",
+    "uploadComplete": "リールが公開されました！",
+    "uploadFailed": "アップロード失敗。タップして閉じる"
   },
   "userProfile": {
     "followers": "フォロワー",

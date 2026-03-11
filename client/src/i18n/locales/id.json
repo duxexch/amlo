@@ -1782,7 +1782,10 @@
     "screenshotWarning": "Screenshot tidak diizinkan",
     "screenshotBanned": "Kamu diblokir sementara",
     "screenshotBannedTitle": "Akses Dibatasi",
-    "screenshotBannedDesc": "Kamu diblokir sementara karena percobaan screenshot berulang. Silakan coba lagi nanti."
+    "screenshotBannedDesc": "Kamu diblokir sementara karena percobaan screenshot berulang. Silakan coba lagi nanti.",
+    "uploadingInBackground": "Reel kamu sedang diunggah di latar belakang...",
+    "uploadComplete": "Reel dipublikasikan!",
+    "uploadFailed": "Gagal mengunggah. Ketuk untuk menutup"
   },
   "userProfile": {
     "followers": "Pengikut",

@@ -1774,7 +1774,10 @@
     "screenshotWarning": "اسکرین‌شات مجاز نیست",
     "screenshotBanned": "شما موقتاً مسدود شده‌اید",
     "screenshotBannedTitle": "دسترسی محدود",
-    "screenshotBannedDesc": "به دلیل تلاش‌های مکرر برای اسکرین‌شات، موقتاً مسدود شده‌اید. لطفاً بعداً تلاش کنید."
+    "screenshotBannedDesc": "به دلیل تلاش‌های مکرر برای اسکرین‌شات، موقتاً مسدود شده‌اید. لطفاً بعداً تلاش کنید.",
+    "uploadingInBackground": "ریل شما در پس‌زمینه آپلود می‌شود...",
+    "uploadComplete": "ریل منتشر شد!",
+    "uploadFailed": "آپلود ناموفق. برای بستن لمس کنید"
   },
   "userProfile": {
     "followers": "دنبال‌کنندگان",

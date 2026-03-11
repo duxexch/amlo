@@ -1,12 +1,13 @@
 import { Link, useLocation } from "wouter";
-import { Home, Wallet, Radio, User, MessageCircle, LogIn, Download, Film } from "lucide-react";
+import { Home, Wallet, Radio, User, MessageCircle, LogIn, Download, Film, Loader2, CheckCircle2, AlertCircle, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { authApi } from "@/lib/authApi";
+import { useReelUploadState, dismissReelUpload } from "@/hooks/useReelUpload";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -160,6 +161,85 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
+
+      {/* Floating reel upload indicator */}
+      <ReelUploadIndicator />
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// ── Floating Reel Upload Indicator ──
+// ═══════════════════════════════════════════════
+function ReelUploadIndicator() {
+  const job = useReelUploadState();
+  const { t } = useTranslation();
+
+  // Auto-dismiss 3s after success
+  useEffect(() => {
+    if (job?.phase === "done") {
+      const timer = setTimeout(dismissReelUpload, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [job?.phase]);
+
+  if (!job) return null;
+
+  const isDone = job.phase === "done";
+  const isError = job.phase === "error";
+  const isActive = !isDone && !isError;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        key={job.id}
+        initial={{ y: 80, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 80, opacity: 0 }}
+        className="fixed bottom-24 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-80 z-[200]"
+      >
+        <div
+          className={cn(
+            "rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl flex items-center gap-3",
+            isDone && "bg-green-950/80 border-green-500/30",
+            isError && "bg-red-950/80 border-red-500/30 cursor-pointer",
+            isActive && "bg-[#0c0c1d]/90 border-white/10",
+          )}
+          onClick={isError ? dismissReelUpload : isDone ? dismissReelUpload : undefined}
+        >
+          {/* Icon */}
+          {isActive && <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0" />}
+          {isDone && <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />}
+          {isError && <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />}
+
+          {/* Text + progress */}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white truncate">
+              {isDone && t("cex.uploadComplete")}
+              {isError && t("cex.uploadFailed")}
+              {isActive && t("cex.uploadingInBackground")}
+            </p>
+            {isActive && (
+              <div className="mt-1.5 w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                <motion.div
+                  className="h-full bg-primary rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${job.progress}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Percentage / dismiss */}
+          {isActive && <span className="text-xs text-white/50 tabular-nums shrink-0">{job.progress}%</span>}
+          {(isDone || isError) && (
+            <button onClick={dismissReelUpload} className="text-white/40 hover:text-white shrink-0">
+              <Upload className="w-4 h-4 rotate-180" />
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </AnimatePresence>
   );
 }

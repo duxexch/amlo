@@ -1782,7 +1782,10 @@
     "screenshotWarning": "Скриншоты запрещены",
     "screenshotBanned": "Вы временно заблокированы",
     "screenshotBannedTitle": "Доступ ограничен",
-    "screenshotBannedDesc": "Вы временно заблокированы из-за повторных попыток скриншота. Попробуйте позже."
+    "screenshotBannedDesc": "Вы временно заблокированы из-за повторных попыток скриншота. Попробуйте позже.",
+    "uploadingInBackground": "Ваш рилс загружается в фоновом режиме...",
+    "uploadComplete": "Рилс опубликован!",
+    "uploadFailed": "Ошибка загрузки. Нажмите, чтобы закрыть"
   },
   "userProfile": {
     "followers": "Подписчики",
