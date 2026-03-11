@@ -50,10 +50,11 @@ const commentLimiter = rateLimit({
 async function getDailyLimits(pool: any): Promise<{ maxDailyReels: number; maxDailyPhotos: number; maxReelDurationSec: number }> {
     try {
         const result = await pool.query(
-            `SELECT value FROM system_config WHERE category = 'contentLimits' LIMIT 1`,
+            `SELECT config_data FROM system_config WHERE category = 'contentLimits' LIMIT 1`,
         );
         if (result.rows.length > 0) {
-            const cfg = typeof result.rows[0].value === "string" ? JSON.parse(result.rows[0].value) : result.rows[0].value;
+            const raw = result.rows[0].config_data;
+            const cfg = typeof raw === "string" ? JSON.parse(raw) : raw;
             return {
                 maxDailyReels: parseInt(cfg.maxDailyReels) || 10,
                 maxDailyPhotos: parseInt(cfg.maxDailyPhotos) || 20,
@@ -62,6 +63,23 @@ async function getDailyLimits(pool: any): Promise<{ maxDailyReels: number; maxDa
         }
     } catch { /* use defaults */ }
     return { maxDailyReels: 10, maxDailyPhotos: 20, maxReelDurationSec: 60 };
+}
+
+// ── One-time backfill: set NULL visibility to 'public' ──
+let _visibilityBackfilled = false;
+async function backfillNullVisibility(pool: any) {
+    if (_visibilityBackfilled) return;
+    _visibilityBackfilled = true;
+    try {
+        const res = await pool.query(
+            `UPDATE user_posts SET visibility = 'public' WHERE visibility IS NULL`,
+        );
+        if (res.rowCount > 0) {
+            postLog.info(`Backfilled ${res.rowCount} posts with NULL visibility → 'public'`);
+        }
+    } catch (err: any) {
+        postLog.error(`Visibility backfill failed: ${err.message}`);
+    }
 }
 
 // ── POST / — Create a post ──
@@ -135,6 +153,9 @@ router.get("/feed", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     const pool = getPool();
     if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+
+    // Ensure NULL visibility rows are fixed (runs once per process)
+    await backfillNullVisibility(pool);
 
     try {
         const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);

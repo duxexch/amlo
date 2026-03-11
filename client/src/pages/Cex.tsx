@@ -760,14 +760,31 @@ export function Cex() {
     }, [viewerReels?.length]);
 
     const [feedPage, setFeedPage] = useState(0);
-    const { data: feedData, isLoading: feedLoading } = useQuery({
+    const [accumulatedReels, setAccumulatedReels] = useState<any[]>([]);
+    const { data: feedData, isLoading: feedLoading, isError: feedError, refetch: refetchFeed } = useQuery({
         queryKey: ["cex-feed", feedPage],
         queryFn: () => postsApi.feed(feedPage * 20, 20),
         staleTime: 0,
         enabled: activeTab === "public",
+        retry: 2,
     });
-    const reels: any[] = Array.isArray(feedData) ? feedData : [];
-    const hasMore = reels.length >= 20;
+
+    // Accumulate pages instead of replacing
+    useEffect(() => {
+        if (!feedData || !Array.isArray(feedData)) return;
+        if (feedPage === 0) {
+            setAccumulatedReels(feedData);
+        } else {
+            setAccumulatedReels((prev) => {
+                const existingIds = new Set(prev.map((r: any) => r.id));
+                const newReels = feedData.filter((r: any) => !existingIds.has(r.id));
+                return [...prev, ...newReels];
+            });
+        }
+    }, [feedData, feedPage]);
+
+    const reels = accumulatedReels;
+    const hasMore = Array.isArray(feedData) && feedData.length >= 20;
 
     // ── Preload + 5-day cache ──
     const { getCachedUrl, preloadAround } = useReelCache(reels);
@@ -873,7 +890,7 @@ export function Cex() {
 
                 <div className="flex items-center gap-2 pointer-events-auto">
                     <div className="flex bg-white/10 rounded-full p-0.5">
-                        <button onClick={() => setActiveTab("public")}
+                        <button onClick={() => { setActiveTab("public"); setFeedPage(0); setAccumulatedReels([]); }}
                             className={cn("px-3 py-1.5 rounded-full text-xs font-bold transition-all",
                                 activeTab === "public" ? "bg-primary text-white" : "text-white/50")}>
                             {t("cex.publicTab")}
@@ -896,9 +913,18 @@ export function Cex() {
             {/* Public Tab */}
             {activeTab === "public" && (
                 <>
-                    {feedLoading ? (
+                    {feedLoading && reels.length === 0 ? (
                         <div className="fixed inset-0 bg-black flex items-center justify-center z-40">
                             <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        </div>
+                    ) : feedError && reels.length === 0 ? (
+                        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-40 gap-4">
+                            <Play className="w-16 h-16 text-red-400/30" />
+                            <p className="text-white/40 text-lg">{t("cex.uploadError")}</p>
+                            <button onClick={() => { setFeedPage(0); setAccumulatedReels([]); refetchFeed(); }}
+                                className="px-6 py-3 rounded-xl bg-primary text-white font-bold flex items-center gap-2">
+                                <Loader2 className="w-4 h-4" /> {t("common.retry")}
+                            </button>
                         </div>
                     ) : reels.length === 0 ? (
                         <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-40 gap-4">
