@@ -157,6 +157,17 @@ router.get("/feed", async (req: Request, res: Response) => {
         // Algorithm: score-based ordering with randomization within tiers
         // - Newer posts get a recency bonus (decays over 48h)
         // - Random factor shuffles posts of similar score on each request
+        // Check if total_watch_sec column exists (may not be pushed yet)
+        let hasWatchSec = true;
+        try {
+            const colCheck = await pool.query(
+                `SELECT 1 FROM information_schema.columns WHERE table_name='user_posts' AND column_name='total_watch_sec' LIMIT 1`
+            );
+            hasWatchSec = colCheck.rows.length > 0;
+        } catch { hasWatchSec = false; }
+
+        const watchSecExpr = hasWatchSec ? "(COALESCE(p.total_watch_sec, 0)::float / 10)" : "0";
+
         const result = await pool.query(
             `SELECT p.id, p.user_id as "userId", p.type, p.media_url as "mediaUrl",
               p.thumbnail_url as "thumbnailUrl", p.caption, p.duration, p.visibility,
@@ -173,7 +184,7 @@ router.get("/feed", async (req: Request, res: Response) => {
        ORDER BY (
          (p.like_count * 3) +
          (p.view_count) +
-         (COALESCE(p.total_watch_sec, 0)::float / 10) +
+         ${watchSecExpr} +
          (p.comment_count * 2) +
          (GREATEST(0, 100 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 1728))
          + (RANDOM() * 20)

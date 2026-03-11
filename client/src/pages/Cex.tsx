@@ -38,6 +38,7 @@ function useScreenshotProtection(isLoggedIn: boolean) {
     useEffect(() => {
         if (!isLoggedIn) return;
 
+        // Desktop: keyboard shortcuts for screenshots
         const handleKey = (e: KeyboardEvent) => {
             const isPrint = e.key === "PrintScreen";
             const isCtrlShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key?.toLowerCase() === "s";
@@ -49,17 +50,19 @@ function useScreenshotProtection(isLoggedIn: boolean) {
             }
         };
 
-        const handleVisibility = () => {
-            if (document.hidden && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
-                reportScreenshot();
-            }
-        };
+        // Prevent context menu (right-click / long-press save on mobile)
+        const handleContextMenu = (e: Event) => { e.preventDefault(); };
+
+        // Prevent drag-and-drop image saving
+        const handleDragStart = (e: Event) => { e.preventDefault(); };
 
         document.addEventListener("keydown", handleKey, true);
-        document.addEventListener("visibilitychange", handleVisibility);
+        document.addEventListener("contextmenu", handleContextMenu, true);
+        document.addEventListener("dragstart", handleDragStart, true);
         return () => {
             document.removeEventListener("keydown", handleKey, true);
-            document.removeEventListener("visibilitychange", handleVisibility);
+            document.removeEventListener("contextmenu", handleContextMenu, true);
+            document.removeEventListener("dragstart", handleDragStart, true);
         };
     }, [isLoggedIn]);
 
@@ -103,7 +106,7 @@ function CommentsPanel({
         enabled: open && !!postId,
         staleTime: 30_000,
     });
-    const comments = (commentsData as any)?.data || [];
+    const comments: any[] = Array.isArray(commentsData) ? commentsData : [];
 
     const addMut = useMutation({
         mutationFn: (t: string) => postsApi.addComment(postId, t),
@@ -312,15 +315,28 @@ function ReelCard({
     const isOwnPost = meId === reel.userId;
 
     return (
-        <div className="relative w-full h-full snap-start snap-always bg-black flex items-center justify-center select-none">
+        <div className="relative w-full h-full snap-start snap-always bg-black flex items-center justify-center select-none"
+            style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none" } as any}>
             <video
                 ref={videoRef}
                 src={reel.mediaUrl}
                 poster={reel.thumbnailUrl || undefined}
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                 loop muted={muted} playsInline preload="auto"
                 {...{ "webkit-playsinline": "", "x5-playsinline": "" } as any}
             />
+
+            {/* Watermark overlay — deterrence against screenshots */}
+            {meId && (
+                <div className="absolute inset-0 z-[6] pointer-events-none overflow-hidden opacity-[0.06]"
+                    style={{ transform: "rotate(-25deg)", transformOrigin: "center center" }}>
+                    <div className="flex flex-wrap gap-x-12 gap-y-6 -m-20 w-[200%] h-[200%] items-center justify-start">
+                        {Array.from({ length: 30 }, (_, i) => (
+                            <span key={i} className="text-white text-xs font-bold whitespace-nowrap">ABLOX</span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div className="absolute inset-0 z-10" onClick={handleTap} />
 
@@ -510,7 +526,7 @@ function CreateReelModal({ open, onClose }: { open: boolean; onClose: () => void
 // ═══════════════════════════════════════════════
 // ── Private Tab (My Reels + Saved) ──
 // ═══════════════════════════════════════════════
-function PrivateTab({ onCreateClick }: { onCreateClick: () => void }) {
+function PrivateTab({ onCreateClick, onReelClick }: { onCreateClick: () => void; onReelClick: (reels: any[], startIdx: number) => void }) {
     const { t, i18n } = useTranslation();
     const dir = i18n.dir();
     const [sub, setSub] = useState<"my" | "saved">("my");
@@ -572,15 +588,16 @@ function PrivateTab({ onCreateClick }: { onCreateClick: () => void }) {
                 </div>
             ) : (
                 <div className="grid grid-cols-3 gap-1 px-2">
-                    {items.map((reel: any) => (
-                        <div key={reel.id} className="relative aspect-[9/16] rounded-lg overflow-hidden bg-white/5 group">
+                    {items.map((reel: any, idx: number) => (
+                        <div key={reel.id} className="relative aspect-[9/16] rounded-lg overflow-hidden bg-white/5 group cursor-pointer"
+                            onClick={() => onReelClick(items, idx)}>
                             <img src={reel.thumbnailUrl || reel.mediaUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                             <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors flex items-center justify-center">
                                 <Play className="w-6 h-6 text-white/70" />
                             </div>
                             {sub === "my" && (
                                 <button
-                                    onClick={() => toggleVisMut.mutate({ id: reel.id, visibility: reel.visibility === "public" ? "private" : "public" })}
+                                    onClick={(e) => { e.stopPropagation(); toggleVisMut.mutate({ id: reel.id, visibility: reel.visibility === "public" ? "private" : "public" }); }}
                                     className="absolute top-1.5 end-1.5 bg-black/60 rounded-full p-1.5 z-10"
                                     disabled={toggleVisMut.isPending}
                                 >
@@ -623,9 +640,54 @@ export function Cex() {
         retry: false,
     });
     const isLoggedIn = Boolean(authUser);
-    const meId = (authUser as any)?.data?.user?.id || (authUser as any)?.data?.id || null;
+    const meId: string | null = (authUser as any)?.data?.user?.id || (authUser as any)?.data?.id || (authUser as any)?.user?.id || (authUser as any)?.id || null;
 
     const { banned } = useScreenshotProtection(isLoggedIn);
+
+    // ── Reel viewer from Private grid ──
+    const [viewerReels, setViewerReels] = useState<any[] | null>(null);
+    const [viewerIndex, setViewerIndex] = useState(0);
+    const viewerContainerRef = useRef<HTMLDivElement>(null);
+    const viewerReelRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+    const openReelViewer = useCallback((reels: any[], startIdx: number) => {
+        setViewerReels(reels);
+        setViewerIndex(startIdx);
+    }, []);
+
+    const closeReelViewer = useCallback(() => {
+        setViewerReels(null);
+        setViewerIndex(0);
+    }, []);
+
+    // Viewer IntersectionObserver
+    useEffect(() => {
+        if (!viewerReels) return;
+        const container = viewerContainerRef.current;
+        if (!container) return;
+        // Scroll to initial reel
+        const el = viewerReelRefs.current.get(viewerIndex);
+        if (el) el.scrollIntoView({ behavior: "instant" });
+    }, [viewerReels]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!viewerReels) return;
+        const container = viewerContainerRef.current;
+        if (!container) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting && entry.intersectionRatio >= 0.7) {
+                        const idx = Number(entry.target.getAttribute("data-vidx"));
+                        if (!isNaN(idx)) setViewerIndex(idx);
+                    }
+                }
+            },
+            { root: container, threshold: 0.7 },
+        );
+        viewerReelRefs.current.forEach((el) => observer.observe(el));
+        return () => observer.disconnect();
+    }, [viewerReels?.length]);
 
     const [feedPage, setFeedPage] = useState(0);
     const { data: feedData, isLoading: feedLoading } = useQuery({
@@ -695,7 +757,7 @@ export function Cex() {
     return (
         <div
             className="select-none"
-            style={{ WebkitUserSelect: "none", userSelect: "none" } as any}
+            style={{ WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" } as any}
         >
             {/* Header */}
             <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3 safe-area-top bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
@@ -772,7 +834,7 @@ export function Cex() {
             {/* Private Tab */}
             {activeTab === "private" && (
                 isLoggedIn ? (
-                    <PrivateTab onCreateClick={() => setShowCreate(true)} />
+                    <PrivateTab onCreateClick={() => setShowCreate(true)} onReelClick={openReelViewer} />
                 ) : (
                     <div className="fixed inset-0 bg-[#06060f] flex flex-col items-center justify-center z-40 gap-4 pt-16">
                         <Lock className="w-12 h-12 text-white/20" />
@@ -794,6 +856,44 @@ export function Cex() {
             </AnimatePresence>
 
             <CreateReelModal open={showCreate} onClose={() => setShowCreate(false)} />
+
+            {/* ── Fullscreen Reel Viewer (from Private grid) ── */}
+            <AnimatePresence>
+                {viewerReels && viewerReels.length > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-black"
+                    >
+                        <button onClick={closeReelViewer} className="absolute top-4 right-4 z-[110] bg-black/60 rounded-full p-2">
+                            <X className="w-6 h-6 text-white" />
+                        </button>
+                        <div ref={viewerContainerRef}
+                            className="w-full h-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
+                            style={{ WebkitOverflowScrolling: "touch" } as any}>
+                            {viewerReels.map((reel: any, idx: number) => (
+                                <div key={reel.id}
+                                    ref={(el) => { if (el) viewerReelRefs.current.set(idx, el); }}
+                                    data-vidx={idx}
+                                    className="w-full h-[100dvh] snap-start snap-always">
+                                    <ReelCard
+                                        reel={reel}
+                                        isActive={viewerIndex === idx}
+                                        onLike={handleLike}
+                                        onView={handleView}
+                                        onSave={handleSave}
+                                        onUserClick={handleUserClick}
+                                        onCommentClick={handleCommentClick}
+                                        onFollow={handleFollow}
+                                        meId={meId}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
