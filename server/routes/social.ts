@@ -2077,7 +2077,7 @@ router.post("/calls", async (req, res) => {
       const timeoutCallId = call.id;
       const timeoutCallerId = userId;
       const timeoutReceiverId = receiverId;
-      setTimeout(async () => {
+      const ringingTimeout = setTimeout(async () => {
         try {
           const db2 = getDb();
           if (!db2) return;
@@ -2095,6 +2095,7 @@ router.post("/calls", async (req, res) => {
           socialLog.warn({ err, callId: timeoutCallId }, "Call timeout handler error");
         }
       }, 40_000);
+      ringingTimeout.unref();
     }
 
     return res.status(201).json({
@@ -2168,8 +2169,8 @@ router.post("/calls/:id/answer", async (req, res) => {
     const freeMinutesCapOnAnswer = freeMinutesCap;
     const callerBalanceRow = caller;
     const callerCoins = Math.max(0, Number(callerBalanceRow?.coins || 0));
-    const paidSecondsBudget = call.coinRate > 0 ? Math.floor((callerCoins * 60) / call.coinRate) : Number.MAX_SAFE_INTEGER;
-    const totalBudgetSeconds = Math.max(0, freeMinutesCapOnAnswer * 60 + paidSecondsBudget);
+    const paidSecondsBudget = call.coinRate > 0 ? Math.floor((callerCoins * 60) / call.coinRate) : 8 * 60 * 60;
+    const totalBudgetSeconds = Math.max(0, Math.min(8 * 60 * 60, freeMinutesCapOnAnswer * 60 + paidSecondsBudget));
 
     clearCallBalanceTimers(call.id);
     if (Number.isFinite(totalBudgetSeconds) && totalBudgetSeconds > 0) {

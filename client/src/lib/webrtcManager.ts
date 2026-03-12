@@ -118,7 +118,7 @@ function enableOpusDTX(sdp: string): string {
   const pt = opusMatch[1];
   return sdp.replace(
     new RegExp(`a=fmtp:${pt} (.*)`, "g"),
-    `a=fmtp:${pt} $1;usedtx=1;stereo=0;sprop-stereo=0`
+    `a=fmtp:${pt} $1;usedtx=1;stereo=0;sprop-stereo=0;maxaveragebitrate=24000;maxplaybackrate=24000`
   );
 }
 
@@ -401,13 +401,19 @@ class WebRTCManager {
       }
     };
 
-    // ── ICE Gathering Timeout — stop waiting after 10s ──
+    // ── ICE Gathering Timeout — force-send offer after 10s ──
     let gatheringTimer: ReturnType<typeof setTimeout> | null = null;
     this.pc.onicegatheringstatechange = () => {
       if (this.pc?.iceGatheringState === "gathering") {
         gatheringTimer = setTimeout(() => {
-          if (this.pc?.iceGatheringState === "gathering") {
-            console.warn("[WebRTC] ICE gathering stuck >10s, proceeding with available candidates");
+          if (this.pc?.iceGatheringState === "gathering" && this.pc.localDescription) {
+            console.warn("[WebRTC] ICE gathering stuck >10s, forcing with available candidates");
+            const socket = socketManager.getSocket();
+            socket.emit("call-signal", {
+              callId: this.callId,
+              targetId: this.targetUserId,
+              signal: { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp },
+            });
           }
         }, 10_000);
       } else if (gatheringTimer) {
@@ -463,16 +469,24 @@ class WebRTCManager {
       this.remoteStream.addTrack(event.track);
       this.handlers.onRemoteStream?.(this.remoteStream);
 
-      // Detect when remote track ends (peer stopped camera/mic)
+      // Detect when remote track ends/mutes (debounced to avoid spam on network jitter)
+      let trackMuteTimer: ReturnType<typeof setTimeout> | null = null;
       event.track.onended = () => {
-        if (event.track.kind === "video") {
+        if (event.track.kind === "video" && this.pc?.connectionState === "connected") {
           this.handlers.onError?.("الطرف الآخر أوقف الكاميرا");
         }
       };
       event.track.onmute = () => {
         if (event.track.kind === "video") {
-          this.handlers.onError?.("فيديو الطرف الآخر متوقف مؤقتاً");
+          trackMuteTimer = setTimeout(() => {
+            if (this.pc?.connectionState === "connected") {
+              this.handlers.onError?.("فيديو الطرف الآخر متوقف مؤقتاً");
+            }
+          }, 3000);
         }
+      };
+      event.track.onunmute = () => {
+        if (trackMuteTimer) { clearTimeout(trackMuteTimer); trackMuteTimer = null; }
       };
     };
 
@@ -513,11 +527,17 @@ class WebRTCManager {
       }
     });
 
-    // ── Network Change Detection — restart ICE on WiFi↔Cellular switch ──
+    // ── Network Change Detection — debounced ICE restart on WiFi↔Cellular switch ──
+    let networkDebounce: ReturnType<typeof setTimeout> | null = null;
     this.networkChangeHandler = () => {
       if (this.pc && this.state === "active") {
-        console.log("[WebRTC] Network changed, restarting ICE");
-        this.restartICE();
+        if (networkDebounce) clearTimeout(networkDebounce);
+        networkDebounce = setTimeout(() => {
+          if (this.pc && (this.state === "active" || this.state === "reconnecting")) {
+            console.log("[WebRTC] Network stable after change, restarting ICE");
+            this.restartICE();
+          }
+        }, 2000);
       }
     };
     (navigator as any).connection?.addEventListener("change", this.networkChangeHandler);
@@ -655,8 +675,8 @@ class WebRTCManager {
           usingRelay: this.usingRelay,
         });
 
-        // Auto-degrade if packet loss is high
-        if (totalPacketsLost > 50 && this.callType === "video") {
+        // Auto-degrade if packet loss percentage is high (>5%)
+        if (lossPercent > 5 && this.callType === "video") {
           this.applyBitrateConstraints();
         }
       } catch { }

@@ -231,15 +231,8 @@ export function CallScreen() {
     gain.connect(ctx.destination);
     osc.start();
 
-    // Toggle on/off pattern
-    let on = true;
+    // Ringback pattern: 1s on, 3s off cycle
     gain.gain.setValueAtTime(0.06, ctx.currentTime);
-    const interval = setInterval(() => {
-      on = !on;
-      gain.gain.setValueAtTime(on ? 0.06 : 0, ctx.currentTime);
-    }, on ? 1000 : 3000);
-    // More accurate: 1s on, 3s off cycle
-    clearInterval(interval);
     let phase = 0;
     const ringInterval = setInterval(() => {
       phase = (phase + 1) % 4;
