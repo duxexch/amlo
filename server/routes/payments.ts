@@ -436,7 +436,7 @@ router.get("/providers", async (req: Request, res: Response) => {
     const gateways = await loadGatewayConfig();
 
     const { rows: methods } = await pool.query(
-      `SELECT id, name, name_ar, icon, type, account_details, min_amount, max_amount, fee, is_active
+      `SELECT id, name, name_ar, icon, type, account_details, min_amount, max_amount, is_active
        FROM payment_methods
        WHERE is_active = true
        ORDER BY sort_order`
@@ -461,7 +461,7 @@ router.get("/providers", async (req: Request, res: Response) => {
         usageTarget: usage === "deposit" || usage === "withdrawal" ? usage : "both",
         minAmount: Number(m.min_amount || 1),
         maxAmount: Number(m.max_amount || 50000),
-        fee: String(details?.fee || m.fee || "0"),
+        fee: String(details?.fee || "0"),
       };
     }).filter((m) => m.usageTarget === "both" || m.usageTarget === "deposit")
       .filter((m) => !country || m.countries.includes("*") || m.countries.includes(country));
