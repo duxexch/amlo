@@ -260,6 +260,76 @@ function clearCallBalanceTimers(callId: string) {
   callBalanceTimers.delete(callId);
 }
 
+/**
+ * Start billing timers for a call. Called when WebRTC media actually connects
+ * (call-media-connected socket event), NOT when the call is answered.
+ * Also sets startedAt in the DB.
+ */
+async function startCallBilling(callId: string): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  const [call] = await db.select().from(schema.calls)
+    .where(and(eq(schema.calls.id, callId), eq(schema.calls.status, "active")))
+    .limit(1);
+  if (!call) return;
+
+  // Already started — ignore duplicate events (both parties may emit)
+  if (call.startedAt) return;
+
+  const now = new Date();
+  await db.update(schema.calls)
+    .set({ startedAt: now })
+    .where(and(eq(schema.calls.id, callId), sql`started_at IS NULL`));
+
+  // Start budget timers
+  const freeMinutesCap = await readCallFreeMinutes(callId);
+  const [caller] = await db.select({ coins: schema.users.coins }).from(schema.users)
+    .where(eq(schema.users.id, call.callerId)).limit(1);
+  const callerCoins = Math.max(0, Number(caller?.coins || 0));
+  const paidSecondsBudget = call.coinRate > 0 ? Math.floor((callerCoins * 60) / call.coinRate) : 8 * 60 * 60;
+  const totalBudgetSeconds = Math.max(0, Math.min(8 * 60 * 60, freeMinutesCap * 60 + paidSecondsBudget));
+
+  clearCallBalanceTimers(callId);
+  if (Number.isFinite(totalBudgetSeconds) && totalBudgetSeconds > 0) {
+    const timers: { warningTimer?: CallTimerHandle; cutoffTimer?: CallTimerHandle } = {};
+
+    if (totalBudgetSeconds > CALL_BALANCE_WARNING_LEAD_SECONDS) {
+      timers.warningTimer = scheduleSafeTimeout(() => {
+        stabilityMetrics.callBalanceWarningsEmitted += 1;
+        emitToUser(call.callerId, "call-balance-warning", {
+          callId: call.id,
+          secondsRemaining: CALL_BALANCE_WARNING_LEAD_SECONDS,
+          message: "تنبيه: الرصيد المتاح للمكالمة سينتهي خلال دقيقة",
+        });
+      }, (totalBudgetSeconds - CALL_BALANCE_WARNING_LEAD_SECONDS) * 1000);
+    }
+
+    timers.cutoffTimer = scheduleSafeTimeout(async () => {
+      const result = await finalizeCallEnd({
+        callId: call.id,
+        actorUserId: call.callerId,
+        reason: "balance_exhausted",
+      });
+      if (result.ok && "data" in result) {
+        emitToUser(call.callerId, "call-ended", {
+          callId: call.id,
+          payerUserId: call.callerId,
+          durationSeconds: (result as any).data?.durationSeconds || 0,
+          coinsCharged: (result as any).data?.coinsCharged || 0,
+          freeMinutesUsed: (result as any).data?.freeMinutesUsed || 0,
+          reason: "balance_exhausted",
+          message: "انتهى الرصيد وتم إنهاء المكالمة",
+        });
+      }
+    }, totalBudgetSeconds * 1000);
+
+    callBalanceTimers.set(callId, timers);
+  }
+
+  socialLog.info({ callId }, "Call billing started (media connected)");
+}
+
 function scheduleSafeTimeout(callback: () => void | Promise<void>, delayMs: number): CallTimerHandle {
   if (!Number.isFinite(delayMs) || delayMs <= 0) {
     return setTimeout(() => {
@@ -2161,53 +2231,14 @@ router.post("/calls/:id/answer", async (req, res) => {
     }
 
     const [updated] = await db.update(schema.calls)
-      .set({ status: "active", startedAt: new Date() })
+      .set({ status: "active" })
       .where(eq(schema.calls.id, call.id))
       .returning();
 
-    // Start budget timers for caller balance: warn before depletion, then force-end.
-    const freeMinutesCapOnAnswer = freeMinutesCap;
-    const callerBalanceRow = caller;
-    const callerCoins = Math.max(0, Number(callerBalanceRow?.coins || 0));
-    const paidSecondsBudget = call.coinRate > 0 ? Math.floor((callerCoins * 60) / call.coinRate) : 8 * 60 * 60;
-    const totalBudgetSeconds = Math.max(0, Math.min(8 * 60 * 60, freeMinutesCapOnAnswer * 60 + paidSecondsBudget));
-
-    clearCallBalanceTimers(call.id);
-    if (Number.isFinite(totalBudgetSeconds) && totalBudgetSeconds > 0) {
-      const timers: { warningTimer?: CallTimerHandle; cutoffTimer?: CallTimerHandle } = {};
-
-      if (totalBudgetSeconds > CALL_BALANCE_WARNING_LEAD_SECONDS) {
-        timers.warningTimer = scheduleSafeTimeout(() => {
-          stabilityMetrics.callBalanceWarningsEmitted += 1;
-          emitToUser(call.callerId, "call-balance-warning", {
-            callId: call.id,
-            secondsRemaining: CALL_BALANCE_WARNING_LEAD_SECONDS,
-            message: "تنبيه: الرصيد المتاح للمكالمة سينتهي خلال دقيقة",
-          });
-        }, (totalBudgetSeconds - CALL_BALANCE_WARNING_LEAD_SECONDS) * 1000);
-      }
-
-      timers.cutoffTimer = scheduleSafeTimeout(async () => {
-        const result = await finalizeCallEnd({
-          callId: call.id,
-          actorUserId: call.callerId,
-          reason: "balance_exhausted",
-        });
-        if (result.ok && "data" in result) {
-          emitToUser(call.callerId, "call-ended", {
-            callId: call.id,
-            payerUserId: call.callerId,
-            durationSeconds: (result as any).data?.durationSeconds || 0,
-            coinsCharged: (result as any).data?.coinsCharged || 0,
-            freeMinutesUsed: (result as any).data?.freeMinutesUsed || 0,
-            reason: "balance_exhausted",
-            message: "انتهى الرصيد وتم إنهاء المكالمة",
-          });
-        }
-      }, totalBudgetSeconds * 1000);
-
-      callBalanceTimers.set(call.id, timers);
-    }
+    // NOTE: startedAt and budget timers are deferred until the client confirms
+    // WebRTC media is actually connected (call-media-connected socket event).
+    // This prevents charging coins when the call never actually connects
+    // (e.g. TURN failure on mobile data).
 
     // Notify caller — always emit via room (no getUserSocketId guard)
     io.to(`user:${call.callerId}`).emit("call-answered", { callId: call.id });
@@ -5961,4 +5992,4 @@ setInterval(async () => {
 }, 6 * 60 * 60 * 1000).unref(); // Every 6 hours
 
 export default router;
-export { finalizeCallEnd };
+export { finalizeCallEnd, startCallBilling };

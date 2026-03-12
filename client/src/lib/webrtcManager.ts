@@ -438,6 +438,11 @@ class WebRTCManager {
           if (!this.durationInterval) this.startDurationTimer();
           if (!this.statsInterval) this.startStatsMonitoring();
           this.applyBitrateConstraints();
+          // Notify server that media is actually flowing (for accurate billing)
+          if (this.callId) {
+            const socket = socketManager.getSocket();
+            socket.emit("call-media-connected", { callId: this.callId });
+          }
           break;
         case "disconnected":
           this.setState("reconnecting");

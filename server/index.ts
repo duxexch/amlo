@@ -847,6 +847,21 @@ io.on("connection", (socket) => {
     });
   });
 
+  // ── Call media connected — start billing only when WebRTC actually connects ──
+  socket.on("call-media-connected", async (data: unknown) => {
+    if (!data || typeof data !== "object") return;
+    const { callId } = data as Record<string, unknown>;
+    if (!isStr(callId, 100)) return;
+    const currentUserId = socket.data.userId;
+    if (!currentUserId) return;
+    try {
+      const { startCallBilling } = await import("./routes/social");
+      await startCallBilling(callId);
+    } catch (err: any) {
+      serverLog.warn({ err: err?.message, callId }, "call-media-connected handler error");
+    }
+  });
+
   // ── Random Chat Matching ──
   socket.on("random-match-start", async (data: unknown) => {
     if (!data || typeof data !== "object") return;

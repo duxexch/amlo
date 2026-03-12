@@ -334,7 +334,6 @@ class SocketManager {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: q === "poor" ? 8000 : 16000,  // 8kHz for poor, 16kHz for others
           channelCount: 1,
         },
         video: false,
