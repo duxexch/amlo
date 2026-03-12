@@ -1781,6 +1781,7 @@
   "permissions": {
     "micDenied": "Bitte erlauben Sie den Mikrofonzugriff für den Anruf",
     "cameraMicDenied": "Bitte erlauben Sie den Zugriff auf Kamera und Mikrofon",
+    "mediaNotAvailable": "Medienzugriff ist in diesem Browser nicht verfügbar",
     "locationDenied": "Bitte erlauben Sie den Standortzugriff",
     "micDeniedSettings": "Mikrofonberechtigung verweigert. Bitte in den Browsereinstellungen aktivieren und erneut versuchen",
     "cameraDenied": "Kein Zugriff auf die Kamera"

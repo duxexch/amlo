@@ -1789,6 +1789,7 @@
   "permissions": {
     "micDenied": "请允许访问麦克风以进行通话",
     "cameraMicDenied": "请允许访问摄像头和麦克风",
+    "mediaNotAvailable": "此浏览器不支持媒体访问",
     "locationDenied": "请允许访问位置信息",
     "micDeniedSettings": "麦克风权限被拒绝。请在浏览器设置中启用后重试",
     "cameraDenied": "无法访问摄像头"

@@ -1789,6 +1789,7 @@
   "permissions": {
     "micDenied": "Arama yapmak için mikrofon erişimine izin verin",
     "cameraMicDenied": "Kamera ve mikrofon erişimine izin verin",
+    "mediaNotAvailable": "Bu tarayıcıda medya erişimi mevcut değil",
     "locationDenied": "Konum erişimine izin verin",
     "micDeniedSettings": "Mikrofon izni reddedildi. Lütfen tarayıcı ayarlarından etkinleştirin ve tekrar deneyin",
     "cameraDenied": "Kameraya erişilemedi"

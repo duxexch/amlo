@@ -4591,28 +4591,30 @@ router.post("/streams/create", async (req: Request, res: Response) => {
   try {
     // Permission check: canStream field + admin global toggle
     const db = getDb();
-    if (db) {
-      const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-      if (!user) return res.status(401).json({ success: false, message: "المستخدم غير موجود" });
+    if (!db) {
+      socialLog.error("Stream create: database unavailable");
+      return res.status(503).json({ success: false, message: "الخدمة غير متاحة حالياً" });
+    }
 
-      // Check per-user canStream flag
-      if (!user.canStream) {
-        return res.status(403).json({ success: false, message: "تم تعطيل البث لحسابك. تواصل مع الإدارة." });
-      }
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!user) return res.status(401).json({ success: false, message: "المستخدم غير موجود" });
 
-      // Check admin global streaming toggle
-      const { type: reqType } = req.body;
-      const settingKey = reqType === "audio" ? "audio_streaming_enabled" : "video_streaming_enabled";
-      const [globalSetting] = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, settingKey)).limit(1);
-      if (globalSetting && globalSetting.value === "false") {
-        // Global streaming disabled — only whitelisted users (canStream=true) with explicit override can bypass
-        // Check if user has explicit whitelist entry
-        const [whitelistSetting] = await db.select().from(schema.systemSettings)
-          .where(eq(schema.systemSettings.key, `stream_whitelist_${userId}`)).limit(1);
-        if (!whitelistSetting || whitelistSetting.value !== "true") {
-          const msg = reqType === "audio" ? "البث الصوتي معطل حالياً من الإدارة" : "البث المرئي معطل حالياً من الإدارة";
-          return res.status(403).json({ success: false, message: msg });
-        }
+    // Check per-user canStream flag
+    if (!user.canStream) {
+      return res.status(403).json({ success: false, message: "تم تعطيل البث لحسابك. تواصل مع الإدارة." });
+    }
+
+    // Check admin global streaming toggle
+    const { type: reqType } = req.body;
+    const settingKey = reqType === "audio" ? "audio_streaming_enabled" : "video_streaming_enabled";
+    const [globalSetting] = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, settingKey)).limit(1);
+    if (globalSetting && globalSetting.value === "false") {
+      // Global streaming disabled — only whitelisted users can bypass
+      const [whitelistSetting] = await db.select().from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, `stream_whitelist_${userId}`)).limit(1);
+      if (!whitelistSetting || whitelistSetting.value !== "true") {
+        const msg = reqType === "audio" ? "البث الصوتي معطل حالياً من الإدارة" : "البث المرئي معطل حالياً من الإدارة";
+        return res.status(403).json({ success: false, message: msg });
       }
     }
 

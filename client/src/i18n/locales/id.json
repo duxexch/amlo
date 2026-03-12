@@ -1789,6 +1789,7 @@
   "permissions": {
     "micDenied": "Harap izinkan akses mikrofon untuk melakukan panggilan",
     "cameraMicDenied": "Harap izinkan akses kamera dan mikrofon",
+    "mediaNotAvailable": "Akses media tidak tersedia di browser ini",
     "locationDenied": "Harap izinkan akses lokasi",
     "micDeniedSettings": "Izin mikrofon ditolak. Aktifkan melalui pengaturan browser lalu coba lagi",
     "cameraDenied": "Tidak dapat mengakses kamera"

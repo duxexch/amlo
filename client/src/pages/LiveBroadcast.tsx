@@ -296,16 +296,8 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
         if (cancelled) return;
         setCurrentUserId(userId);
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
-        const hostMode = !!(userId && stream.userId && userId === stream.userId);
-        setIsHost(hostMode);
 
-        // Keep DB viewer metrics in sync for non-host audience.
-        if (!hostMode) {
-          joinedAsViewer = true;
-          streamsApi.join(stream.id).catch(() => { });
-        }
-
-        // Fetch LiveKit token
+        // Fetch LiveKit token — server determines role authoritatively
         setLkState('connecting');
         const tokenRes = await streamsApi.token(stream.id);
         if (cancelled) return;
@@ -314,6 +306,16 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
         if (!token || !wsUrl) {
           setLkState('failed');
           return;
+        }
+
+        // Use server-determined role for host detection (works for anonymous streams too)
+        const hostMode = role === 'host';
+        setIsHost(hostMode);
+
+        // Keep DB viewer metrics in sync for non-host audience.
+        if (!hostMode) {
+          joinedAsViewer = true;
+          streamsApi.join(stream.id).catch(() => { });
         }
 
         // Connect to LiveKit — audio only (no video for audio rooms)
@@ -1604,7 +1606,16 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
         if (cancelled) return;
         setCurrentUserId(userId);
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
-        const hostMode = !!(userId && stream.userId && userId === stream.userId);
+
+        // Fetch LiveKit token — server determines role authoritatively
+        setLkState('connecting');
+        const tokenRes = await streamsApi.token(stream.id);
+        if (cancelled) return;
+        const { token, wsUrl, role } = tokenRes;
+        if (!token || !wsUrl) { setLkState('failed'); return; }
+
+        // Use server-determined role for host detection (works for anonymous streams too)
+        const hostMode = role === 'host';
         setIsHost(hostMode);
         if (hostMode && !conn.allowVideo) setCamOn(false);
 
@@ -1614,16 +1625,13 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
           streamsApi.join(stream.id).catch(() => { });
         }
 
-        setLkState('connecting');
-        const tokenRes = await streamsApi.token(stream.id);
-        if (cancelled) return;
-        const { token, wsUrl, role } = tokenRes;
-        if (!token || !wsUrl) { setLkState('failed'); return; }
-
         await livekitStreamManager.connect(wsUrl, token, role as StreamRole, {
           onStateChange: (state: StreamState) => { if (!cancelled) setLkState(state); },
           onActiveSpeakersChanged: () => { },
-          onError: () => { if (!cancelled) setLkState('failed'); },
+          onError: (msg: string) => {
+            console.error('[VideoStream] LiveKit error:', msg);
+            if (!cancelled) setLkState('failed');
+          },
           onConnectionQualityChanged: (q: string, participantId: string) => {
             if (!cancelled && (!participantId || participantId === userId)) setLkQualityHint(q);
           },
@@ -1644,7 +1652,10 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
           publishAudio: hostMode,
           videoQuality: effectiveVideoQuality,
         });
-      } catch { if (!cancelled) setLkState('failed'); }
+      } catch (err) {
+        console.error('[VideoStream] Init error:', err);
+        if (!cancelled) setLkState('failed');
+      }
     };
     init();
     // Fetch pinned message & active poll
@@ -2436,6 +2447,12 @@ export function LiveBroadcast() {
     if (creating) return;
     if (isAnonymous && !anonymousName.trim()) {
       toast.error(t("live.anonymousNameRequired", "أدخل اسماً مستعاراً"));
+      return;
+    }
+
+    // Check media API availability (WebView / insecure context)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error(t("permissions.mediaNotAvailable", "الوصول للوسائط غير متاح في هذا المتصفح"));
       return;
     }
 

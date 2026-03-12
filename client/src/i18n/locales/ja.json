@@ -1789,6 +1789,7 @@
   "permissions": {
     "micDenied": "通話にはマイクへのアクセスを許可してください",
     "cameraMicDenied": "カメラとマイクへのアクセスを許可してください",
+    "mediaNotAvailable": "このブラウザではメディアアクセスが利用できません",
     "locationDenied": "位置情報へのアクセスを許可してください",
     "micDeniedSettings": "マイクの許可が拒否されました。ブラウザの設定から有効にして再度お試しください",
     "cameraDenied": "カメラにアクセスできません"

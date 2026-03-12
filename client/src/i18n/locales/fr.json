@@ -1789,6 +1789,7 @@
   "permissions": {
     "micDenied": "Veuillez autoriser l'accès au microphone pour passer l'appel",
     "cameraMicDenied": "Veuillez autoriser l'accès à la caméra et au microphone",
+    "mediaNotAvailable": "L'accès aux médias n'est pas disponible dans ce navigateur",
     "locationDenied": "Veuillez autoriser l'accès à la localisation",
     "micDeniedSettings": "Permission du microphone refusée. Veuillez l'activer dans les paramètres du navigateur et réessayer",
     "cameraDenied": "Impossible d'accéder à la caméra"
