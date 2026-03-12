@@ -19,7 +19,7 @@ rtc:
   port_range_end: 50100
   tcp_port: 7881
   udp_port: 7882
-  
+
   # ICE servers - critical for NAT traversal
   ice_servers:
     - urls:
