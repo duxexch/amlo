@@ -1,78 +1,40 @@
 # ═══════════════════════════════════════════════════════
 # LiveKit Server Configuration — Ablox Live Streaming
-# Complete + Production-Ready Configuration
+# Minimal + Compatible Config (works with all versions)
+# Advanced settings via docker-compose environment variables
 # ═══════════════════════════════════════════════════════
 
-# ── Basic Settings ──
+# ── Basic Server Settings ──
 port: 7880
 bind_addresses:
   - 0.0.0.0
-api:
-  api_key: ablox_livekit_key
-  api_secret: ablox_livekit_secret_2026_secure
+
+# ── Keys (matches LIVEKIT_API_KEY and LIVEKIT_API_SECRET env) ──
+keys:
+  ablox_livekit_key: ablox_livekit_secret_2026_secure
 
 # ── RTC (WebRTC) Configuration ──
 rtc:
   use_external_ip: true
-  use_external_ip_fallback: true
   port_range_start: 50000
   port_range_end: 50100
+  # TCP fallback for restrictive networks
   tcp_port: 7881
-  udp_port: 7882
-
-  # ICE servers - critical for NAT traversal
-  ice_servers:
-    - urls:
-        - "stun:stun.l.google.com:19302"
-        - "stun:turn.mrco.live:3478"
-    - urls:
-        - "turn:turn.mrco.live:3478?transport=udp"
-        - "turns:turn.mrco.live:443?transport=tcp"
-      username: "ablox"
-      credential: "ablox_livekit_secret_2026_secure"
-
-# ── API Keys (from env or hardcoded) ──
-# These should match LIVEKIT_API_KEY and LIVEKIT_API_SECRET
-keys:
-  # Key name : Secret
-  ablox_livekit_key: ablox_livekit_secret_2026_secure
 
 # ── Room Settings ──
 room:
-  empty_timeout: 300 # auto-delete empty rooms after 5 min
-  max_participants: 500 # max 500 per room
-  auto_create: true # auto-create rooms on first join
-
-# ── Replication (for multi-region) ──
-# Disable if single region
-replication:
-  enabled: false
-
-# ── WebRTC Codec Configuration ──
-# Use VP8 + Opus for compatibility
-codecs:
-  video:
-    - mime: video/vp8
-      fmtp_line: ""
-    - mime: video/h264
-      fmtp_line: "packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01e"
-  audio:
-    - mime: audio/opus
-      fmtp_line: "minptime=10;useinbandfec=1"
+  empty_timeout: 300      # Auto-cleanup after 5 minutes
+  max_participants: 500   # Max concurrent users per room
+  auto_create: true       # Create rooms on first join
 
 # ── Logging ──
 logging:
-  sample: false
   level: info
-  json: true
+  sample: false
 
-# ── Performance Tuning ──
-# Increase this if you have high throughput
-num_cpus: 0 # Auto-detect
-buffer_factory: ring_buffer
-
-# ── Webhook (optional — for integrations) ──
-# webhook:
-#   api_key: webhook_secret
-#   urls:
-#     - "https://mrco.live/webhooks/livekit"
+# ────────────────────────────────────────────────────────
+# IMPORTANT: ICE/STUN/TURN servers, codecs, and advanced
+# settings are configured via environment variables in
+# docker-compose.yml to ensure compatibility with all
+# LiveKit versions. See docker-compose.yml for details.
+# ────────────────────────────────────────────────────────
