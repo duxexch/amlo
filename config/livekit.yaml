@@ -13,41 +13,28 @@ api:
 
 # ── RTC (WebRTC) Configuration ──
 rtc:
+  use_external_ip: true
+  use_external_ip_fallback: true
   port_range_start: 50000
   port_range_end: 50100
-  use_external_ip: true
   tcp_port: 7881
-
-  # CRITICAL: Specify external IP for media connections
-  # Set this to your server's public IP or load balancer IP
-  # Format: IP:port or just IP (port defaults to port_range_start)
-  use_external_ip_fallback: true
-
-  # UDP port for media (critical for NAT traversal)
-  port: 7882
   udp_port: 7882
-
-  # ICE servers for WebRTC connectivity
+  
+  # ICE servers - critical for NAT traversal
   ice_servers:
     - urls:
-        - "stun:turn.mrco.live:3478"
         - "stun:stun.l.google.com:19302"
-      username: ""
-      credential: ""
+        - "stun:turn.mrco.live:3478"
     - urls:
         - "turn:turn.mrco.live:3478?transport=udp"
         - "turns:turn.mrco.live:443?transport=tcp"
       username: "ablox"
       credential: "ablox_livekit_secret_2026_secure"
 
-  # Network interfaces
-  interfaces:
-    - |
-      dev: eth0
-      ip: ""
-
-# ── Keys & Metadata ──
+# ── API Keys (from env or hardcoded) ──
+# These should match LIVEKIT_API_KEY and LIVEKIT_API_SECRET
 keys:
+  # Key name : Secret
   ablox_livekit_key: ablox_livekit_secret_2026_secure
 
 # ── Room Settings ──
