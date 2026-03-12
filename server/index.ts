@@ -1772,6 +1772,26 @@ app.use((req, res, next) => {
   await applyDatabaseConstraints();
   await ensureDefaultAdmin();
 
+  // Cleanup stale calls stuck in ringing/active from previous crashes
+  try {
+    const db = (await import("./db")).getDb();
+    const { calls } = await import("../shared/schema");
+    const { eq, or, and, sql } = await import("drizzle-orm");
+    if (db) {
+      const result = await db.update(calls)
+        .set({ status: "ended", endedAt: sql`NOW()` })
+        .where(
+          or(
+            and(eq(calls.status, "ringing"), sql`${calls.createdAt} < NOW() - INTERVAL '60 seconds'`),
+            and(eq(calls.status, "active"), sql`${calls.createdAt} < NOW() - INTERVAL '2 hours'`),
+          )!
+        );
+      serverLog.info(`Cleaned up stale calls on startup`);
+    }
+  } catch (err) {
+    serverLog.warn({ err }, "Failed to cleanup stale calls on startup");
+  }
+
   // Initialize email/OTP service
   const { initEmailService } = await import("./services/email");
   initEmailService();

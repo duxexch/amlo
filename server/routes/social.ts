@@ -6,7 +6,7 @@
 import { Router, type Request, type Response } from "express";
 import { escapeLike, isValidUuid } from "../utils/validation";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { eq, and, or, desc, asc, sql, count, ne, inArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql, count, ne, inArray, gt } from "drizzle-orm";
 import { getDb } from "../db";
 import { getRedis } from "../redis";
 import { createLogger } from "../logger";
@@ -1941,6 +1941,7 @@ router.post("/calls", async (req, res) => {
     const receiverOnline = await isUserOnline(receiverId);
 
     // Check if receiver is already in an active call — auto-busy
+    // Use time boundaries to avoid stale calls blocking: ringing < 60s, active < 2h
     const [receiverActiveCall] = await db.select({ id: schema.calls.id }).from(schema.calls)
       .where(
         and(
@@ -1949,8 +1950,8 @@ router.post("/calls", async (req, res) => {
             eq(schema.calls.receiverId, receiverId),
           ),
           or(
-            eq(schema.calls.status, "active"),
-            eq(schema.calls.status, "ringing"),
+            and(eq(schema.calls.status, "ringing"), gt(schema.calls.createdAt, sql`NOW() - INTERVAL '60 seconds'`)),
+            and(eq(schema.calls.status, "active"), gt(schema.calls.createdAt, sql`NOW() - INTERVAL '2 hours'`)),
           ),
         )
       ).limit(1);
