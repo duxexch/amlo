@@ -30,6 +30,32 @@ import { toast } from "sonner";
 import { socketManager, type ConnectionInfo } from "@/lib/socketManager";
 import { LANGUAGES } from "@/i18n";
 
+/** Clamp a dropdown element inside the viewport so it never gets clipped */
+function clampToViewport(el: HTMLElement | null) {
+  if (!el) return;
+  // Reset any previous adjustments
+  el.style.left = "";
+  el.style.right = "";
+  el.style.removeProperty("inset-inline-start");
+  el.style.removeProperty("inset-inline-end");
+  requestAnimationFrame(() => {
+    const rect = el.getBoundingClientRect();
+    const pad = 8;
+    if (rect.right > window.innerWidth - pad) {
+      el.style.left = "auto";
+      el.style.right = "0px";
+      el.style.removeProperty("inset-inline-start");
+      el.style.removeProperty("inset-inline-end");
+    }
+    if (rect.left < pad) {
+      el.style.right = "auto";
+      el.style.left = "0px";
+      el.style.removeProperty("inset-inline-start");
+      el.style.removeProperty("inset-inline-end");
+    }
+  });
+}
+
 // ── Date label helper ──
 function formatDateLabel(dateStr: string, t: any): string {
   const d = new Date(dateStr);
@@ -395,11 +421,11 @@ const MessageBubble = memo(function MessageBubble({
         <AnimatePresence>
           {showMenu && (
             <motion.div
-              ref={menuRef}
+              ref={(el) => { if (menuRef) (menuRef as React.MutableRefObject<HTMLDivElement | null>).current = el; clampToViewport(el); }}
               initial={{ opacity: 0, scale: 0.9, y: -5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="absolute top-full left-0 rtl:left-auto rtl:right-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
+              className="absolute top-full mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
             >
               <button onClick={() => { onReply(msg); setShowMenu(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/5 transition-colors">
@@ -962,7 +988,8 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                           initial={{ opacity: 0, scale: 0.9, y: -4 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[60vh] overflow-y-auto p-2"
+                          className="absolute top-full mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50 w-[min(16rem,calc(100vw-1rem))] max-h-[60vh] overflow-y-auto p-2"
+                          ref={(el) => clampToViewport(el)}
                         >
                           <div className="flex items-center justify-between mb-2 px-1">
                             <span className="text-[11px] text-white/70 font-semibold">{t("chat.autoTranslate", "الترجمة التلقائية")}</span>
@@ -1027,7 +1054,8 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                           initial={{ opacity: 0, scale: 0.9, y: -4 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(10rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
+                          className="absolute top-full mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(10rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
+                          ref={(el) => clampToViewport(el)}
                         >
                           {[
                             { key: "all", label: t("social.notifyAll", "الكل") },
@@ -1080,7 +1108,8 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
                     <AnimatePresence>
                       {chat.showBlockMenu && (
                         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                          className="absolute top-full end-0 mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(11rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto">
+                          className="absolute top-full mt-1 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 w-[min(11rem,calc(100vw-1rem))] max-h-[55vh] overflow-y-auto"
+                          ref={(el) => clampToViewport(el)}>
                           <button onClick={chat.handleToggleBlock}
                             className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm ${chat.blockStatus?.blockedByMe ? "text-emerald-400 hover:bg-emerald-500/10" : "text-red-400 hover:bg-red-500/10"
                               } transition-colors`}>
