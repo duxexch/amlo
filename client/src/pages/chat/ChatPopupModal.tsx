@@ -920,10 +920,10 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           exit={{ opacity: 0, scale: 0.92, y: 30 }}
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
           onClick={e => e.stopPropagation()}
-          className="w-full max-w-lg h-[90dvh] sm:h-[85dvh] max-h-[700px] min-h-0 flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)] overflow-hidden"
+          className="w-full max-w-lg h-[90dvh] sm:h-[85dvh] max-h-[700px] min-h-0 flex flex-col bg-[#0e0e20]/95 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.6)]"
         >
           {/* ── Header ── */}
-          <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3 bg-white/[0.02] shrink-0">
+          <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3 bg-white/[0.02] shrink-0 rounded-t-3xl">
             <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all">
               <X className="w-4 h-4 text-white/50" />
             </button>
@@ -1292,7 +1292,7 @@ export function ChatPopupModal({ initialConv, conversations, setConversations, s
           </AnimatePresence>
 
           {/* ── Message Input ── */}
-          <div className="border-t border-white/5 px-3 py-3 bg-white/[0.02] shrink-0">
+          <div className="border-t border-white/5 px-3 py-3 bg-white/[0.02] shrink-0 rounded-b-3xl">
             {chat.blockStatus?.isBlocked ? (
               <div className="text-center py-2 text-white/30 text-sm">
                 {chat.blockStatus.blockedByMe ? t("chat.unblockToChat", "ألغِ الحظر للمراسلة") : t("chat.blockedCannotChat", "لا يمكنك المراسلة")}
