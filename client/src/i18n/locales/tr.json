@@ -1537,6 +1537,8 @@
     "callFailed": "Arama başarısız",
     "userOffline": "Kullanıcı şu anda çevrimdışı",
     "userBusy": "Kullanıcı başka bir aramada",
+    "callerBusy": "Zaten başka bir aramada olduğunuz",
+    "peerDisconnected": "Karşı tarafın bağlantısı kesildi",
     "callNoLongerAvailable": "Arama artık mevcut değil",
     "minimizeCall": "Aramayı küçült",
     "tapToReturn": "Geri dönmek için dokun",

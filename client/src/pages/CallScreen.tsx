@@ -336,6 +336,8 @@ export function CallScreen() {
         const code = err?.code || err?.response?.data?.code;
         if (code === "RECEIVER_BUSY") {
           setErrorMsg(t("social.userBusy", "المستخدم في مكالمة أخرى"));
+        } else if (code === "CALLER_BUSY") {
+          setErrorMsg(t("social.callerBusy", "أنت في مكالمة أخرى حالياً"));
         } else {
           setErrorMsg(err?.message || t("social.callStartFailed", "تعذر بدء المكالمة"));
         }
@@ -442,6 +444,8 @@ export function CallScreen() {
       if (typeof data?.coinsCharged === "number") setChargedCoins(data.coinsCharged);
       if (data?.reason === "balance_exhausted") {
         setErrorMsg(data?.message || t("social.callEndedNoBalance", "انتهى الرصيد وتم إنهاء المكالمة"));
+      } else if (data?.reason === "peer_disconnected") {
+        setErrorMsg(t("social.peerDisconnected", "انقطع اتصال الطرف الآخر"));
       }
       webrtcManager.endCall();
       setStatus("ended");
@@ -501,8 +505,9 @@ export function CallScreen() {
     const handleBeforeUnload = () => {
       webrtcManager.endCall();
       if (callId) {
-        // Use sendBeacon for reliable delivery during page unload
-        navigator.sendBeacon(`/api/social/calls/${callId}/end`, JSON.stringify({}));
+        // Use sendBeacon with proper content-type for reliable delivery during page unload
+        const blob = new Blob([JSON.stringify({})], { type: "application/json" });
+        navigator.sendBeacon(`/api/social/calls/${callId}/end`, blob);
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);

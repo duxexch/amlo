@@ -1863,7 +1863,9 @@ router.get("/chat/metrics", async (req, res) => {
 import crypto from "crypto";
 import { getConfig } from "../config";
 
-router.get("/ice-servers", (_req, res) => {
+router.get("/ice-servers", (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
   const cfg = getConfig();
   const servers: Array<{ urls: string | string[]; username?: string; credential?: string }> = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -1939,6 +1941,29 @@ router.post("/calls", async (req, res) => {
 
     // Check if receiver is online
     const receiverOnline = await isUserOnline(receiverId);
+
+    // Check if CALLER is already in an active call — prevent multi-call abuse
+    const [callerActiveCall] = await db.select({ id: schema.calls.id }).from(schema.calls)
+      .where(
+        and(
+          or(
+            eq(schema.calls.callerId, userId),
+            eq(schema.calls.receiverId, userId),
+          ),
+          or(
+            and(eq(schema.calls.status, "ringing"), gt(schema.calls.createdAt, sql`NOW() - INTERVAL '60 seconds'`)),
+            and(eq(schema.calls.status, "active"), gt(schema.calls.createdAt, sql`NOW() - INTERVAL '2 hours'`)),
+          ),
+        )
+      ).limit(1);
+
+    if (callerActiveCall) {
+      return res.status(409).json({
+        success: false,
+        message: "أنت في مكالمة أخرى حالياً",
+        code: "CALLER_BUSY",
+      });
+    }
 
     // Check if receiver is already in an active call — auto-busy
     // Use time boundaries to avoid stale calls blocking: ringing < 60s, active < 2h

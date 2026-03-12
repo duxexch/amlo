@@ -1537,6 +1537,8 @@
     "callFailed": "通話失敗",
     "userOffline": "ユーザーは現在オフラインです",
     "userBusy": "相手は通話中です",
+    "callerBusy": "すでに別の通話中です",
+    "peerDisconnected": "相手の接続が切断されました",
     "callNoLongerAvailable": "通話は終了しました",
     "minimizeCall": "通話を最小化",
     "tapToReturn": "タップして戻る",

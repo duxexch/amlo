@@ -1529,6 +1529,8 @@
     "callFailed": "Llamada fallida",
     "userOffline": "El usuario no está conectado",
     "userBusy": "El usuario está en otra llamada",
+    "callerBusy": "Ya estás en otra llamada",
+    "peerDisconnected": "La otra parte se desconectó",
     "callNoLongerAvailable": "La llamada ya no está disponible",
     "minimizeCall": "Minimizar llamada",
     "tapToReturn": "Toca para volver",

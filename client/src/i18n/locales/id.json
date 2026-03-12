@@ -1537,6 +1537,8 @@
     "callFailed": "Panggilan gagal",
     "userOffline": "Pengguna sedang offline",
     "userBusy": "Pengguna sedang dalam panggilan lain",
+    "callerBusy": "Anda sudah dalam panggilan lain",
+    "peerDisconnected": "Pihak lain terputus",
     "callNoLongerAvailable": "Panggilan tidak lagi tersedia",
     "minimizeCall": "Perkecil panggilan",
     "tapToReturn": "Ketuk untuk kembali",

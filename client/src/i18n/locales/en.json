@@ -1607,6 +1607,8 @@
     "callFailed": "Call Failed",
     "userOffline": "User is Currently Offline",
     "userBusy": "User is on Another Call",
+    "callerBusy": "You are already in another call",
+    "peerDisconnected": "The other party disconnected",
     "callNoLongerAvailable": "Call is No Longer Available",
     "minimizeCall": "Minimize Call",
     "tapToReturn": "Tap to Return",

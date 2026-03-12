@@ -1537,6 +1537,8 @@
     "callFailed": "Échec de l'appel",
     "userOffline": "L'utilisateur est actuellement hors ligne",
     "userBusy": "L'utilisateur est en appel",
+    "callerBusy": "Vous êtes déjà en appel",
+    "peerDisconnected": "L'autre partie s'est déconnectée",
     "callNoLongerAvailable": "L'appel n'est plus disponible",
     "minimizeCall": "Réduire l'appel",
     "tapToReturn": "Appuyez pour revenir",

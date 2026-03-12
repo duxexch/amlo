@@ -1529,6 +1529,8 @@
     "callFailed": "تماس ناموفق",
     "userOffline": "کاربر در حال حاضر آفلاین است",
     "userBusy": "کاربر در تماس دیگری است",
+    "callerBusy": "شما در حال حاضر در تماس دیگری هستید",
+    "peerDisconnected": "ارتباط طرف مقابل قطع شد",
     "callNoLongerAvailable": "تماس دیگر در دسترس نیست",
     "minimizeCall": "کوچک کردن تماس",
     "tapToReturn": "برای بازگشت بزنید",

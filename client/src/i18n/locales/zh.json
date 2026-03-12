@@ -1537,6 +1537,8 @@
     "callFailed": "通话失败",
     "userOffline": "用户当前离线",
     "userBusy": "用户正在通话中",
+    "callerBusy": "您正在另一个通话中",
+    "peerDisconnected": "对方已断开连接",
     "callNoLongerAvailable": "通话已不可用",
     "minimizeCall": "最小化通话",
     "tapToReturn": "点击返回",

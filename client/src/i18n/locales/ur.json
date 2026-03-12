@@ -1537,6 +1537,8 @@
     "callFailed": "کال ناکام",
     "userOffline": "صارف اس وقت آف لائن ہے",
     "userBusy": "صارف دوسری کال پر ہے",
+    "callerBusy": "آپ پہلے سے ایک اور کال پر ہیں",
+    "peerDisconnected": "دوسری طرف کا رابطہ منقطع ہو گیا",
     "callNoLongerAvailable": "کال اب دستیاب نہیں ہے",
     "minimizeCall": "کال چھوٹی کریں",
     "tapToReturn": "واپس جانے کے لیے ٹیپ کریں",

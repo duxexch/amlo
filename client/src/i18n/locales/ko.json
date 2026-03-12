@@ -1537,6 +1537,8 @@
     "callFailed": "통화 실패",
     "userOffline": "사용자가 현재 오프라인입니다",
     "userBusy": "상대방이 통화 중입니다",
+    "callerBusy": "이미 다른 통화 중입니다",
+    "peerDisconnected": "상대방의 연결이 끊어졌습니다",
     "callNoLongerAvailable": "통화를 더 이상 사용할 수 없습니다",
     "minimizeCall": "통화 최소화",
     "tapToReturn": "탭하여 돌아가기",

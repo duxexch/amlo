@@ -112,9 +112,13 @@ function calculateMOS(rtt: number, jitter: number, packetLossPercent: number): n
 
 /** Enable Opus DTX (discontinuous transmission) to save bandwidth on voice calls */
 function enableOpusDTX(sdp: string): string {
+  // Dynamically find Opus payload type from SDP (not always 111)
+  const opusMatch = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
+  if (!opusMatch) return sdp;
+  const pt = opusMatch[1];
   return sdp.replace(
-    /a=fmtp:111 (.*)/g,
-    "a=fmtp:111 $1;usedtx=1;stereo=0;sprop-stereo=0"
+    new RegExp(`a=fmtp:${pt} (.*)`, "g"),
+    `a=fmtp:${pt} $1;usedtx=1;stereo=0;sprop-stereo=0`
   );
 }
 
@@ -413,8 +417,8 @@ class WebRTCManager {
           this.reconnectAttempts = 0;
           if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
           this.setState("active");
-          this.startDurationTimer();
-          this.startStatsMonitoring();
+          if (!this.durationInterval) this.startDurationTimer();
+          if (!this.statsInterval) this.startStatsMonitoring();
           this.applyBitrateConstraints();
           break;
         case "disconnected":
@@ -636,7 +640,7 @@ class WebRTCManager {
           this.applyBitrateConstraints();
         }
       } catch { }
-    }, 5_000); // every 5 seconds
+    }, 2_000); // every 2 seconds for responsive adaptive bitrate
   }
 
   /**

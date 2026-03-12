@@ -1529,6 +1529,8 @@
     "callFailed": "Anruf fehlgeschlagen",
     "userOffline": "Benutzer ist derzeit offline",
     "userBusy": "Benutzer ist in einem anderen Anruf",
+    "callerBusy": "Sie sind bereits in einem anderen Anruf",
+    "peerDisconnected": "Die Gegenseite wurde getrennt",
     "callNoLongerAvailable": "Anruf nicht mehr verfügbar",
     "minimizeCall": "Anruf minimieren",
     "tapToReturn": "Tippen zum Zurückkehren",

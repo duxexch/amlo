@@ -1096,6 +1096,35 @@ io.on("connection", (socket) => {
     if (userId) {
       await leaveQueue(userId);
       await endRandomCall(userId);
+
+      // ── End any active/ringing calls for this user on disconnect ──
+      try {
+        const db = getDb();
+        if (db) {
+          const { calls } = await import("../shared/schema");
+          const { eq, or, and } = await import("drizzle-orm");
+          const activeCalls = await db.select({ id: calls.id, callerId: calls.callerId, receiverId: calls.receiverId })
+            .from(calls)
+            .where(
+              and(
+                or(eq(calls.callerId, userId), eq(calls.receiverId, userId)),
+                or(eq(calls.status, "active"), eq(calls.status, "ringing")),
+              )
+            ).limit(5);
+          for (const call of activeCalls) {
+            await db.update(calls)
+              .set({ status: "ended", endedAt: new Date() })
+              .where(and(eq(calls.id, call.id), or(eq(calls.status, "active"), eq(calls.status, "ringing"))));
+            const otherId = call.callerId === userId ? call.receiverId : call.callerId;
+            io.to(`user:${otherId}`).emit("call-ended", {
+              callId: call.id,
+              reason: "peer_disconnected",
+            });
+          }
+        }
+      } catch (err) {
+        serverLog.warn({ err, userId }, "Failed to cleanup calls on disconnect");
+      }
       const stillConnected = (io.sockets.adapter.rooms.get(`user:${userId}`)?.size || 0) > 0;
       if (!stillConnected) {
         invalidateFriendPresenceRecipients(userId);
@@ -1791,6 +1820,25 @@ app.use((req, res, next) => {
   } catch (err) {
     serverLog.warn({ err }, "Failed to cleanup stale calls on startup");
   }
+
+  // ── Periodic stale call cleanup (every 60s) — defense against orphaned calls ──
+  setInterval(async () => {
+    try {
+      const db2 = (await import("./db")).getDb();
+      const { calls } = await import("../shared/schema");
+      const { eq, or, and, sql } = await import("drizzle-orm");
+      if (db2) {
+        await db2.update(calls)
+          .set({ status: "ended", endedAt: sql`NOW()` })
+          .where(
+            or(
+              and(eq(calls.status, "ringing"), sql`${calls.createdAt} < NOW() - INTERVAL '60 seconds'`),
+              and(eq(calls.status, "active"), sql`${calls.createdAt} < NOW() - INTERVAL '2 hours'`),
+            )!
+          );
+      }
+    } catch { /* swallow */ }
+  }, 60_000).unref();
 
   // Initialize email/OTP service
   const { initEmailService } = await import("./services/email");

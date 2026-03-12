@@ -1607,6 +1607,8 @@
     "callFailed": "فشل الاتصال",
     "userOffline": "المستخدم غير متصل حالياً",
     "userBusy": "المستخدم في مكالمة أخرى",
+    "callerBusy": "أنت في مكالمة أخرى حالياً",
+    "peerDisconnected": "انقطع اتصال الطرف الآخر",
     "callNoLongerAvailable": "المكالمة لم تعد متاحة",
     "minimizeCall": "تصغير المكالمة",
     "tapToReturn": "اضغط للعودة",
