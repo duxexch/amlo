@@ -1,24 +1,91 @@
 # ═══════════════════════════════════════════════════════
 # LiveKit Server Configuration — Ablox Live Streaming
-# Minimal + proven config — no experimental fields
-# TURN handled externally by Coturn (host network)
+# Complete + Production-Ready Configuration
 # ═══════════════════════════════════════════════════════
 
+# ── Basic Settings ──
 port: 7880
+bind_addresses:
+  - 0.0.0.0
+api:
+  api_key: ablox_livekit_key
+  api_secret: ablox_livekit_secret_2026_secure
 
+# ── RTC (WebRTC) Configuration ──
 rtc:
   port_range_start: 50000
   port_range_end: 50100
   use_external_ip: true
   tcp_port: 7881
 
+  # CRITICAL: Specify external IP for media connections
+  # Set this to your server's public IP or load balancer IP
+  # Format: IP:port or just IP (port defaults to port_range_start)
+  use_external_ip_fallback: true
+
+  # UDP port for media (critical for NAT traversal)
+  port: 7882
+  udp_port: 7882
+
+  # ICE servers for WebRTC connectivity
+  ice_servers:
+    - urls:
+        - "stun:turn.mrco.live:3478"
+        - "stun:stun.l.google.com:19302"
+      username: ""
+      credential: ""
+    - urls:
+        - "turn:turn.mrco.live:3478?transport=udp"
+        - "turns:turn.mrco.live:443?transport=tcp"
+      username: "ablox"
+      credential: "ablox_livekit_secret_2026_secure"
+
+  # Network interfaces
+  interfaces:
+    - |
+      dev: eth0
+      ip: ""
+
+# ── Keys & Metadata ──
 keys:
   ablox_livekit_key: ablox_livekit_secret_2026_secure
 
+# ── Room Settings ──
 room:
-  empty_timeout: 300
-  max_participants: 500
+  empty_timeout: 300 # auto-delete empty rooms after 5 min
+  max_participants: 500 # max 500 per room
+  auto_create: true # auto-create rooms on first join
 
+# ── Replication (for multi-region) ──
+# Disable if single region
+replication:
+  enabled: false
+
+# ── WebRTC Codec Configuration ──
+# Use VP8 + Opus for compatibility
+codecs:
+  video:
+    - mime: video/vp8
+      fmtp_line: ""
+    - mime: video/h264
+      fmtp_line: "packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01e"
+  audio:
+    - mime: audio/opus
+      fmtp_line: "minptime=10;useinbandfec=1"
+
+# ── Logging ──
 logging:
+  sample: false
   level: info
   json: true
+
+# ── Performance Tuning ──
+# Increase this if you have high throughput
+num_cpus: 0 # Auto-detect
+buffer_factory: ring_buffer
+
+# ── Webhook (optional — for integrations) ──
+# webhook:
+#   api_key: webhook_secret
+#   urls:
+#     - "https://mrco.live/webhooks/livekit"
