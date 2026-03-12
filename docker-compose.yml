@@ -48,6 +48,7 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:info@mrco.live}
       # ── TURN/STUN (Coturn) ──
       TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in .env}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
       # ── Payment Gateway (Stripe) ──
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -246,6 +247,7 @@ services:
       TLS_ARGS=\"--cert=$${TURN_TLS_CERT_FILE} --pkey=$${TURN_TLS_KEY_FILE} --tls-listening-port=$${TURN_TLS_LISTEN_PORT}\";
       fi;
       turnserver -c /etc/turnserver.conf
+      --log-file=stdout --verbose
       --static-auth-secret=$${TURN_SECRET}
       $${TURN_EXTERNAL_IP:+--external-ip=$${TURN_EXTERNAL_IP}}
       $${TLS_ARGS}"
