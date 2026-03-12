@@ -110,7 +110,7 @@ function calculateMOS(rtt: number, jitter: number, packetLossPercent: number): n
   return 1 + 0.035 * R + 7e-6 * R * (R - 60) * (100 - R);
 }
 
-/** Enable Opus DTX (discontinuous transmission) to save bandwidth on voice calls */
+/** Enable Opus DTX + FEC for bandwidth savings and packet-loss resilience */
 function enableOpusDTX(sdp: string): string {
   // Dynamically find Opus payload type from SDP (not always 111)
   const opusMatch = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
@@ -118,7 +118,7 @@ function enableOpusDTX(sdp: string): string {
   const pt = opusMatch[1];
   return sdp.replace(
     new RegExp(`a=fmtp:${pt} (.*)`, "g"),
-    `a=fmtp:${pt} $1;usedtx=1;stereo=0;sprop-stereo=0;maxaveragebitrate=24000;maxplaybackrate=24000`
+    `a=fmtp:${pt} $1;usedtx=1;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=24000;maxplaybackrate=24000`
   );
 }
 
@@ -139,9 +139,13 @@ class WebRTCManager {
   private isNegotiating = false;
   private makingOffer = false;
   private reconnectAttempts = 0;
-  private readonly maxReconnectAttempts = 3;
+  private readonly maxReconnectAttempts = 5;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private networkChangeHandler: (() => void) | null = null;
+  private onlineHandler: (() => void) | null = null;
+  private visibilityHandler: (() => void) | null = null;
+  private silentDisconnectTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPacketsReceivedAt = 0;
   private usingRelay = false;
   private lastPacketsReceived = 0;
   private currentFacingMode: "user" | "environment" = "user";
@@ -407,7 +411,7 @@ class WebRTCManager {
       if (this.pc?.iceGatheringState === "gathering") {
         gatheringTimer = setTimeout(() => {
           if (this.pc?.iceGatheringState === "gathering" && this.pc.localDescription) {
-            console.warn("[WebRTC] ICE gathering stuck >10s, forcing with available candidates");
+            console.warn("[WebRTC] ICE gathering stuck >5s, forcing with available candidates");
             const socket = socketManager.getSocket();
             socket.emit("call-signal", {
               callId: this.callId,
@@ -415,7 +419,7 @@ class WebRTCManager {
               signal: { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp },
             });
           }
-        }, 10_000);
+        }, 5_000);
       } else if (gatheringTimer) {
         clearTimeout(gatheringTimer);
         gatheringTimer = null;
@@ -529,18 +533,64 @@ class WebRTCManager {
 
     // ── Network Change Detection — debounced ICE restart on WiFi↔Cellular switch ──
     let networkDebounce: ReturnType<typeof setTimeout> | null = null;
-    this.networkChangeHandler = () => {
-      if (this.pc && this.state === "active") {
+    const debouncedICERestart = () => {
+      if (this.pc && (this.state === "active" || this.state === "reconnecting")) {
         if (networkDebounce) clearTimeout(networkDebounce);
         networkDebounce = setTimeout(() => {
           if (this.pc && (this.state === "active" || this.state === "reconnecting")) {
-            console.log("[WebRTC] Network stable after change, restarting ICE");
+            console.log("[WebRTC] Network change detected, restarting ICE");
             this.restartICE();
           }
         }, 2000);
       }
     };
+
+    // navigator.connection.change — Chrome/Edge/Android
+    this.networkChangeHandler = debouncedICERestart;
     (navigator as any).connection?.addEventListener("change", this.networkChangeHandler);
+
+    // online event — all browsers (Safari, Firefox included)
+    this.onlineHandler = () => {
+      if (this.pc && (this.state === "reconnecting" || this.pc.iceConnectionState === "disconnected" || this.pc.iceConnectionState === "failed")) {
+        console.log("[WebRTC] Browser came online, restarting ICE");
+        this.restartICE();
+      }
+    };
+    window.addEventListener("online", this.onlineHandler);
+
+    // visibilitychange — restart ICE when user returns to the app/tab (mobile may suspend WebRTC)
+    this.visibilityHandler = () => {
+      if (document.visibilityState === "visible" && this.pc) {
+        const iceState = this.pc.iceConnectionState;
+        if (iceState === "disconnected" || iceState === "failed") {
+          console.log("[WebRTC] Tab became visible with broken ICE, restarting");
+          this.restartICE();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", this.visibilityHandler);
+
+    // ── Silent Disconnect Detection — catch frozen connections with no packet flow ──
+    this.lastPacketsReceivedAt = Date.now();
+    this.silentDisconnectTimer = setInterval(async () => {
+      if (!this.pc || this.state !== "active") return;
+      try {
+        const stats = await this.pc.getStats();
+        let currentReceived = 0;
+        stats.forEach((report) => {
+          if (report.type === "inbound-rtp") currentReceived += report.packetsReceived || 0;
+        });
+        if (currentReceived > this.lastPacketsReceived) {
+          this.lastPacketsReceived = currentReceived;
+          this.lastPacketsReceivedAt = Date.now();
+        } else if (Date.now() - this.lastPacketsReceivedAt > 8000) {
+          // No new packets for 8 seconds — connection is silently dead
+          console.warn("[WebRTC] Silent disconnect: no packets for 8s, restarting ICE");
+          this.lastPacketsReceivedAt = Date.now(); // reset to avoid rapid retries
+          this.restartICE();
+        }
+      } catch { }
+    }, 4000);
   }
 
   /**
@@ -819,10 +869,22 @@ class WebRTCManager {
     if (this.qualityUnsub) this.qualityUnsub();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    // Remove network change listener
+    // Remove network/browser event listeners
     if (this.networkChangeHandler) {
       (navigator as any).connection?.removeEventListener("change", this.networkChangeHandler);
       this.networkChangeHandler = null;
+    }
+    if (this.onlineHandler) {
+      window.removeEventListener("online", this.onlineHandler);
+      this.onlineHandler = null;
+    }
+    if (this.visibilityHandler) {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    if (this.silentDisconnectTimer) {
+      clearInterval(this.silentDisconnectTimer);
+      this.silentDisconnectTimer = null;
     }
 
     // Stop local media tracks
@@ -841,6 +903,7 @@ class WebRTCManager {
     this.reconnectTimer = null;
     this.usingRelay = false;
     this.lastPacketsReceived = 0;
+    this.lastPacketsReceivedAt = 0;
     this.statsInterval = null;
     this.durationInterval = null;
     this.qualityUnsub = null;
