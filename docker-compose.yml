@@ -188,6 +188,12 @@ services:
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-ablox_livekit_key}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-ablox_livekit_secret_2026_secure}
+      # TURN/STUN servers for NAT traversal
+      LIVEKIT_IP_ADDRESSES: "72.61.187.119"
+      LIVEKIT_TURN_SERVERS: "turn:turn.mrco.live:3478?transport=udp,turns:turn.mrco.live:443?transport=tcp"
+      LIVEKIT_TURN_USERNAME: "ablox"
+      LIVEKIT_TURN_PASSWORD: "ablox_livekit_secret_2026_secure"
+      LIVEKIT_STUN_SERVERS: "stun:stun.l.google.com:19302,stun:turn.mrco.live:3478"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7880"]
       interval: 10s
