@@ -443,11 +443,20 @@ export function Friends() {
     return Number.isNaN(dt.getTime()) ? null : dt.toLocaleTimeString();
   }, [chatMetrics?.timestamp]);
 
-  const filteredConvs = useMemo(() =>
-    conversations.filter(c =>
+  const filteredConvs = useMemo(() => {
+    const filtered = conversations.filter(c =>
       !searchFilter || (c.otherUser?.displayName || c.otherUser?.username || "").toLowerCase().includes(searchFilter.toLowerCase())
-    ), [conversations, searchFilter]
-  );
+    );
+    return filtered.sort((a, b) => {
+      const aTyping = typingConvIds.has(a.id) ? 1 : 0;
+      const bTyping = typingConvIds.has(b.id) ? 1 : 0;
+      if (aTyping !== bTyping) return bTyping - aTyping;
+      const aOnline = a.otherUser?.isOnline ? 1 : 0;
+      const bOnline = b.otherUser?.isOnline ? 1 : 0;
+      if (aOnline !== bOnline) return bOnline - aOnline;
+      return new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime();
+    });
+  }, [conversations, searchFilter, typingConvIds]);
 
   // ── Load friends & requests ──
   useEffect(() => {
