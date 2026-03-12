@@ -4589,6 +4589,9 @@ router.post("/streams/create", async (req: Request, res: Response) => {
   const userId = requireUser(req, res);
   if (!userId) return;
   try {
+    // DEBUG: Log request body
+    socialLog.info({ body: req.body, contentType: req.headers['content-type'] }, "Stream create request");
+
     // Permission check: canStream field + admin global toggle
     const db = getDb();
     if (!db) {
