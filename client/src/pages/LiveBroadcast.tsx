@@ -580,6 +580,16 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
   const handleEndPoll = async (pollId: string) => {
     try { await streamsApi.endPoll(stream.id, pollId); setActivePoll(null); } catch { /* silent */ }
   };
+  const handleEndStream = async () => {
+    if (!isHost) return;
+    try {
+      await streamsApi.end(stream.id);
+      toast.success(t("live.streamEnded", "تم إنهاء البث"));
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || t("live.endStreamFailed", "فشل إنهاء البث"));
+    }
+  };
   const toggleRecording = async () => {
     try { if (isRecording) { await streamsApi.stopRecording(stream.id); setIsRecording(false); } else { await streamsApi.startRecording(stream.id); setIsRecording(true); } } catch { /* silent */ }
   };
