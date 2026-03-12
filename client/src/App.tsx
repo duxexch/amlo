@@ -8,6 +8,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CallPopup } from "@/components/ui/CallPopup";
+import { FloatingCallBar } from "@/components/FloatingCallBar";
 import { AnnouncementPopup } from "@/components/ui/AnnouncementPopup";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
@@ -57,6 +58,7 @@ const ReportsPage = lazy(() => import("@/pages/admin/Reports").then(m => ({ defa
 const SettingsPage = lazy(() => import("@/pages/admin/Settings").then(m => ({ default: m.SettingsPage })));
 const FraudDetectionPage = lazy(() => import("@/pages/admin/FraudDetection").then(m => ({ default: m.FraudDetectionPage })));
 const ChatManagementPage = lazy(() => import("@/pages/admin/ChatManagement").then(m => ({ default: m.ChatManagementPage })));
+const SectionsVisibilityPage = lazy(() => import("@/pages/admin/SectionsVisibility").then(m => ({ default: m.SectionsVisibilityPage })));
 
 // Agent Pages (separate chunk)
 const AgentProvider = lazy(() => import("@/pages/agent/AgentPanel").then(m => ({ default: m.AgentProvider })));
@@ -105,6 +107,9 @@ function AdminRouter() {
           </Route>
           <Route path="/admin/settings">
             <AdminLayout><SettingsPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/sections">
+            <AdminLayout><SectionsVisibilityPage /></AdminLayout>
           </Route>
           <Route component={NotFound} />
         </Switch>
@@ -234,6 +239,18 @@ function App() {
         if (data && typeof data === "object") {
           const call = data.call || {};
           const caller = data.caller || {};
+
+          // If already on the call screen, auto-reject this incoming call
+          if (window.location.pathname === "/call") {
+            const callId = call.id || data.callId;
+            if (callId) {
+              import("@/lib/socialApi").then(({ callsApi }) => {
+                callsApi.reject(callId).catch(() => { });
+              });
+            }
+            return;
+          }
+
           setIncomingCallInfo({
             callerName: caller.displayName || caller.username || data.callerName || data.senderName,
             callerId: call.callerId || caller.id || data.callerId,
@@ -356,6 +373,7 @@ function App() {
             }}
           />
           <Router />
+          <FloatingCallBar />
           <CallPopup
             isOpen={incomingCall}
             callerName={incomingCallInfo.callerName}

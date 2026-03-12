@@ -99,6 +99,17 @@ export const adminStats = {
   get: () => request<any>("/stats"),
 };
 
+// ── Section Visibility ───────────────────────────────────
+
+export const adminSections = {
+  get: () => request<Record<string, boolean>>("/sections"),
+  toggle: (key: string, visible: boolean, password: string) =>
+    request("/sections", {
+      method: "PUT",
+      body: JSON.stringify({ key, visible, password }),
+    }),
+};
+
 // ── Users ────────────────────────────────────────────────
 
 export interface UserFilters {

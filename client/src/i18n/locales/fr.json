@@ -348,7 +348,8 @@
       "fraud": "Détection de fraude",
       "settings": "Paramètres",
       "chatManagement": "Gestion des chats",
-      "chats": "Chats"
+      "chats": "Chats",
+      "sections": "Sections"
     },
     "sections": {
       "main": "Principal",
@@ -403,6 +404,27 @@
       "activeAgent": "Agent actif",
       "activeStream": "Diffusion active",
       "pendingReport": "Rapport en attente"
+    },
+    "sectionsVisibility": {
+      "title": "Gestion des sections",
+      "subtitle": "Contrôlez les sections visibles pour les utilisateurs",
+      "passwordLabel": "Mot de passe des sections",
+      "passwordHint": "Entrez le mot de passe des sections configuré sur le serveur",
+      "passwordRequired": "Veuillez d'abord entrer le mot de passe des sections",
+      "visible": "Visible",
+      "hidden": "Masqué",
+      "updated": "Visibilité de la section mise à jour",
+      "error": "Erreur lors de la mise à jour",
+      "noteTitle": "Note :",
+      "noteText": "Accueil et Profil ne peuvent pas être masqués. Les sections masquées disparaissent de la barre de navigation pour tous.",
+      "live": "En direct",
+      "liveDesc": "Section direct et salles",
+      "cex": "Regarder",
+      "cexDesc": "Section vidéos et reels",
+      "friends": "Amis",
+      "friendsDesc": "Section sociale et discussions",
+      "wallet": "Portefeuille",
+      "walletDesc": "Section portefeuille et transactions"
     },
     "settings": {
       "title": "Paramètres système",
@@ -1514,6 +1536,10 @@
     "callStartFailed": "Échec du démarrage de l'appel",
     "callFailed": "Échec de l'appel",
     "userOffline": "L'utilisateur est actuellement hors ligne",
+    "userBusy": "L'utilisateur est en appel",
+    "callNoLongerAvailable": "L'appel n'est plus disponible",
+    "minimizeCall": "Réduire l'appel",
+    "tapToReturn": "Appuyez pour revenir",
     "friendRequestAccepted": "Demande d'ami acceptée",
     "friendRequestRejected": "Demande d'ami refusée",
     "actionFailed": "Échec de l'action",
@@ -1669,7 +1695,16 @@
     "bannedWords": "Mots interdits",
     "addBannedWord": "Ajouter un mot interdit...",
     "noBannedWords": "Aucun mot interdit",
-    "category": "Catégorie"
+    "category": "Catégorie",
+    "streamType": "Type de diffusion",
+    "identityMode": "Identité",
+    "streamAsAccount": "Diffuser avec votre compte",
+    "streamAsAccountDesc": "Les spectateurs peuvent vous suivre et vous ajouter",
+    "streamAsAnonymous": "Diffuser anonymement",
+    "streamAsAnonymousDesc": "Les spectateurs ne peuvent pas vous suivre ni vous ajouter",
+    "anonymousName": "Nom anonyme",
+    "anonymousNamePlaceholder": "Choisissez un nom anonyme...",
+    "anonymousNameRequired": "Entrez un nom anonyme"
   },
   "resetPassword": {
     "title": "Définir un nouveau mot de passe",

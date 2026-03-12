@@ -527,7 +527,7 @@ export const streamsApi = {
     metadata?: Record<string, unknown>;
   }) => request<any>(`/streams/${id}/clips/auto`, { method: "POST", body: JSON.stringify(data) }),
   autoClips: (id: string) => request<any[]>(`/streams/${id}/clips`),
-  create: (data: { title: string; type: "live" | "audio"; tags?: string[]; category?: string; scheduledAt?: string }) =>
+  create: (data: { title?: string; type: "live" | "audio"; tags?: string[]; category?: string; scheduledAt?: string; isAnonymous?: boolean; anonymousName?: string }) =>
     request<any>("/streams/create", { method: "POST", body: JSON.stringify(data) }),
   end: (id: string) => request<any>(`/streams/${id}/end`, { method: "POST" }),
   join: (id: string) => request("/streams/" + id + "/join", { method: "POST" }),

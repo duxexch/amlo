@@ -348,7 +348,8 @@
       "fraud": "不正検出",
       "settings": "設定",
       "chatManagement": "チャット管理",
-      "chats": "チャット"
+      "chats": "チャット",
+      "sections": "セクション"
     },
     "sections": {
       "main": "メイン",
@@ -403,6 +404,27 @@
       "activeAgent": "アクティブエージェント",
       "activeStream": "アクティブ配信",
       "pendingReport": "保留中のレポート"
+    },
+    "sectionsVisibility": {
+      "title": "アプリセクション管理",
+      "subtitle": "ユーザーに表示するセクションを制御",
+      "passwordLabel": "セクションパスワード",
+      "passwordHint": "サーバーで設定されたセクションパスワードを入力",
+      "passwordRequired": "先にセクションパスワードを入力してください",
+      "visible": "表示",
+      "hidden": "非表示",
+      "updated": "セクションの表示が正常に更新されました",
+      "error": "更新中にエラーが発生しました",
+      "noteTitle": "注意:",
+      "noteText": "ホームとプロフィールは非表示にできません。非表示のセクションは全ユーザーのナビゲーションから消えます。",
+      "live": "ライブ配信",
+      "liveDesc": "ライブ配信とルームセクション",
+      "cex": "視聴",
+      "cexDesc": "動画とリールズの視聴セクション",
+      "friends": "友達",
+      "friendsDesc": "ソーシャルとチャットセクション",
+      "wallet": "ウォレット",
+      "walletDesc": "ウォレットと取引セクション"
     },
     "settings": {
       "title": "システム設定",
@@ -1514,6 +1536,10 @@
     "callStartFailed": "通話の開始に失敗",
     "callFailed": "通話失敗",
     "userOffline": "ユーザーは現在オフラインです",
+    "userBusy": "相手は通話中です",
+    "callNoLongerAvailable": "通話は終了しました",
+    "minimizeCall": "通話を最小化",
+    "tapToReturn": "タップして戻る",
     "friendRequestAccepted": "友達リクエストが承認されました",
     "friendRequestRejected": "友達リクエストが拒否されました",
     "actionFailed": "操作に失敗しました",
@@ -1669,7 +1695,16 @@
     "bannedWords": "禁止ワード",
     "addBannedWord": "禁止ワードを追加...",
     "noBannedWords": "禁止ワードなし",
-    "category": "カテゴリー"
+    "category": "カテゴリー",
+    "streamType": "配信タイプ",
+    "identityMode": "アイデンティティ",
+    "streamAsAccount": "アカウントで配信",
+    "streamAsAccountDesc": "視聴者はあなたをフォロー・追加できます",
+    "streamAsAnonymous": "匿名で配信",
+    "streamAsAnonymousDesc": "視聴者はあなたをフォロー・追加できません",
+    "anonymousName": "匿名名",
+    "anonymousNamePlaceholder": "匿名名を選んでください...",
+    "anonymousNameRequired": "匿名名を入力してください"
   },
   "resetPassword": {
     "title": "新しいパスワードを設定",

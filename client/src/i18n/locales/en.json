@@ -417,7 +417,8 @@
       "finances": "Finances",
       "reports": "Reports",
       "fraud": "Fraud Detection",
-      "settings": "Settings"
+      "settings": "Settings",
+      "sections": "Sections"
     },
     "sections": {
       "main": "Main",
@@ -472,6 +473,27 @@
       "activeAgent": "Active Agent",
       "activeStream": "Active Stream",
       "pendingReport": "Pending Report"
+    },
+    "sectionsVisibility": {
+      "title": "App Sections Manager",
+      "subtitle": "Control which sections are visible to users",
+      "passwordLabel": "Sections Password",
+      "passwordHint": "Enter the sections password configured on the server to make changes",
+      "passwordRequired": "Please enter the sections password first",
+      "visible": "Visible",
+      "hidden": "Hidden",
+      "updated": "Section visibility updated successfully",
+      "error": "An error occurred while updating",
+      "noteTitle": "Note:",
+      "noteText": "Home and Profile cannot be hidden. When a section is hidden, it disappears from the navigation bar for all users.",
+      "live": "Live Stream",
+      "liveDesc": "Live streaming and rooms section",
+      "cex": "Watch",
+      "cexDesc": "Videos and reels watching section",
+      "friends": "Friends",
+      "friendsDesc": "Social and chat section",
+      "wallet": "Wallet",
+      "walletDesc": "Wallet and financial transactions section"
     },
     "settings": {
       "title": "System Settings",
@@ -1584,6 +1606,10 @@
     "callStartFailed": "Failed to Start Call",
     "callFailed": "Call Failed",
     "userOffline": "User is Currently Offline",
+    "userBusy": "User is on Another Call",
+    "callNoLongerAvailable": "Call is No Longer Available",
+    "minimizeCall": "Minimize Call",
+    "tapToReturn": "Tap to Return",
     "friendRequestAccepted": "Friend Request Accepted",
     "friendRequestRejected": "Friend Request Rejected",
     "actionFailed": "Action Failed",
@@ -1739,7 +1765,16 @@
     "bannedWords": "Banned Words",
     "addBannedWord": "Add banned word...",
     "noBannedWords": "No banned words",
-    "category": "Category"
+    "category": "Category",
+    "streamType": "Stream Type",
+    "identityMode": "Identity",
+    "streamAsAccount": "Stream with your account",
+    "streamAsAccountDesc": "Viewers can follow and add you",
+    "streamAsAnonymous": "Stream anonymously",
+    "streamAsAnonymousDesc": "Viewers cannot follow or add you",
+    "anonymousName": "Anonymous Name",
+    "anonymousNamePlaceholder": "Choose an anonymous name...",
+    "anonymousNameRequired": "Enter an anonymous name"
   },
   "resetPassword": {
     "title": "Set New Password",

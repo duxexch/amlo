@@ -14,7 +14,7 @@ import {
   Phone, PhoneOff, Video, VideoOff, Mic, MicOff,
   Volume2, VolumeX, Coins, SkipForward,
   WifiOff, Signal, SignalLow, SignalMedium, SignalHigh,
-  SwitchCamera
+  SwitchCamera, Minimize2
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { callsApi } from "@/lib/socialApi";
@@ -22,6 +22,7 @@ import { useLocation, useSearch } from "wouter";
 import { webrtcManager, type CallState, type CallStats } from "@/lib/webrtcManager";
 import { getSocket } from "@/lib/socketManager";
 import { useConnectionQuality } from "@/hooks/useConnectionQuality";
+import { activeCallStore } from "@/lib/activeCallStore";
 
 function CallerAvatar({ user }: { user: any }) {
   const colors = ["from-primary to-secondary", "from-cyan-400 to-blue-500", "from-pink-400 to-rose-500", "from-amber-400 to-orange-500"];
@@ -124,6 +125,11 @@ export function CallScreen() {
   const sessionId = params.get("session");
   const isIncoming = params.get("incoming") === "1";
   const conn = useConnectionQuality();
+
+  // Restore from minimized state
+  useEffect(() => {
+    activeCallStore.restore();
+  }, []);
 
   const [status, setStatus] = useState<CallState>("connecting");
   const [duration, setDuration] = useState(0);
@@ -327,7 +333,12 @@ export function CallScreen() {
       })
       .catch((err: any) => {
         if (cancelled) return;
-        setErrorMsg(err?.message || t("social.callStartFailed", "تعذر بدء المكالمة"));
+        const code = err?.code || err?.response?.data?.code;
+        if (code === "RECEIVER_BUSY") {
+          setErrorMsg(t("social.userBusy", "المستخدم في مكالمة أخرى"));
+        } else {
+          setErrorMsg(err?.message || t("social.callStartFailed", "تعذر بدء المكالمة"));
+        }
         setStatus("failed");
       });
 
@@ -339,6 +350,7 @@ export function CallScreen() {
     onStateChange: (state) => {
       setStatus(state);
       if (state === "ended" || state === "failed") {
+        activeCallStore.clear();
         setTimeout(() => navigate("/chat"), 2500);
       }
     },
@@ -463,7 +475,12 @@ export function CallScreen() {
     if (isIncoming && callId) {
       setStatus("connecting");
       callsApi.answer(callId).catch((err: any) => {
-        setErrorMsg(err?.message || t("social.callAcceptFailed", "تعذر قبول المكالمة"));
+        const status = err?.status;
+        if (status === 404) {
+          setErrorMsg(t("social.callNoLongerAvailable", "المكالمة لم تعد متاحة"));
+        } else {
+          setErrorMsg(err?.message || t("social.callAcceptFailed", "تعذر قبول المكالمة"));
+        }
         setStatus("failed");
       });
     }
@@ -493,6 +510,7 @@ export function CallScreen() {
   }, [callId]);
 
   const endCall = async () => {
+    activeCallStore.clear();
     webrtcManager.endCall();
     if (isRandomMatch) {
       const socket = getSocket();
@@ -541,6 +559,21 @@ export function CallScreen() {
   };
 
   const toggleSpeaker = () => setIsSpeaker(!isSpeaker);
+
+  const handleMinimize = () => {
+    // Try native PiP for video calls
+    if (currentCallType === "video" && remoteVideoRef.current && document.pictureInPictureEnabled) {
+      remoteVideoRef.current.requestPictureInPicture().catch(() => { });
+    }
+    // Store call info and navigate away
+    activeCallStore.minimize({
+      callId: callId || "",
+      userId: userId || "",
+      callType: currentCallType,
+      displayName: otherUser?.displayName || "...",
+    });
+    navigate("/chat");
+  };
 
   const handleSwitchCamera = async () => {
     const facing = await webrtcManager.switchCamera();
@@ -738,6 +771,17 @@ export function CallScreen() {
             >
               {isSpeaker ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
+
+            {/* Minimize — تصغير المكالمة */}
+            {(status === "active" || status === "reconnecting") && (
+              <button
+                onClick={handleMinimize}
+                className="w-12 h-12 rounded-full flex items-center justify-center bg-white/10 text-white/70 border border-white/10 backdrop-blur-md transition-all"
+                title={t("social.minimizeCall", "تصغير المكالمة")}
+              >
+                <Minimize2 className="w-5 h-5" />
+              </button>
+            )}
 
             {/* Toggle video on/off */}
             <button

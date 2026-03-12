@@ -348,7 +348,8 @@
       "fraud": "사기 탐지",
       "settings": "설정",
       "chatManagement": "채팅 관리",
-      "chats": "채팅"
+      "chats": "채팅",
+      "sections": "섹션"
     },
     "sections": {
       "main": "메인",
@@ -403,6 +404,27 @@
       "activeAgent": "활성 에이전트",
       "activeStream": "활성 스트림",
       "pendingReport": "대기 보고서"
+    },
+    "sectionsVisibility": {
+      "title": "앱 섹션 관리",
+      "subtitle": "사용자에게 보이는 섹션을 제어합니다",
+      "passwordLabel": "섹션 비밀번호",
+      "passwordHint": "서버에서 설정된 섹션 비밀번호를 입력하세요",
+      "passwordRequired": "먼저 섹션 비밀번호를 입력하세요",
+      "visible": "표시",
+      "hidden": "숨김",
+      "updated": "섹션 표시가 성공적으로 업데이트되었습니다",
+      "error": "업데이트 중 오류가 발생했습니다",
+      "noteTitle": "참고:",
+      "noteText": "홈과 프로필은 숨길 수 없습니다. 숨겨진 섹션은 모든 사용자의 네비게이션에서 사라집니다.",
+      "live": "라이브 방송",
+      "liveDesc": "라이브 방송 및 방 섹션",
+      "cex": "보기",
+      "cexDesc": "동영상 및 릴스 보기 섹션",
+      "friends": "친구",
+      "friendsDesc": "소셜 및 채팅 섹션",
+      "wallet": "지갑",
+      "walletDesc": "지갑 및 금융 거래 섹션"
     },
     "settings": {
       "title": "시스템 설정",
@@ -1514,6 +1536,10 @@
     "callStartFailed": "통화 시작 실패",
     "callFailed": "통화 실패",
     "userOffline": "사용자가 현재 오프라인입니다",
+    "userBusy": "상대방이 통화 중입니다",
+    "callNoLongerAvailable": "통화를 더 이상 사용할 수 없습니다",
+    "minimizeCall": "통화 최소화",
+    "tapToReturn": "탭하여 돌아가기",
     "friendRequestAccepted": "친구 요청이 수락되었습니다",
     "friendRequestRejected": "친구 요청이 거부되었습니다",
     "actionFailed": "작업 실패",
@@ -1669,7 +1695,16 @@
     "bannedWords": "금지어",
     "addBannedWord": "금지어 추가...",
     "noBannedWords": "금지어 없음",
-    "category": "카테고리"
+    "category": "카테고리",
+    "streamType": "방송 유형",
+    "identityMode": "신원",
+    "streamAsAccount": "계정으로 방송",
+    "streamAsAccountDesc": "시청자가 팔로우하고 추가할 수 있습니다",
+    "streamAsAnonymous": "익명으로 방송",
+    "streamAsAnonymousDesc": "시청자가 팔로우하거나 추가할 수 없습니다",
+    "anonymousName": "익명 이름",
+    "anonymousNamePlaceholder": "익명 이름을 선택하세요...",
+    "anonymousNameRequired": "익명 이름을 입력하세요"
   },
   "resetPassword": {
     "title": "새 비밀번호 설정",

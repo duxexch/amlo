@@ -252,6 +252,8 @@ export const streams = pgTable(
     viewerCount: integer("viewer_count").notNull().default(0),
     peakViewers: integer("peak_viewers").notNull().default(0),
     totalGifts: integer("total_gifts").notNull().default(0),
+    isAnonymous: boolean("is_anonymous").notNull().default(false),
+    anonymousName: text("anonymous_name"),
     tags: text("tags"),
     pinnedMessage: text("pinned_message"),
     recordingUrl: text("recording_url"),
@@ -1293,9 +1295,11 @@ export const sendGiftSchema = z.object({
 });
 
 export const createStreamSchema = z.object({
-  title: z.string().min(1).max(200),
+  title: z.string().max(200).optional(),
   type: z.enum(["live", "audio"]).default("live"),
   tags: z.string().max(500).optional(),
+  isAnonymous: z.boolean().default(false),
+  anonymousName: z.string().max(30).optional(),
 });
 
 export const withdrawalRequestSchema = z.object({

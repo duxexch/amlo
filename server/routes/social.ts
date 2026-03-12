@@ -1940,6 +1940,29 @@ router.post("/calls", async (req, res) => {
     // Check if receiver is online
     const receiverOnline = await isUserOnline(receiverId);
 
+    // Check if receiver is already in an active call — auto-busy
+    const [receiverActiveCall] = await db.select({ id: schema.calls.id }).from(schema.calls)
+      .where(
+        and(
+          or(
+            eq(schema.calls.callerId, receiverId),
+            eq(schema.calls.receiverId, receiverId),
+          ),
+          or(
+            eq(schema.calls.status, "active"),
+            eq(schema.calls.status, "ringing"),
+          ),
+        )
+      ).limit(1);
+
+    if (receiverActiveCall) {
+      return res.status(409).json({
+        success: false,
+        message: "المستخدم في مكالمة أخرى حالياً",
+        code: "RECEIVER_BUSY",
+      });
+    }
+
     // Get coin rate (from cached pricing)
     const coinRate = type === "video" ? callPricing.calls.video_call_rate : callPricing.calls.voice_call_rate;
 
@@ -3623,12 +3646,15 @@ async function enrichStream(s: any) {
   const db = getDb();
   if (!db || !s) return s;
   const [host] = await db.select().from(schema.users).where(eq(schema.users.id, s.userId)).limit(1);
+  const isAnon = !!s.isAnonymous;
   return {
     ...s,
-    hostName: host?.displayName || host?.username || "مجهول",
-    hostUsername: host?.username || "",
-    hostAvatar: host?.avatar || null,
-    hostLevel: host?.level || 1,
+    hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"),
+    hostUsername: isAnon ? "" : (host?.username || ""),
+    hostAvatar: isAnon ? null : (host?.avatar || null),
+    hostLevel: isAnon ? 1 : (host?.level || 1),
+    userId: isAnon ? undefined : s.userId,
+    isAnonymous: isAnon,
     tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
   };
 }
@@ -4234,6 +4260,8 @@ router.get("/streams/active", async (req: Request, res: Response) => {
       peakViewers: schema.streams.peakViewers,
       totalGifts: schema.streams.totalGifts,
       tags: schema.streams.tags,
+      isAnonymous: schema.streams.isAnonymous,
+      anonymousName: schema.streams.anonymousName,
       startedAt: schema.streams.startedAt,
       scheduledAt: schema.streams.scheduledAt,
     }).from(schema.streams)
@@ -4251,12 +4279,15 @@ router.get("/streams/active", async (req: Request, res: Response) => {
 
     const enriched = data.map((s: any) => {
       const host = usersMap[s.userId];
+      const isAnon = !!s.isAnonymous;
       return {
         ...s,
-        hostName: host?.displayName || host?.username || "مجهول",
-        hostUsername: host?.username || "",
-        hostAvatar: host?.avatar || null,
-        hostLevel: host?.level || 1,
+        hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"),
+        hostUsername: isAnon ? "" : (host?.username || ""),
+        hostAvatar: isAnon ? null : (host?.avatar || null),
+        hostLevel: isAnon ? 1 : (host?.level || 1),
+        userId: isAnon ? undefined : s.userId,
+        isAnonymous: isAnon,
         tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
       };
     });
@@ -4317,6 +4348,8 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
       peakViewers: schema.streams.peakViewers,
       totalGifts: schema.streams.totalGifts,
       tags: schema.streams.tags,
+      isAnonymous: schema.streams.isAnonymous,
+      anonymousName: schema.streams.anonymousName,
       startedAt: schema.streams.startedAt,
       scheduledAt: schema.streams.scheduledAt,
     }).from(schema.streams)
@@ -4365,14 +4398,17 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
 
       const score = Math.round(base * recencyBoost * followBoost * categoryBoost * 100) / 100;
       const host = hostsMap[s.userId];
+      const isAnon = !!s.isAnonymous;
 
       return {
         ...s,
         recommendationScore: score,
-        hostName: host?.displayName || host?.username || "مجهول",
-        hostUsername: host?.username || "",
-        hostAvatar: host?.avatar || null,
-        hostLevel: host?.level || 1,
+        hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"),
+        hostUsername: isAnon ? "" : (host?.username || ""),
+        hostAvatar: isAnon ? null : (host?.avatar || null),
+        hostLevel: isAnon ? 1 : (host?.level || 1),
+        userId: isAnon ? undefined : s.userId,
+        isAnonymous: isAnon,
         tags: s.tags ? (typeof s.tags === "string" ? s.tags.split(",").map((t: string) => t.trim()) : s.tags) : [],
       };
     });
@@ -4430,7 +4466,8 @@ router.get("/streams/scheduled", async (_req: Request, res: Response) => {
     }
     const enriched = data.map(s => {
       const host = usersMap[s.userId];
-      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+      const isAnon = !!s.isAnonymous;
+      return { ...s, hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"), hostAvatar: isAnon ? null : (host?.avatar || null), hostLevel: isAnon ? 1 : (host?.level || 1), userId: isAnon ? undefined : s.userId, isAnonymous: isAnon, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
     });
     return res.json(enriched);
   } catch (err: any) {
@@ -4465,7 +4502,8 @@ router.get("/streams/search", searchLimiter, async (req: Request, res: Response)
     }
     const enriched = data.map(s => {
       const host = usersMap[s.userId];
-      return { ...s, hostName: host?.displayName || host?.username || "مجهول", hostAvatar: host?.avatar || null, hostLevel: host?.level || 1, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
+      const isAnon = !!s.isAnonymous;
+      return { ...s, hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"), hostAvatar: isAnon ? null : (host?.avatar || null), hostLevel: isAnon ? 1 : (host?.level || 1), userId: isAnon ? undefined : s.userId, isAnonymous: isAnon, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
     });
     return res.json(enriched);
   } catch (err: any) {
@@ -4532,10 +4570,32 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       }
     }
 
-    const { title, type, tags, category, scheduledAt } = req.body;
-    if (!title || typeof title !== "string" || title.trim().length < 1) {
-      return res.status(400).json({ success: false, message: "عنوان البث مطلوب" });
+    const { title, type, tags, category, scheduledAt, isAnonymous, anonymousName } = req.body;
+    const isAnon = isAnonymous === true;
+
+    // Generate title: user-provided, or auto-generated based on mode
+    let streamTitle: string;
+    if (title && typeof title === "string" && title.trim().length >= 1) {
+      streamTitle = title.trim().slice(0, 200);
+    } else {
+      // Auto-generate title
+      const db2 = getDb();
+      if (isAnon) {
+        streamTitle = anonymousName && typeof anonymousName === "string" && anonymousName.trim().length > 0
+          ? `بث ${anonymousName.trim().slice(0, 30)}`
+          : "بث مجهول";
+      } else if (db2) {
+        const [u] = await db2.select({ displayName: schema.users.displayName, username: schema.users.username }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+        streamTitle = `بث ${u?.displayName || u?.username || "مستخدم"}`;
+      } else {
+        streamTitle = "بث مباشر";
+      }
     }
+
+    // Validate anonymous name
+    const anonName = isAnon && anonymousName && typeof anonymousName === "string"
+      ? anonymousName.trim().slice(0, 30) || "مجهول"
+      : isAnon ? "مجهول" : null;
 
     const streamType = ["live", "audio", "video_call"].includes(type) ? type : "live";
     const streamTags = Array.isArray(tags) ? tags.filter((t: any) => typeof t === "string").join(",") : (typeof tags === "string" ? tags : "");
@@ -4545,10 +4605,12 @@ router.post("/streams/create", async (req: Request, res: Response) => {
 
     const stream = await storage.createStream({
       userId,
-      title: title.trim().slice(0, 200),
+      title: streamTitle,
       type: streamType,
       tags: streamTags,
       category: streamCategory,
+      isAnonymous: isAnon,
+      anonymousName: anonName,
       status: isScheduled ? "scheduled" : "active",
       scheduledAt: isScheduled ? new Date(scheduledAt) : null,
       viewerCount: 0,
@@ -4573,8 +4635,8 @@ router.post("/streams/create", async (req: Request, res: Response) => {
     const enriched = await enrichStream(stream);
     socialLog.info({ streamId: stream.id, userId, type: streamType }, "Stream created");
 
-    // Notify followers that this user started a stream
-    if (!isScheduled && io && db) {
+    // Notify followers that this user started a stream (only for non-anonymous streams)
+    if (!isScheduled && !isAnon && io && db) {
       try {
         const followers = await db.select({ followerId: schema.userFollows.followerId })
           .from(schema.userFollows).where(eq(schema.userFollows.followingId, userId)).limit(500);

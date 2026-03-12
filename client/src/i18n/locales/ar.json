@@ -417,7 +417,8 @@
       "finances": "ماليات",
       "reports": "البلاغات",
       "fraud": "كشف الاحتيال",
-      "settings": "الإعدادات"
+      "settings": "الإعدادات",
+      "sections": "الأقسام"
     },
     "sections": {
       "main": "الرئيسية",
@@ -472,6 +473,27 @@
       "activeAgent": "وكيل نشط",
       "activeStream": "بث نشط",
       "pendingReport": "بلاغ معلق"
+    },
+    "sectionsVisibility": {
+      "title": "إدارة أقسام التطبيق",
+      "subtitle": "تحكم في إظهار وإخفاء أقسام التطبيق للمستخدمين",
+      "passwordLabel": "كلمة مرور الأقسام",
+      "passwordHint": "أدخل كلمة مرور الأقسام المحددة من السيرفر لتتمكن من التعديل",
+      "passwordRequired": "يجب إدخال كلمة مرور الأقسام أولاً",
+      "visible": "ظاهر",
+      "hidden": "مخفي",
+      "updated": "تم تحديث حالة القسم بنجاح",
+      "error": "حدث خطأ أثناء التحديث",
+      "noteTitle": "ملاحظة:",
+      "noteText": "الرئيسية والملف الشخصي لا يمكن إخفاؤهما. عند إخفاء قسم سيختفي من شريط التنقل لجميع المستخدمين.",
+      "live": "البث المباشر",
+      "liveDesc": "قسم البث المباشر والغرف",
+      "cex": "شاهد",
+      "cexDesc": "قسم مشاهدة الفيديوهات والريلز",
+      "friends": "الأصدقاء",
+      "friendsDesc": "قسم التواصل والمحادثات",
+      "wallet": "المحفظة",
+      "walletDesc": "قسم المحفظة والمعاملات المالية"
     },
     "settings": {
       "title": "إعدادات النظام",
@@ -1584,6 +1606,10 @@
     "callStartFailed": "تعذر بدء المكالمة",
     "callFailed": "فشل الاتصال",
     "userOffline": "المستخدم غير متصل حالياً",
+    "userBusy": "المستخدم في مكالمة أخرى",
+    "callNoLongerAvailable": "المكالمة لم تعد متاحة",
+    "minimizeCall": "تصغير المكالمة",
+    "tapToReturn": "اضغط للعودة",
     "friendRequestAccepted": "تم قبول طلب الصداقة",
     "friendRequestRejected": "تم رفض طلب الصداقة",
     "actionFailed": "تعذر تنفيذ العملية",
@@ -1739,7 +1765,16 @@
     "bannedWords": "كلمات محظورة",
     "addBannedWord": "أضف كلمة محظورة...",
     "noBannedWords": "لا توجد كلمات محظورة",
-    "category": "التصنيف"
+    "category": "التصنيف",
+    "streamType": "نوع البث",
+    "identityMode": "الهوية",
+    "streamAsAccount": "البث باسم حسابك",
+    "streamAsAccountDesc": "يمكن للمشاهدين متابعتك وإضافتك",
+    "streamAsAnonymous": "البث باسم مستعار",
+    "streamAsAnonymousDesc": "لن يستطيع المشاهدون متابعتك أو إضافتك",
+    "anonymousName": "الاسم المستعار",
+    "anonymousNamePlaceholder": "اختر اسماً مستعاراً...",
+    "anonymousNameRequired": "أدخل اسماً مستعاراً"
   },
   "resetPassword": {
     "title": "تعيين كلمة مرور جديدة",

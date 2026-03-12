@@ -3061,4 +3061,54 @@ router.put("/pricing/message-costs", requireAdmin, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════
+// SECTION VISIBILITY — إظهار/إخفاء أقسام التطبيق
+// ══════════════════════════════════════════════════════════
+
+import { validateEnv } from "../config";
+
+const SECTION_KEYS = ["live", "cex", "friends", "wallet"] as const;
+
+router.get("/sections", requireAdmin, async (_req, res) => {
+  try {
+    const sections: Record<string, boolean> = {};
+    for (const key of SECTION_KEYS) {
+      const setting = await storage.getSetting(`section_visible_${key}`);
+      sections[key] = setting ? setting.value !== "false" : true;
+    }
+    return res.json({ success: true, data: sections });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.put("/sections", requireAdmin, async (req, res) => {
+  try {
+    const bodySchema = z.object({
+      key: z.enum(SECTION_KEYS),
+      visible: z.boolean(),
+      password: z.string().min(1),
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    const { key, visible, password } = parsed.data;
+    const env = validateEnv();
+    if (password !== env.SECTIONS_PASSWORD) {
+      return res.status(403).json({ success: false, message: "كلمة مرور الأقسام غير صحيحة" });
+    }
+
+    await storage.upsertSetting(`section_visible_${key}`, String(visible), "sections", `Visibility of ${key} section`);
+    await storage.addAdminLog(req.session.adminId!, "toggle_section", "setting", key,
+      `Section ${key} → ${visible ? "visible" : "hidden"}`);
+    invalidateResponseCache();
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
 export default router;

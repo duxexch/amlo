@@ -348,7 +348,8 @@
       "fraud": "تشخیص کلاهبرداری",
       "settings": "تنظیمات",
       "chatManagement": "مدیریت چت",
-      "chats": "گفتگوها"
+      "chats": "گفتگوها",
+      "sections": "بخش‌ها"
     },
     "sections": {
       "main": "اصلی",
@@ -403,6 +404,27 @@
       "activeAgent": "نماینده فعال",
       "activeStream": "استریم فعال",
       "pendingReport": "گزارش در انتظار"
+    },
+    "sectionsVisibility": {
+      "title": "مدیریت بخش‌های برنامه",
+      "subtitle": "کنترل نمایش بخش‌ها برای کاربران",
+      "passwordLabel": "رمز عبور بخش‌ها",
+      "passwordHint": "رمز عبور تنظیم شده در سرور را وارد کنید",
+      "passwordRequired": "لطفاً ابتدا رمز عبور بخش‌ها را وارد کنید",
+      "visible": "نمایش",
+      "hidden": "پنهان",
+      "updated": "وضعیت بخش با موفقیت به‌روز شد",
+      "error": "خطا در به‌روزرسانی",
+      "noteTitle": "توجه:",
+      "noteText": "صفحه اصلی و پروفایل قابل پنهان کردن نیستند. بخش‌های پنهان از نوار ناوبری حذف می‌شوند.",
+      "live": "پخش زنده",
+      "liveDesc": "بخش پخش زنده و اتاق‌ها",
+      "cex": "تماشا",
+      "cexDesc": "بخش تماشای ویدیو و ریلز",
+      "friends": "دوستان",
+      "friendsDesc": "بخش اجتماعی و چت",
+      "wallet": "کیف پول",
+      "walletDesc": "بخش کیف پول و تراکنش‌های مالی"
     },
     "settings": {
       "title": "تنظیمات سیستم",
@@ -1506,6 +1528,10 @@
     "callStartFailed": "شروع تماس ناموفق بود",
     "callFailed": "تماس ناموفق",
     "userOffline": "کاربر در حال حاضر آفلاین است",
+    "userBusy": "کاربر در تماس دیگری است",
+    "callNoLongerAvailable": "تماس دیگر در دسترس نیست",
+    "minimizeCall": "کوچک کردن تماس",
+    "tapToReturn": "برای بازگشت بزنید",
     "friendRequestAccepted": "درخواست دوستی پذیرفته شد",
     "friendRequestRejected": "درخواست دوستی رد شد",
     "actionFailed": "عملیات ناموفق",
@@ -1661,7 +1687,16 @@
     "bannedWords": "کلمات ممنوعه",
     "addBannedWord": "افزودن کلمه ممنوعه...",
     "noBannedWords": "کلمه ممنوعه‌ای وجود ندارد",
-    "category": "دسته‌بندی"
+    "category": "دسته‌بندی",
+    "streamType": "نوع پخش",
+    "identityMode": "هویت",
+    "streamAsAccount": "پخش با حساب شما",
+    "streamAsAccountDesc": "بینندگان می‌توانند شما را دنبال و اضافه کنند",
+    "streamAsAnonymous": "پخش ناشناس",
+    "streamAsAnonymousDesc": "بینندگان نمی‌توانند شما را دنبال یا اضافه کنند",
+    "anonymousName": "نام مستعار",
+    "anonymousNamePlaceholder": "یک نام مستعار انتخاب کنید...",
+    "anonymousNameRequired": "یک نام مستعار وارد کنید"
   },
   "resetPassword": {
     "title": "تنظیم رمز عبور جدید",

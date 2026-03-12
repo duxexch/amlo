@@ -86,6 +86,21 @@ export async function registerRoutes(
 
   // ── Public API routes (for the app) ──
 
+  // Public: section visibility (no auth required — needed by AppLayout)
+  app.get("/api/sections/visibility", async (_req, res) => {
+    try {
+      const keys = ["live", "cex", "friends", "wallet"];
+      const hidden: string[] = [];
+      for (const key of keys) {
+        const setting = await storage.getSetting(`section_visible_${key}`);
+        if (setting && setting.value === "false") hidden.push(key);
+      }
+      return res.json({ success: true, data: { hidden } });
+    } catch {
+      return res.json({ success: true, data: { hidden: [] } });
+    }
+  });
+
   // Public: submit agent application (no auth required)
   app.post("/api/agent-applications", async (req, res) => {
     try {

@@ -348,7 +348,8 @@
       "fraud": "Betrugserkennung",
       "settings": "Einstellungen",
       "chatManagement": "Chat-Verwaltung",
-      "chats": "Chats"
+      "chats": "Chats",
+      "sections": "Bereiche"
     },
     "sections": {
       "main": "Hauptmenü",
@@ -403,6 +404,27 @@
       "activeAgent": "Aktiver Agent",
       "activeStream": "Aktiver Stream",
       "pendingReport": "Ausstehender Bericht"
+    },
+    "sectionsVisibility": {
+      "title": "App-Bereiche verwalten",
+      "subtitle": "Sichtbarkeit der App-Bereiche für Benutzer steuern",
+      "passwordLabel": "Bereichs-Passwort",
+      "passwordHint": "Geben Sie das auf dem Server konfigurierte Bereichs-Passwort ein",
+      "passwordRequired": "Bitte geben Sie zuerst das Bereichs-Passwort ein",
+      "visible": "Sichtbar",
+      "hidden": "Versteckt",
+      "updated": "Bereichs-Sichtbarkeit erfolgreich aktualisiert",
+      "error": "Fehler beim Aktualisieren",
+      "noteTitle": "Hinweis:",
+      "noteText": "Startseite und Profil können nicht ausgeblendet werden. Ausgeblendete Bereiche verschwinden aus der Navigation für alle Benutzer.",
+      "live": "Livestream",
+      "liveDesc": "Livestream- und Räume-Bereich",
+      "cex": "Ansehen",
+      "cexDesc": "Videos und Reels ansehen",
+      "friends": "Freunde",
+      "friendsDesc": "Soziales und Chat-Bereich",
+      "wallet": "Geldbörse",
+      "walletDesc": "Geldbörse und Finanztransaktionen"
     },
     "settings": {
       "title": "Systemeinstellungen",
@@ -1506,6 +1528,10 @@
     "callStartFailed": "Anruf konnte nicht gestartet werden",
     "callFailed": "Anruf fehlgeschlagen",
     "userOffline": "Benutzer ist derzeit offline",
+    "userBusy": "Benutzer ist in einem anderen Anruf",
+    "callNoLongerAvailable": "Anruf nicht mehr verfügbar",
+    "minimizeCall": "Anruf minimieren",
+    "tapToReturn": "Tippen zum Zurückkehren",
     "friendRequestAccepted": "Freundschaftsanfrage akzeptiert",
     "friendRequestRejected": "Freundschaftsanfrage abgelehnt",
     "actionFailed": "Aktion fehlgeschlagen",
@@ -1661,7 +1687,16 @@
     "bannedWords": "Gesperrte Wörter",
     "addBannedWord": "Gesperrtes Wort hinzufügen...",
     "noBannedWords": "Keine gesperrten Wörter",
-    "category": "Kategorie"
+    "category": "Kategorie",
+    "streamType": "Stream-Typ",
+    "identityMode": "Identität",
+    "streamAsAccount": "Mit deinem Konto streamen",
+    "streamAsAccountDesc": "Zuschauer können dir folgen und dich hinzufügen",
+    "streamAsAnonymous": "Anonym streamen",
+    "streamAsAnonymousDesc": "Zuschauer können dir nicht folgen oder dich hinzufügen",
+    "anonymousName": "Anonymer Name",
+    "anonymousNamePlaceholder": "Wähle einen anonymen Namen...",
+    "anonymousNameRequired": "Gib einen anonymen Namen ein"
   },
   "resetPassword": {
     "title": "Neues Passwort festlegen",

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Users, UserCog, Gift, Wallet, Flag, Settings,
   LogOut, Menu, X, ChevronLeft, Bell, Shield, ShieldAlert, MessageSquare,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminAuth } from "@/lib/adminApi";
@@ -30,8 +31,8 @@ interface AdminCtx {
 const AdminContext = createContext<AdminCtx>({
   admin: null,
   isLoading: true,
-  login: async () => {},
-  logout: async () => {},
+  login: async () => { },
+  logout: async () => { },
 });
 
 export const useAdmin = () => useContext(AdminContext);
@@ -58,7 +59,7 @@ const navSections: NavSection[] = [
   {
     sectionKey: "admin.sections.people",
     items: [
-      { icon: Users,   labelKey: "admin.nav.users",  path: "/admin/users" },
+      { icon: Users, labelKey: "admin.nav.users", path: "/admin/users" },
       { icon: UserCog, labelKey: "admin.nav.agents", path: "/admin/agents" },
     ],
   },
@@ -66,7 +67,7 @@ const navSections: NavSection[] = [
     sectionKey: "admin.sections.content",
     items: [
       { icon: MessageSquare, labelKey: "admin.nav.chatManagement", path: "/admin/chat-management" },
-      { icon: Gift,          labelKey: "admin.nav.gifts",          path: "/admin/gifts" },
+      { icon: Gift, labelKey: "admin.nav.gifts", path: "/admin/gifts" },
     ],
   },
   {
@@ -78,13 +79,14 @@ const navSections: NavSection[] = [
   {
     sectionKey: "admin.sections.safety",
     items: [
-      { icon: Flag,        labelKey: "admin.nav.reports", path: "/admin/reports" },
-      { icon: ShieldAlert, labelKey: "admin.nav.fraud",   path: "/admin/fraud" },
+      { icon: Flag, labelKey: "admin.nav.reports", path: "/admin/reports" },
+      { icon: ShieldAlert, labelKey: "admin.nav.fraud", path: "/admin/fraud" },
     ],
   },
   {
     sectionKey: "admin.sections.system",
     items: [
+      { icon: LayoutGrid, labelKey: "admin.nav.sections", path: "/admin/sections" },
       { icon: Settings, labelKey: "admin.nav.settings", path: "/admin/settings" },
     ],
   },
@@ -104,7 +106,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       .then((res) => {
         if (res.success && res.data) setAdmin(res.data);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -117,7 +119,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await adminAuth.logout().catch(() => {});
+    await adminAuth.logout().catch(() => { });
     setAdmin(null);
     setLocation("/admin");
   };

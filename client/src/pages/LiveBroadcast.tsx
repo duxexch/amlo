@@ -36,6 +36,7 @@ interface StreamItem {
   speakers?: string[];
   maxSpeakers?: number;
   status: string;
+  isAnonymous?: boolean;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2316,13 +2317,9 @@ export function LiveBroadcast() {
   const [scheduledStreams, setScheduledStreams] = useState<StreamItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createTitle, setCreateTitle] = useState("");
   const [createType, setCreateType] = useState<"live" | "audio">("live");
-  const [createTags, setCreateTags] = useState("");
-  const [createCategory, setCreateCategory] = useState<string>("chat");
-  const [createScheduleDate, setCreateScheduleDate] = useState("");
-  const [createScheduleTime, setCreateScheduleTime] = useState("");
-  const createScheduledAt = createScheduleDate ? `${createScheduleDate}T${createScheduleTime || "00:00"}` : "";
+  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [anonymousName, setAnonymousName] = useState("");
   const [creating, setCreating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -2361,6 +2358,7 @@ export function LiveBroadcast() {
     speakers: s.speakers || [],
     maxSpeakers: s.maxSpeakers || 4,
     status: s.status || 'live',
+    isAnonymous: !!s.isAnonymous,
   });
 
   // Fetch active streams (with optional category filter)
@@ -2435,7 +2433,11 @@ export function LiveBroadcast() {
   }, [searchQuery, handleSearch]);
 
   const handleCreateStream = async () => {
-    if (!createTitle.trim() || creating) return;
+    if (creating) return;
+    if (isAnonymous && !anonymousName.trim()) {
+      toast.error(t("live.anonymousNameRequired", "أدخل اسماً مستعاراً"));
+      return;
+    }
 
     // Request media permissions before creating stream
     try {
@@ -2455,20 +2457,17 @@ export function LiveBroadcast() {
 
     setCreating(true);
     try {
-      const tags = createTags.split(",").map(t => t.trim()).filter(Boolean);
-      const createData: any = { title: createTitle.trim(), type: createType, tags, category: createCategory };
-      if (createScheduledAt) createData.scheduledAt = new Date(createScheduledAt).toISOString();
+      const createData: any = {
+        type: createType,
+        isAnonymous,
+        ...(isAnonymous && anonymousName.trim() ? { anonymousName: anonymousName.trim() } : {}),
+      };
       const res = await streamsApi.create(createData);
       if (res?.id) {
         setShowCreateModal(false);
-        setCreateTitle("");
-        setCreateTags("");
-        setCreateScheduleDate("");
-        setCreateScheduleTime("");
-        if (createScheduledAt) {
-          // Scheduled stream — refresh scheduled list
-          streamsApi.scheduled().then((data: any[]) => setScheduledStreams(data.map(parseStream))).catch(() => { });
-        } else if (createType === "audio") {
+        setAnonymousName("");
+        setIsAnonymous(false);
+        if (createType === "audio") {
           const item = parseStream({ ...res, type: "audio" });
           setSelectedAudioRoom(item);
         } else {
@@ -2739,121 +2738,99 @@ export function LiveBroadcast() {
               </h3>
 
               {/* Stream Type Selector */}
-              <div className="flex gap-2 mb-4">
-                <button
-                  onClick={() => setCreateType("live")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${createType === "live"
-                    ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30"
-                    : "text-white/40 bg-white/5 border border-white/5"
-                    }`}
-                >
-                  <Video className="w-4 h-4" />
-                  {t("live.videoLive", "بث فيديو")}
-                </button>
-                <button
-                  onClick={() => setCreateType("audio")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${createType === "audio"
-                    ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30"
-                    : "text-white/40 bg-white/5 border border-white/5"
-                    }`}
-                >
-                  <Headphones className="w-4 h-4" />
-                  {t("live.audioLive", "غرفة صوتية")}
-                </button>
-              </div>
-
-              {/* Title */}
-              <div className="mb-4">
-                <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.streamTitle", "عنوان البث")}</label>
-                <input
-                  type="text"
-                  value={createTitle}
-                  onChange={e => setCreateTitle(e.target.value)}
-                  placeholder={t("live.streamTitlePlaceholder", "اكتب عنوان البث...")}
-                  maxLength={200}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                />
-              </div>
-
-              {/* Category Selector */}
-              <div className="mb-4">
-                <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.category", "التصنيف")}</label>
-                <div className="flex flex-wrap gap-2">
-                  {STREAM_CATEGORIES.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setCreateCategory(cat)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${createCategory === cat
-                        ? "bg-primary/20 text-primary border-primary/30"
-                        : "bg-white/5 text-white/40 border-white/5"
-                        }`}
-                    >
-                      {categoryLabels[cat] || cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tags */}
-              <div className="mb-4">
-                <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.streamTags", "الوسوم (اختياري)")}</label>
-                <input
-                  type="text"
-                  value={createTags}
-                  onChange={e => setCreateTags(e.target.value)}
-                  placeholder={t("live.streamTagsPlaceholder", "دردشة, ألعاب, موسيقى")}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                />
-              </div>
-
-              {/* Schedule (optional) */}
-              <div className="mb-6">
-                <label className="text-white/60 text-xs font-bold mb-1.5 block flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5" />
-                  {t("live.scheduleStream", "جدولة البث (اختياري)")}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-white/30 text-[10px] mb-1 block">{t("live.scheduleDate", "التاريخ")}</label>
-                    <input
-                      type="date"
-                      value={createScheduleDate}
-                      onChange={e => setCreateScheduleDate(e.target.value)}
-                      onFocus={e => setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 100)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-3 text-white text-sm focus:outline-none focus:border-primary/50 transition-all [color-scheme:dark]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-white/30 text-[10px] mb-1 block">{t("live.scheduleTime", "الوقت")}</label>
-                    <input
-                      type="time"
-                      value={createScheduleTime}
-                      onChange={e => setCreateScheduleTime(e.target.value)}
-                      onFocus={e => setTimeout(() => e.target.scrollIntoView({ behavior: "smooth", block: "center" }), 100)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-3 text-white text-sm focus:outline-none focus:border-primary/50 transition-all [color-scheme:dark]"
-                    />
-                  </div>
-                </div>
-                {createScheduledAt && (
-                  <button onClick={() => { setCreateScheduleDate(""); setCreateScheduleTime(""); }} className="text-white/40 text-[10px] mt-1 hover:text-white/60">
-                    {t("live.clearSchedule", "× إلغاء الجدولة")}
+              <div className="mb-5">
+                <label className="text-white/60 text-xs font-bold mb-2 block">{t("live.streamType", "نوع البث")}</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCreateType("live")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all ${createType === "live"
+                      ? "bg-gradient-to-r from-blue-500/20 to-primary/20 text-white border border-blue-500/30"
+                      : "text-white/40 bg-white/5 border border-white/5"
+                      }`}
+                  >
+                    <Video className="w-4 h-4" />
+                    {t("live.videoLive", "بث فيديو")}
                   </button>
-                )}
+                  <button
+                    onClick={() => setCreateType("audio")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all ${createType === "audio"
+                      ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-white border border-emerald-500/30"
+                      : "text-white/40 bg-white/5 border border-white/5"
+                      }`}
+                  >
+                    <Headphones className="w-4 h-4" />
+                    {t("live.audioLive", "غرفة صوتية")}
+                  </button>
+                </div>
               </div>
+
+              {/* Identity Mode Selector */}
+              <div className="mb-6">
+                <label className="text-white/60 text-xs font-bold mb-2 block">{t("live.identityMode", "الهوية")}</label>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setIsAnonymous(false)}
+                    className={`w-full flex items-center gap-3 p-3.5 rounded-xl transition-all text-start ${!isAnonymous
+                      ? "bg-gradient-to-r from-primary/15 to-blue-500/15 border border-primary/30"
+                      : "bg-white/5 border border-white/5"
+                      }`}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${!isAnonymous ? "bg-primary/20" : "bg-white/5"}`}>
+                      <UserCheck className={`w-5 h-5 ${!isAnonymous ? "text-primary" : "text-white/30"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold ${!isAnonymous ? "text-white" : "text-white/40"}`}>{t("live.streamAsAccount", "البث باسم حسابك")}</p>
+                      <p className={`text-[11px] mt-0.5 ${!isAnonymous ? "text-white/50" : "text-white/25"}`}>{t("live.streamAsAccountDesc", "يمكن للمشاهدين متابعتك وإضافتك")}</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setIsAnonymous(true)}
+                    className={`w-full flex items-center gap-3 p-3.5 rounded-xl transition-all text-start ${isAnonymous
+                      ? "bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/30"
+                      : "bg-white/5 border border-white/5"
+                      }`}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isAnonymous ? "bg-amber-500/20" : "bg-white/5"}`}>
+                      <Eye className={`w-5 h-5 ${isAnonymous ? "text-amber-400" : "text-white/30"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold ${isAnonymous ? "text-white" : "text-white/40"}`}>{t("live.streamAsAnonymous", "البث باسم مستعار")}</p>
+                      <p className={`text-[11px] mt-0.5 ${isAnonymous ? "text-white/50" : "text-white/25"}`}>{t("live.streamAsAnonymousDesc", "لن يستطيع المشاهدون متابعتك أو إضافتك")}</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Anonymous Name Input (only when anonymous) */}
+              <AnimatePresence>
+                {isAnonymous && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mb-6 overflow-hidden"
+                  >
+                    <label className="text-white/60 text-xs font-bold mb-1.5 block">{t("live.anonymousName", "الاسم المستعار")}</label>
+                    <input
+                      type="text"
+                      value={anonymousName}
+                      onChange={e => setAnonymousName(e.target.value)}
+                      placeholder={t("live.anonymousNamePlaceholder", "اختر اسماً مستعاراً...")}
+                      maxLength={30}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white text-sm focus:outline-none focus:border-amber-500/50 transition-all placeholder:text-white/20"
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Start Button */}
               <button
                 onClick={handleCreateStream}
-                disabled={!createTitle.trim() || creating}
+                disabled={creating || (isAnonymous && !anonymousName.trim())}
                 className="w-full py-4 rounded-2xl font-black text-white text-base transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-gradient-to-r from-red-500 to-primary shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] flex items-center justify-center gap-2"
               >
                 {creating ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : createScheduledAt ? (
-                  <>
-                    <Calendar className="w-5 h-5" />
-                    {t("live.scheduleBtn", "جدولة البث")}
-                  </>
                 ) : (
                   <>
                     <Radio className="w-5 h-5" />

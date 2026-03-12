@@ -348,7 +348,8 @@
       "fraud": "Detección de fraude",
       "settings": "Configuración",
       "chatManagement": "Gestión de Chats",
-      "chats": "Chats"
+      "chats": "Chats",
+      "sections": "Secciones"
     },
     "sections": {
       "main": "Principal",
@@ -403,6 +404,27 @@
       "activeAgent": "Agente activo",
       "activeStream": "Transmisión activa",
       "pendingReport": "Informe pendiente"
+    },
+    "sectionsVisibility": {
+      "title": "Gestor de secciones",
+      "subtitle": "Controla qué secciones son visibles para los usuarios",
+      "passwordLabel": "Contraseña de secciones",
+      "passwordHint": "Ingrese la contraseña de secciones configurada en el servidor",
+      "passwordRequired": "Ingrese la contraseña de secciones primero",
+      "visible": "Visible",
+      "hidden": "Oculto",
+      "updated": "Visibilidad de sección actualizada exitosamente",
+      "error": "Error al actualizar",
+      "noteTitle": "Nota:",
+      "noteText": "Inicio y Perfil no se pueden ocultar. Las secciones ocultas desaparecen de la barra de navegación para todos los usuarios.",
+      "live": "En vivo",
+      "liveDesc": "Sección de transmisión en vivo y salas",
+      "cex": "Ver",
+      "cexDesc": "Sección de videos y reels",
+      "friends": "Amigos",
+      "friendsDesc": "Sección social y de chat",
+      "wallet": "Billetera",
+      "walletDesc": "Sección de billetera y transacciones"
     },
     "settings": {
       "title": "Configuración del sistema",
@@ -1506,6 +1528,10 @@
     "callStartFailed": "Error al iniciar la llamada",
     "callFailed": "Llamada fallida",
     "userOffline": "El usuario no está conectado",
+    "userBusy": "El usuario está en otra llamada",
+    "callNoLongerAvailable": "La llamada ya no está disponible",
+    "minimizeCall": "Minimizar llamada",
+    "tapToReturn": "Toca para volver",
     "friendRequestAccepted": "Solicitud de amistad aceptada",
     "friendRequestRejected": "Solicitud de amistad rechazada",
     "actionFailed": "Error en la acción",
@@ -1661,7 +1687,16 @@
     "bannedWords": "Palabras prohibidas",
     "addBannedWord": "Agregar palabra prohibida...",
     "noBannedWords": "Sin palabras prohibidas",
-    "category": "Categoría"
+    "category": "Categoría",
+    "streamType": "Tipo de transmisión",
+    "identityMode": "Identidad",
+    "streamAsAccount": "Transmitir con tu cuenta",
+    "streamAsAccountDesc": "Los espectadores pueden seguirte y agregarte",
+    "streamAsAnonymous": "Transmitir anónimamente",
+    "streamAsAnonymousDesc": "Los espectadores no pueden seguirte ni agregarte",
+    "anonymousName": "Nombre anónimo",
+    "anonymousNamePlaceholder": "Elige un nombre anónimo...",
+    "anonymousNameRequired": "Ingresa un nombre anónimo"
   },
   "resetPassword": {
     "title": "Establecer nueva contraseña",

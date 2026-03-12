@@ -40,6 +40,9 @@ const envSchema = z.object({
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
 
+  // ── Section Visibility Password ──
+  SECTIONS_PASSWORD: z.string().min(4).default("sections123"),
+
   // ── BunnyCDN (optional — enables CDN storage) ──
   BUNNY_STORAGE_API_KEY: z.string().optional(),
   BUNNY_STORAGE_ZONE: z.string().optional(),

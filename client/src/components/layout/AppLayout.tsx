@@ -39,13 +39,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       .catch(() => { });
   }, []);
 
+  // Fetch hidden sections once
+  const [hiddenSections, setHiddenSections] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/sections/visibility")
+      .then(r => r.json())
+      .then(res => {
+        if (res.success && res.data?.hidden) setHiddenSections(res.data.hidden);
+      })
+      .catch(() => { });
+  }, []);
+
   // Pages without navigation (full-screen experiences)
   const noNavPages = ["/admin", "/auth", "/room"];
   if (noNavPages.some(page => location.startsWith(page))) {
     return <div className="min-h-screen bg-black" dir={dir}>{children}</div>;
   }
 
-  const navItems = [
+  const PATH_TO_KEY: Record<string, string> = { "/live": "live", "/cex": "cex", "/friends": "friends", "/wallet": "wallet" };
+
+  const allNavItems = [
     { icon: Home, label: t("nav.home"), path: "/" },
     { icon: Radio, label: t("nav.liveStream"), path: "/live" },
     { icon: Film, label: t("nav.cex"), path: "/cex" },
@@ -53,6 +66,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { icon: Wallet, label: t("nav.wallet"), path: "/wallet" },
     { icon: User, label: t("nav.profile"), path: "/profile" },
   ];
+  const navItems = allNavItems.filter((item) => {
+    const key = PATH_TO_KEY[item.path];
+    return !key || !hiddenSections.includes(key);
+  });
   const mobileNavItems = navItems.filter((item) => item.path !== "/profile");
 
   return (
