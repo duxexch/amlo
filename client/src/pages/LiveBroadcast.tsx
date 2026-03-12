@@ -291,15 +291,18 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
 
     const initLiveKit = async () => {
       try {
-        const res = await authApi.me();
+        setLkState('connecting');
+        // Fetch identity + token in parallel to reduce join latency.
+        const [res, tokenRes] = await Promise.all([
+          authApi.me(),
+          streamsApi.token(stream.id),
+        ]);
         const userId = res?.data?.id || '';
         if (cancelled) return;
         setCurrentUserId(userId);
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
 
         // Fetch LiveKit token — server determines role authoritatively
-        setLkState('connecting');
-        const tokenRes = await streamsApi.token(stream.id);
         if (cancelled) return;
 
         const { token, wsUrl, role } = tokenRes;
@@ -1617,15 +1620,18 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     let joinedAsViewer = false;
     const init = async () => {
       try {
-        const res = await authApi.me();
+        setLkState('connecting');
+        // Fetch identity + token in parallel to reduce stream startup time.
+        const [res, tokenRes] = await Promise.all([
+          authApi.me(),
+          streamsApi.token(stream.id),
+        ]);
         const userId = res?.data?.id || '';
         if (cancelled) return;
         setCurrentUserId(userId);
         setCurrentUserName(res?.data?.displayName || res?.data?.username || '');
 
         // Fetch LiveKit token — server determines role authoritatively
-        setLkState('connecting');
-        const tokenRes = await streamsApi.token(stream.id);
         if (cancelled) return;
         const { token, wsUrl, role } = tokenRes;
         if (!token || !wsUrl) { setLkState('failed'); return; }
@@ -1633,7 +1639,6 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
         // Use server-determined role for host detection (works for anonymous streams too)
         const hostMode = role === 'host';
         setIsHost(hostMode);
-        if (hostMode && !conn.allowVideo) setCamOn(false);
 
         // Keep DB viewer metrics in sync for non-host audience.
         if (!hostMode) {
@@ -1664,7 +1669,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
             }
           },
         }, {
-          publishVideo: hostMode && conn.allowVideo,
+          publishVideo: hostMode,
           publishAudio: hostMode,
           videoQuality: effectiveVideoQuality,
         });
@@ -1685,7 +1690,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       }
       livekitStreamManager.disconnect();
     };
-  }, [conn.allowVideo, effectiveVideoQuality, stream.id, stream.userId]);
+  }, [stream.id, stream.userId]);
 
   // ── Host stream cleanup on page unload ──
   useEffect(() => {
@@ -1702,14 +1707,6 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isHost, stream.id]);
-
-  // Auto-degrade host camera when network becomes too weak.
-  useEffect(() => {
-    if (!isHost) return;
-    if (!conn.allowVideo && camOn) {
-      livekitStreamManager.toggleCamera().then(() => setCamOn(false)).catch(() => { });
-    }
-  }, [camOn, conn.allowVideo, isHost]);
 
   // Apply host-selected quality profile without reconnecting LiveKit.
   useEffect(() => {
