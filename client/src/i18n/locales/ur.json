@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "ناظرین آپ کو فالو یا شامل نہیں کر سکتے",
     "anonymousName": "گمنام نام",
     "anonymousNamePlaceholder": "ایک گمنام نام منتخب کریں...",
-    "anonymousNameRequired": "ایک گمنام نام درج کریں"
+    "anonymousNameRequired": "ایک گمنام نام درج کریں",
+    "createFailed": "براڈکاسٹ بنانے میں ناکام"
   },
   "resetPassword": {
     "title": "نیا پاس ورڈ مقرر کریں",

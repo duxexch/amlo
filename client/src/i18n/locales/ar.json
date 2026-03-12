@@ -1776,7 +1776,8 @@
     "streamAsAnonymousDesc": "لن يستطيع المشاهدون متابعتك أو إضافتك",
     "anonymousName": "الاسم المستعار",
     "anonymousNamePlaceholder": "اختر اسماً مستعاراً...",
-    "anonymousNameRequired": "أدخل اسماً مستعاراً"
+    "anonymousNameRequired": "أدخل اسماً مستعاراً",
+    "createFailed": "فشل في إنشاء البث"
   },
   "resetPassword": {
     "title": "تعيين كلمة مرور جديدة",

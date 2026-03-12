@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "Penonton tidak dapat mengikuti atau menambahkan Anda",
     "anonymousName": "Nama Anonim",
     "anonymousNamePlaceholder": "Pilih nama anonim...",
-    "anonymousNameRequired": "Masukkan nama anonim"
+    "anonymousNameRequired": "Masukkan nama anonim",
+    "createFailed": "Gagal membuat siaran"
   },
   "resetPassword": {
     "title": "Atur Kata Sandi Baru",

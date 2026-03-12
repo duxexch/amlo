@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "观众无法关注或添加你",
     "anonymousName": "匿名名称",
     "anonymousNamePlaceholder": "选择一个匿名名称...",
-    "anonymousNameRequired": "请输入匿名名称"
+    "anonymousNameRequired": "请输入匿名名称",
+    "createFailed": "创建直播失败"
   },
   "resetPassword": {
     "title": "设置新密码",

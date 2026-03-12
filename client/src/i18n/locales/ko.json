@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "시청자가 팔로우하거나 추가할 수 없습니다",
     "anonymousName": "익명 이름",
     "anonymousNamePlaceholder": "익명 이름을 선택하세요...",
-    "anonymousNameRequired": "익명 이름을 입력하세요"
+    "anonymousNameRequired": "익명 이름을 입력하세요",
+    "createFailed": "스트림 생성 실패"
   },
   "resetPassword": {
     "title": "새 비밀번호 설정",

@@ -1698,7 +1698,8 @@
     "streamAsAnonymousDesc": "بینندگان نمی‌توانند شما را دنبال یا اضافه کنند",
     "anonymousName": "نام مستعار",
     "anonymousNamePlaceholder": "یک نام مستعار انتخاب کنید...",
-    "anonymousNameRequired": "یک نام مستعار وارد کنید"
+    "anonymousNameRequired": "یک نام مستعار وارد کنید",
+    "createFailed": "ایجاد پخش زنده ناموفق بود"
   },
   "resetPassword": {
     "title": "تنظیم رمز عبور جدید",

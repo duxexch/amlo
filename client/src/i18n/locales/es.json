@@ -1698,7 +1698,8 @@
     "streamAsAnonymousDesc": "Los espectadores no pueden seguirte ni agregarte",
     "anonymousName": "Nombre anónimo",
     "anonymousNamePlaceholder": "Elige un nombre anónimo...",
-    "anonymousNameRequired": "Ingresa un nombre anónimo"
+    "anonymousNameRequired": "Ingresa un nombre anónimo",
+    "createFailed": "Error al crear la transmisión"
   },
   "resetPassword": {
     "title": "Establecer nueva contraseña",

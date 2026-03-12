@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "İzleyiciler sizi takip edemez veya ekleyemez",
     "anonymousName": "Anonim Ad",
     "anonymousNamePlaceholder": "Anonim bir ad seçin...",
-    "anonymousNameRequired": "Anonim bir ad girin"
+    "anonymousNameRequired": "Anonim bir ad girin",
+    "createFailed": "Yayın oluşturulamadı"
   },
   "resetPassword": {
     "title": "Yeni Şifre Belirle",

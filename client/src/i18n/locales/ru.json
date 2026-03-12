@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "Зрители не смогут подписаться или добавить вас",
     "anonymousName": "Анонимное имя",
     "anonymousNamePlaceholder": "Выберите анонимное имя...",
-    "anonymousNameRequired": "Введите анонимное имя"
+    "anonymousNameRequired": "Введите анонимное имя",
+    "createFailed": "Не удалось создать трансляцию"
   },
   "resetPassword": {
     "title": "Установить новый пароль",

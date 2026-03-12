@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "視聴者はあなたをフォロー・追加できません",
     "anonymousName": "匿名名",
     "anonymousNamePlaceholder": "匿名名を選んでください...",
-    "anonymousNameRequired": "匿名名を入力してください"
+    "anonymousNameRequired": "匿名名を入力してください",
+    "createFailed": "配信の作成に失敗しました"
   },
   "resetPassword": {
     "title": "新しいパスワードを設定",

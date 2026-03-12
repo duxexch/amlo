@@ -2474,8 +2474,13 @@ export function LiveBroadcast() {
           const item = parseStream({ ...res, type: "live" });
           setSelectedVideoStream(item);
         }
+      } else {
+        toast.error(t("live.createFailed", "فشل في إنشاء البث"));
       }
-    } catch { /* silent */ } finally {
+    } catch (err: any) {
+      const msg = err?.message || t("live.createFailed", "فشل في إنشاء البث");
+      toast.error(msg);
+    } finally {
       setCreating(false);
     }
   };

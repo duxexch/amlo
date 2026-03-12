@@ -1706,7 +1706,8 @@
     "streamAsAnonymousDesc": "दर्शक आपको फॉलो या जोड़ नहीं सकते",
     "anonymousName": "गुमनाम नाम",
     "anonymousNamePlaceholder": "एक गुमनाम नाम चुनें...",
-    "anonymousNameRequired": "एक गुमनाम नाम दर्ज करें"
+    "anonymousNameRequired": "एक गुमनाम नाम दर्ज करें",
+    "createFailed": "स्ट्रीम बनाने में विफल"
   },
   "resetPassword": {
     "title": "नया पासवर्ड सेट करें",

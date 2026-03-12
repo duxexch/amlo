@@ -1776,7 +1776,8 @@
     "streamAsAnonymousDesc": "Viewers cannot follow or add you",
     "anonymousName": "Anonymous Name",
     "anonymousNamePlaceholder": "Choose an anonymous name...",
-    "anonymousNameRequired": "Enter an anonymous name"
+    "anonymousNameRequired": "Enter an anonymous name",
+    "createFailed": "Failed to create stream"
   },
   "resetPassword": {
     "title": "Set New Password",
