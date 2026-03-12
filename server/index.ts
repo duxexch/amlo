@@ -1112,6 +1112,32 @@ io.on("connection", (socket) => {
       await leaveQueue(userId);
       await endRandomCall(userId);
 
+      // ── End any active streams hosted by this user ──
+      try {
+        const db = getDb();
+        if (db) {
+          const activeStream = await db.select({ id: schema.streams.id })
+            .from(schema.streams)
+            .where(and(eq(schema.streams.userId, userId), eq(schema.streams.status, "active")))
+            .limit(1);
+          if (activeStream.length > 0) {
+            const streamId = activeStream[0].id;
+            await db.update(schema.streams)
+              .set({ status: "ended", endedAt: new Date() })
+              .where(eq(schema.streams.id, streamId));
+            io.to(`room:${streamId}`).emit("stream-ended", { streamId, reason: "host_disconnected" });
+            serverLog.info({ streamId, userId }, "Stream auto-ended due to host disconnect");
+            // Cleanup LiveKit room
+            try {
+              const { deleteLiveKitRoom } = await import("./utils/livekit");
+              await deleteLiveKitRoom(`stream-${streamId}`);
+            } catch { /* non-blocking */ }
+          }
+        }
+      } catch (err) {
+        serverLog.warn({ err, userId }, "Failed to cleanup streams on disconnect");
+      }
+
       // ── End any active/ringing calls for this user on disconnect ──
       try {
         const db = getDb();

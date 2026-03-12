@@ -629,6 +629,12 @@ function AudioRoomView({ stream, onClose }: { stream: StreamItem; onClose: () =>
           <button className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center">
             <Share2 className="w-4 h-4 text-white" />
           </button>
+          {isHost && (
+            <button onClick={handleEndStream} className="flex-1 py-2 px-4 rounded-full bg-red-600/80 backdrop-blur-md border border-red-600/60 flex items-center justify-center hover:bg-red-700 transition-colors gap-2">
+              <PhoneOff className="w-4 h-4 text-white" />
+              <span className="text-white text-xs font-bold">{t("live.endStream", "إنهاء البث")}</span>
+            </button>
+          )}
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-destructive hover:border-destructive transition-colors">
             <X className="w-4 h-4 text-white" />
           </button>
@@ -1671,6 +1677,22 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
     };
   }, [conn.allowVideo, effectiveVideoQuality, stream.id, stream.userId]);
 
+  // ── Host stream cleanup on page unload ──
+  useEffect(() => {
+    if (!isHost) return;
+
+    const handleBeforeUnload = () => {
+      // Send keepalive to end stream on page close/refresh
+      navigator.sendBeacon(
+        `/api/v1/social/streams/${stream.id}/end`,
+        JSON.stringify({})
+      );
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isHost, stream.id]);
+
   // Auto-degrade host camera when network becomes too weak.
   useEffect(() => {
     if (!isHost) return;
@@ -1761,12 +1783,24 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       onClose();
     };
 
+    const handleStreamEnded = (data: any) => {
+      if (String(data?.streamId || "") !== String(stream.id)) return;
+      const reason = data?.reason || "unknown";
+      if (reason === "host_disconnected") {
+        toast.info(t("live.streamEndedDisconnect", "انقطع اتصال المضيف"));
+      } else if (reason !== "host_ended" && !isHost) {
+        toast.info(t("live.streamEnded", "انتهى البث"));
+      }
+      setTimeout(onClose, 500);
+    };
+
     socket.on('chat-message', handleChat);
     socket.on('viewer-count', handleViewerCount);
     socket.on('gift-received', handleGiftReceived);
     socket.on('stream-pinned', handlePinned);
     socket.on('stream-poll-update', handlePollUpdate);
     socket.on('stream-force-ended', handleStreamForceEnded);
+    socket.on('stream-ended', handleStreamEnded);
 
     return () => {
       socket.emit('leave-room', stream.id);
@@ -1776,6 +1810,7 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       socket.off('stream-pinned', handlePinned);
       socket.off('stream-poll-update', handlePollUpdate);
       socket.off('stream-force-ended', handleStreamForceEnded);
+      socket.off('stream-ended', handleStreamEnded);
     };
   }, [onClose, stream.id, t]);
 
@@ -2006,6 +2041,17 @@ function VideoStreamView({ stream, onClose }: { stream: StreamItem; onClose: () 
       await streamsApi.endPoll(stream.id, pollId);
       setActivePoll(null);
     } catch { /* silent */ }
+  };
+
+  const handleEndStream = async () => {
+    if (!isHost) return;
+    try {
+      await streamsApi.end(stream.id);
+      toast.success(t("live.streamEnded", "تم إنهاء البث"));
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || t("live.endStreamFailed", "فشل إنهاء البث"));
+    }
   };
 
   const handleMuteUser = async (userId: string) => {
