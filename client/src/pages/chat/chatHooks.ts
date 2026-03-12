@@ -254,7 +254,7 @@ export function useActiveChat(
 
       if (conv?.id === data.conversationId) {
         setMessages(prev => {
-          if (prev.some(m => m.id === data.message.id)) return prev;
+          if (prev.some(m => m.id === data.message.id || (data.message.clientMessageId && m.clientMessageId === data.message.clientMessageId))) return prev;
           return [...prev, data.message];
         });
         if (isNearBottom()) {
@@ -357,7 +357,8 @@ export function useActiveChat(
 
       if (activeConvRef.current?.id === data.conversationId) {
         setMessages(prev => {
-          if (prev.some(m => m.id === data.message.id)) return prev;
+          // Deduplicate by server id OR clientMessageId (optimistic msg has temp id)
+          if (prev.some(m => m.id === data.message.id || (data.message.clientMessageId && m.clientMessageId === data.message.clientMessageId))) return prev;
           return [...prev, { ...data.message, senderId: "me" }];
         });
       }
