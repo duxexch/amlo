@@ -1826,7 +1826,16 @@
     "shareReelTitle": "این ریل را در Ablox ببینید",
     "linkCopied": "لینک کپی شد!",
     "reelNotFound": "ریل یافت نشد",
-    "durationTooLong": "حداکثر مدت ریل {{max}} ثانیه است"
+    "durationTooLong": "حداکثر مدت ریل {{max}} ثانیه است",
+    "reportTitle": "گزارش این ریل",
+    "reportSent": "گزارش ارسال شد",
+    "report_spam": "هرزنامه",
+    "report_inappropriate": "محتوای نامناسب",
+    "report_harassment": "آزار و اذیت",
+    "report_other": "سایر",
+    "notInterested": "علاقه‌ای ندارم",
+    "videoError": "بارگذاری ویدیو ناموفق بود",
+    "refreshFeed": "بازنشانی"
   },
   "userProfile": {
     "followers": "دنبال‌کنندگان",

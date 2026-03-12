@@ -658,6 +658,8 @@ export const postsApi = {
     request(`/posts/comments/${commentId}`, { method: "DELETE" }),
   toggleVisibility: (id: string, visibility: "public" | "private") =>
     request<any>(`/posts/${id}/visibility`, { method: "PATCH", body: JSON.stringify({ visibility }) }),
+  report: (id: string, type: string) =>
+    request<{ reported: boolean }>(`/posts/${id}/report`, { method: "POST", body: JSON.stringify({ type }) }),
   reportScreenshot: () =>
     request<{ banned: boolean; count: number; warning?: boolean; bannedUntil?: string }>("/posts/screenshot-violation", { method: "POST" }),
   getScreenshotStatus: () =>

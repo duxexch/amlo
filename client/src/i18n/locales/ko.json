@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Ablox에서 이 릴을 시청하세요",
     "linkCopied": "링크가 복사되었습니다!",
     "reelNotFound": "릴을 찾을 수 없습니다",
-    "durationTooLong": "릴 최대 길이는 {{max}}초입니다"
+    "durationTooLong": "릴 최대 길이는 {{max}}초입니다",
+    "reportTitle": "이 릴 신고",
+    "reportSent": "신고가 제출되었습니다",
+    "report_spam": "스팸",
+    "report_inappropriate": "부적절한 콘텐츠",
+    "report_harassment": "괴롭힘",
+    "report_other": "기타",
+    "notInterested": "관심 없음",
+    "videoError": "동영상을 불러오지 못했습니다",
+    "refreshFeed": "새로고침"
   },
   "userProfile": {
     "followers": "팔로워",

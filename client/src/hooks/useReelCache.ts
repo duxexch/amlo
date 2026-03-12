@@ -17,8 +17,17 @@ const DB_NAME = "ablox_reel_cache";
 const DB_VERSION = 1;
 const STORE_NAME = "videos";
 const MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
-const PRELOAD_AHEAD = 5;
 const MAX_CACHE_ENTRIES = 200; // safety cap
+
+/** Adaptive preload count based on network quality */
+function getPreloadAhead(): number {
+    const conn = (navigator as any).connection;
+    if (!conn) return 3;
+    const etype = conn.effectiveType;
+    if (etype === "slow-2g" || etype === "2g") return 1;
+    if (etype === "3g") return 2;
+    return 5; // 4g or better
+}
 
 // ── Helpers ──
 function openDB(): Promise<IDBDatabase> {
@@ -187,8 +196,9 @@ export function useReelCache(reels: any[]) {
      */
     const preloadAround = useCallback((activeIdx: number) => {
         if (!reels.length) return;
+        const ahead = getPreloadAhead();
         const start = activeIdx;
-        const end = Math.min(activeIdx + PRELOAD_AHEAD + 1, reels.length);
+        const end = Math.min(activeIdx + ahead + 1, reels.length);
         for (let i = start; i < end; i++) {
             const url = reels[i]?.mediaUrl;
             if (url) preloadOne(url);

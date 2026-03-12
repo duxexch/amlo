@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Tonton reel ini di Ablox",
     "linkCopied": "Tautan disalin!",
     "reelNotFound": "Reel tidak ditemukan",
-    "durationTooLong": "Durasi reel maksimal {{max}} detik"
+    "durationTooLong": "Durasi reel maksimal {{max}} detik",
+    "reportTitle": "Laporkan reel ini",
+    "reportSent": "Laporan terkirim",
+    "report_spam": "Spam",
+    "report_inappropriate": "Konten tidak pantas",
+    "report_harassment": "Pelecehan",
+    "report_other": "Lainnya",
+    "notInterested": "Tidak tertarik",
+    "videoError": "Gagal memuat video",
+    "refreshFeed": "Segarkan"
   },
   "userProfile": {
     "followers": "Pengikut",

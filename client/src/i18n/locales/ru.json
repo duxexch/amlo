@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Смотрите этот рилс на Ablox",
     "linkCopied": "Ссылка скопирована!",
     "reelNotFound": "Рилс не найден",
-    "durationTooLong": "Максимальная длительность рилса — {{max}} секунд"
+    "durationTooLong": "Максимальная длительность рилса — {{max}} секунд",
+    "reportTitle": "Пожаловаться на рилс",
+    "reportSent": "Жалоба отправлена",
+    "report_spam": "Спам",
+    "report_inappropriate": "Неприемлемый контент",
+    "report_harassment": "Преследование",
+    "report_other": "Другое",
+    "notInterested": "Не интересно",
+    "videoError": "Не удалось загрузить видео",
+    "refreshFeed": "Обновить"
   },
   "userProfile": {
     "followers": "Подписчики",

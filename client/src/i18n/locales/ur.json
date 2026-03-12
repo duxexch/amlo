@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Ablox پر یہ ریل دیکھیں",
     "linkCopied": "لنک کاپی ہو گیا!",
     "reelNotFound": "ریل نہیں ملی",
-    "durationTooLong": "ریل کی زیادہ سے زیادہ مدت {{max}} سیکنڈ ہے"
+    "durationTooLong": "ریل کی زیادہ سے زیادہ مدت {{max}} سیکنڈ ہے",
+    "reportTitle": "اس ریل کی رپورٹ کریں",
+    "reportSent": "رپورٹ بھیجی گئی",
+    "report_spam": "سپیم",
+    "report_inappropriate": "نامناسب مواد",
+    "report_harassment": "ہراسانی",
+    "report_other": "دیگر",
+    "notInterested": "دلچسپی نہیں ہے",
+    "videoError": "ویڈیو لوڈ نہیں ہو سکی",
+    "refreshFeed": "ریفریش"
   },
   "userProfile": {
     "followers": "فالوورز",

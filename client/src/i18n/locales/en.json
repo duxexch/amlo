@@ -1868,7 +1868,16 @@
     "shareReelTitle": "Watch this reel on Ablox",
     "linkCopied": "Link copied!",
     "reelNotFound": "Reel not found",
-    "durationTooLong": "Maximum reel duration is {{max}} seconds"
+    "durationTooLong": "Maximum reel duration is {{max}} seconds",
+    "reportTitle": "Report this reel",
+    "reportSent": "Report submitted",
+    "report_spam": "Spam",
+    "report_inappropriate": "Inappropriate content",
+    "report_harassment": "Harassment",
+    "report_other": "Other",
+    "notInterested": "Not interested",
+    "videoError": "Video failed to load",
+    "refreshFeed": "Refresh"
   },
   "userProfile": {
     "followers": "Followers",

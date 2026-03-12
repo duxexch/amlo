@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Regarde ce reel sur Ablox",
     "linkCopied": "Lien copié !",
     "reelNotFound": "Reel introuvable",
-    "durationTooLong": "La durée maximale du reel est de {{max}} secondes"
+    "durationTooLong": "La durée maximale du reel est de {{max}} secondes",
+    "reportTitle": "Signaler ce reel",
+    "reportSent": "Signalement envoyé",
+    "report_spam": "Spam",
+    "report_inappropriate": "Contenu inapproprié",
+    "report_harassment": "Harcèlement",
+    "report_other": "Autre",
+    "notInterested": "Pas intéressé",
+    "videoError": "Échec du chargement de la vidéo",
+    "refreshFeed": "Actualiser"
   },
   "userProfile": {
     "followers": "Abonnés",

@@ -1826,7 +1826,16 @@
     "shareReelTitle": "Sieh dir dieses Reel auf Ablox an",
     "linkCopied": "Link kopiert!",
     "reelNotFound": "Reel nicht gefunden",
-    "durationTooLong": "Maximale Reel-Dauer beträgt {{max}} Sekunden"
+    "durationTooLong": "Maximale Reel-Dauer beträgt {{max}} Sekunden",
+    "reportTitle": "Dieses Reel melden",
+    "reportSent": "Meldung gesendet",
+    "report_spam": "Spam",
+    "report_inappropriate": "Unangemessener Inhalt",
+    "report_harassment": "Belästigung",
+    "report_other": "Sonstiges",
+    "notInterested": "Kein Interesse",
+    "videoError": "Video konnte nicht geladen werden",
+    "refreshFeed": "Aktualisieren"
   },
   "userProfile": {
     "followers": "Follower",

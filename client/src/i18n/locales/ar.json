@@ -1868,7 +1868,16 @@
     "shareReelTitle": "شاهد هذا الريلز على Ablox",
     "linkCopied": "تم نسخ الرابط!",
     "reelNotFound": "الريلز غير موجود",
-    "durationTooLong": "الحد الأقصى لمدة الريلز {{max}} ثانية"
+    "durationTooLong": "الحد الأقصى لمدة الريلز {{max}} ثانية",
+    "reportTitle": "الإبلاغ عن هذا الريلز",
+    "reportSent": "تم إرسال البلاغ",
+    "report_spam": "محتوى مزعج",
+    "report_inappropriate": "محتوى غير لائق",
+    "report_harassment": "تحرش",
+    "report_other": "أخرى",
+    "notInterested": "غير مهتم",
+    "videoError": "فشل تحميل الفيديو",
+    "refreshFeed": "تحديث"
   },
   "userProfile": {
     "followers": "المتابعون",

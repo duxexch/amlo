@@ -1834,7 +1834,16 @@
     "shareReelTitle": "在Ablox上观看这个短视频",
     "linkCopied": "链接已复制！",
     "reelNotFound": "未找到短视频",
-    "durationTooLong": "短视频最长{{max}}秒"
+    "durationTooLong": "短视频最长{{max}}秒",
+    "reportTitle": "举报此短视频",
+    "reportSent": "举报已提交",
+    "report_spam": "垃圾内容",
+    "report_inappropriate": "不当内容",
+    "report_harassment": "骚扰",
+    "report_other": "其他",
+    "notInterested": "不感兴趣",
+    "videoError": "视频加载失败",
+    "refreshFeed": "刷新"
   },
   "userProfile": {
     "followers": "粉丝",

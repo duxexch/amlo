@@ -279,6 +279,9 @@ export async function applyDatabaseConstraints(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS payment_orders_user_created_idx ON payment_orders (user_id, created_at DESC);`,
     `CREATE INDEX IF NOT EXISTS payment_orders_provider_ref_idx ON payment_orders (provider_reference);`,
     `CREATE INDEX IF NOT EXISTS payment_orders_status_idx ON payment_orders (status, created_at DESC);`,
+    // ── Stream anonymous columns (safe migration) ──
+    `ALTER TABLE streams ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;`,
+    `ALTER TABLE streams ADD COLUMN IF NOT EXISTS anonymous_name text;`,
   ];
 
   let client: pg.PoolClient | null = null;

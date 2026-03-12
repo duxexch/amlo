@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Abloxでこのリールを見る",
     "linkCopied": "リンクをコピーしました！",
     "reelNotFound": "リールが見つかりません",
-    "durationTooLong": "リールの最大長は{{max}}秒です"
+    "durationTooLong": "リールの最大長は{{max}}秒です",
+    "reportTitle": "このリールを報告",
+    "reportSent": "報告を送信しました",
+    "report_spam": "スパム",
+    "report_inappropriate": "不適切なコンテンツ",
+    "report_harassment": "嫌がらせ",
+    "report_other": "その他",
+    "notInterested": "興味なし",
+    "videoError": "動画の読み込みに失敗しました",
+    "refreshFeed": "更新"
   },
   "userProfile": {
     "followers": "フォロワー",

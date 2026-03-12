@@ -1826,7 +1826,16 @@
     "shareReelTitle": "Mira este reel en Ablox",
     "linkCopied": "¡Enlace copiado!",
     "reelNotFound": "Reel no encontrado",
-    "durationTooLong": "La duración máxima del reel es {{max}} segundos"
+    "durationTooLong": "La duración máxima del reel es {{max}} segundos",
+    "reportTitle": "Reportar este reel",
+    "reportSent": "Reporte enviado",
+    "report_spam": "Spam",
+    "report_inappropriate": "Contenido inapropiado",
+    "report_harassment": "Acoso",
+    "report_other": "Otro",
+    "notInterested": "No me interesa",
+    "videoError": "Error al cargar el video",
+    "refreshFeed": "Actualizar"
   },
   "userProfile": {
     "followers": "Seguidores",

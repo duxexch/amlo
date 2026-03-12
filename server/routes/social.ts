@@ -4286,7 +4286,7 @@ router.get("/streams/active", async (req: Request, res: Response) => {
   try {
     const category = String(req.query.category || "").trim();
     const db = getDb();
-    if (!db) return res.json([]);
+    if (!db) return res.json({ data: [] });
 
     const redis = getRedis();
     const cacheVersion = await getStreamCacheVersion(redis);
@@ -4295,7 +4295,7 @@ router.get("/streams/active", async (req: Request, res: Response) => {
       try {
         const cached = await redis.get(cacheKey);
         if (cached) {
-          return res.json(JSON.parse(cached));
+          return res.json({ data: JSON.parse(cached) });
         }
       } catch {
         // best-effort cache read
@@ -4326,7 +4326,7 @@ router.get("/streams/active", async (req: Request, res: Response) => {
       .where(and(...conditions))
       .orderBy(desc(schema.streams.viewerCount)).limit(50);
 
-    if (!data.length) return res.json([]);
+    if (!data.length) return res.json({ data: [] });
 
     const userIds = data.map((s: any) => s.userId).filter(Boolean);
     let usersMap: Record<string, any> = {};
@@ -4358,10 +4358,10 @@ router.get("/streams/active", async (req: Request, res: Response) => {
       }
     }
 
-    return res.json(enriched);
+    return res.json({ data: enriched });
   } catch (err: any) {
     socialLog.error({ err }, "Active streams error");
-    return res.json([]);
+    return res.json({ data: [] });
   }
 });
 
@@ -4369,11 +4369,11 @@ router.get("/streams/active", async (req: Request, res: Response) => {
 router.get("/streams/recommended", async (req: Request, res: Response) => {
   try {
     const db = getDb();
-    if (!db) return res.json([]);
+    if (!db) return res.json({ data: [] });
 
     const flags = await getLiveFeatureFlags(db);
     if (!flags.liveRecommendationEnabled) {
-      return res.json([]);
+      return res.json({ data: [] });
     }
 
     const category = String(req.query.category || "").trim();
@@ -4384,7 +4384,7 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
     if (redis) {
       try {
         const cached = await redis.get(recCacheKey);
-        if (cached) return res.json(JSON.parse(cached));
+        if (cached) return res.json({ data: JSON.parse(cached) });
       } catch {
         // best-effort cache read
       }
@@ -4415,7 +4415,7 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
       .orderBy(desc(schema.streams.viewerCount), desc(schema.streams.startedAt))
       .limit(80);
 
-    if (!streams.length) return res.json([]);
+    if (!streams.length) return res.json({ data: [] });
 
     const hostIds = [...new Set(streams.map((s: any) => s.userId).filter(Boolean))] as string[];
     const hosts = hostIds.length
@@ -4482,10 +4482,10 @@ router.get("/streams/recommended", async (req: Request, res: Response) => {
       }
     }
 
-    return res.json(payload);
+    return res.json({ data: payload });
   } catch (err: any) {
     socialLog.error({ err }, "Recommended streams error");
-    return res.json([]);
+    return res.json({ data: [] });
   }
 });
 
@@ -4512,7 +4512,7 @@ router.get("/streams/my", async (req: Request, res: Response) => {
 router.get("/streams/scheduled", async (_req: Request, res: Response) => {
   try {
     const db = getDb();
-    if (!db) return res.json([]);
+    if (!db) return res.json({ data: [] });
     const data = await db.select().from(schema.streams)
       .where(and(eq(schema.streams.status, "scheduled"), sql`${schema.streams.scheduledAt} > NOW()`))
       .orderBy(asc(schema.streams.scheduledAt));
@@ -4527,10 +4527,10 @@ router.get("/streams/scheduled", async (_req: Request, res: Response) => {
       const isAnon = !!s.isAnonymous;
       return { ...s, hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"), hostAvatar: isAnon ? null : (host?.avatar || null), hostLevel: isAnon ? 1 : (host?.level || 1), userId: isAnon ? undefined : s.userId, isAnonymous: isAnon, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
     });
-    return res.json(enriched);
+    return res.json({ data: enriched });
   } catch (err: any) {
     socialLog.error({ err }, "Scheduled streams error");
-    return res.json([]);
+    return res.json({ data: [] });
   }
 });
 
@@ -4539,9 +4539,9 @@ router.get("/streams/scheduled", async (_req: Request, res: Response) => {
 router.get("/streams/search", searchLimiter, async (req: Request, res: Response) => {
   try {
     const q = String(req.query.q || "").trim().toLowerCase();
-    if (!q || q.length < 2) return res.json([]);
+    if (!q || q.length < 2) return res.json({ data: [] });
     const db = getDb();
-    if (!db) return res.json([]);
+    if (!db) return res.json({ data: [] });
     const escapedQ = escapeLike(q);
     const data = await db.select().from(schema.streams)
       .where(and(
@@ -4563,10 +4563,10 @@ router.get("/streams/search", searchLimiter, async (req: Request, res: Response)
       const isAnon = !!s.isAnonymous;
       return { ...s, hostName: isAnon ? (s.anonymousName || "مجهول") : (host?.displayName || host?.username || "مجهول"), hostAvatar: isAnon ? null : (host?.avatar || null), hostLevel: isAnon ? 1 : (host?.level || 1), userId: isAnon ? undefined : s.userId, isAnonymous: isAnon, tags: s.tags ? s.tags.split(",").map(t => t.trim()) : [] };
     });
-    return res.json(enriched);
+    return res.json({ data: enriched });
   } catch (err: any) {
     socialLog.error({ err }, "Stream search error");
-    return res.json([]);
+    return res.json({ data: [] });
   }
 });
 

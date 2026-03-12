@@ -186,6 +186,10 @@ router.get("/feed", async (req: Request, res: Response) => {
         let idx = 3;
         let likedClause = ", false as \"liked\"";
         let savedClause = ", false as \"saved\"";
+        let isFollowingClause = ", false as \"isFollowing\"";
+        let viewedBoostExpr = "0";
+        let followBoostExpr = "0";
+        let blockedFilter = "";
 
         if (userId) {
             likedClause = `, EXISTS(SELECT 1 FROM user_post_likes l WHERE l.post_id = p.id AND l.user_id = $${idx}) as "liked"`;
@@ -194,6 +198,14 @@ router.get("/feed", async (req: Request, res: Response) => {
             savedClause = `, EXISTS(SELECT 1 FROM user_post_saves s WHERE s.post_id = p.id AND s.user_id = $${idx}) as "saved"`;
             params.push(userId);
             idx++;
+            // Personalization: following status, unseen boost, follow boost, blocked filter
+            const uidIdx = idx;
+            params.push(userId);
+            idx++;
+            isFollowingClause = `, EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id = $${uidIdx} AND f.following_id = p.user_id) as "isFollowing"`;
+            viewedBoostExpr = `(CASE WHEN NOT EXISTS(SELECT 1 FROM user_post_views v WHERE v.post_id = p.id AND v.user_id = $${uidIdx}) THEN 500 ELSE 0 END)`;
+            followBoostExpr = `(CASE WHEN EXISTS(SELECT 1 FROM user_follows f2 WHERE f2.follower_id = $${uidIdx} AND f2.following_id = p.user_id) THEN 50 ELSE 0 END)`;
+            blockedFilter = ` AND NOT EXISTS(SELECT 1 FROM chat_blocks cb WHERE (cb.blocker_id = $${uidIdx} AND cb.blocked_id = p.user_id) OR (cb.blocker_id = p.user_id AND cb.blocked_id = $${uidIdx}))`;
         }
 
         // Check if total_watch_sec column exists (cached after first check)
@@ -211,16 +223,20 @@ router.get("/feed", async (req: Request, res: Response) => {
               u.country as "countryCode"
               ${likedClause}
               ${savedClause}
+              ${isFollowingClause}
        FROM user_posts p
        JOIN users u ON u.id = p.user_id
        WHERE p.is_active = true AND p.type = 'reel' AND COALESCE(p.visibility, 'public') = 'public'
-         AND u.is_banned = false
+         AND u.is_banned = false${blockedFilter}
        ORDER BY (
          (p.like_count * 3) +
          (p.view_count) +
          ${watchSecExpr} +
          (p.comment_count * 2) +
-         (GREATEST(0, 100 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 1728))
+         (GREATEST(0, 100 - EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 1728)) +
+         ${viewedBoostExpr} +
+         ${followBoostExpr} +
+         (RANDOM() * 15)
        ) DESC
        LIMIT $1 OFFSET $2`,
             params,
@@ -658,13 +674,8 @@ router.post("/:id/view", async (req: Request, res: Response) => {
                 `UPDATE user_posts SET view_count = view_count + 1, total_watch_sec = total_watch_sec + $2 WHERE id = $1`,
                 [postId, watchSec],
             );
-        } else if (watchSec > 0) {
-            // Already counted the view, but still accumulate watch time
-            await pool.query(
-                `UPDATE user_posts SET total_watch_sec = total_watch_sec + $2 WHERE id = $1`,
-                [postId, watchSec],
-            );
         }
+        // Watch time only accumulated on first view per user to prevent inflation
 
         return res.json({ success: true });
     } catch (err: any) {
@@ -730,7 +741,7 @@ router.get("/:id/comments", async (req: Request, res: Response) => {
         if (cursor) {
             const cursorDate = new Date(cursor);
             if (!isNaN(cursorDate.getTime())) {
-                cursorClause = `AND c.created_at < $3`;
+                cursorClause = `AND c.created_at > $3`;
                 params.push(cursorDate.toISOString());
             }
         }
@@ -742,7 +753,7 @@ router.get("/:id/comments", async (req: Request, res: Response) => {
        JOIN users u ON u.id = c.user_id
        WHERE c.post_id = $1 AND c.is_active = true
          ${cursorClause}
-       ORDER BY c.created_at DESC
+       ORDER BY c.created_at ASC
        LIMIT $2`,
             params,
         );
@@ -879,6 +890,85 @@ router.patch("/:id/visibility", async (req: Request, res: Response) => {
         return res.json({ success: true, data: result.rows[0] });
     } catch (err: any) {
         postLog.error(`Visibility toggle error: ${err.message}`);
+        return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+    }
+});
+
+// ── POST /:id/report — Report a post ──
+const VALID_REPORT_TYPES = ["spam", "inappropriate", "harassment", "other"];
+const reportLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => (req.session as any)?.userId || ipKeyGenerator(req.ip || "127.0.0.1"),
+    message: { success: false, message: "تم تجاوز حد الإبلاغ. حاول لاحقاً" },
+});
+
+router.post("/:id/report", reportLimiter, async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "يرجى تسجيل الدخول" });
+
+    const pool = getPool();
+    if (!pool) return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+
+    const postId = req.params.id;
+    const type = req.body?.type;
+    if (!type || !VALID_REPORT_TYPES.includes(type)) {
+        return res.status(400).json({ success: false, message: "نوع الإبلاغ غير صالح" });
+    }
+
+    try {
+        // Get the post to find the owner
+        const postResult = await pool.query(
+            `SELECT user_id FROM user_posts WHERE id = $1 AND is_active = true LIMIT 1`,
+            [postId],
+        );
+        if (postResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "المنشور غير موجود" });
+        }
+        const reportedUserId = postResult.rows[0].user_id;
+
+        // Cannot report own post
+        if (reportedUserId === userId) {
+            return res.status(400).json({ success: false, message: "لا يمكنك الإبلاغ عن منشورك" });
+        }
+
+        // Check for duplicate report (same reporter + same post)
+        const existing = await pool.query(
+            `SELECT 1 FROM user_reports WHERE reporter_id = $1 AND reported_id = $2 AND reason LIKE $3 LIMIT 1`,
+            [userId, reportedUserId, `[Post:${postId}]%`],
+        );
+        if (existing.rows.length > 0) {
+            return res.json({ success: true, data: { reported: true }, message: "تم الإبلاغ مسبقاً" });
+        }
+
+        // Insert report using existing user_reports table
+        await pool.query(
+            `INSERT INTO user_reports (reporter_id, reported_id, type, reason, status)
+             VALUES ($1, $2, $3, $4, 'pending')`,
+            [userId, reportedUserId, type, `[Post:${postId}] ${type}`],
+        );
+
+        postLog.info(`Post ${postId} reported by ${userId} as ${type}`);
+
+        // Auto-hide post if >= 3 distinct reporters
+        const reportCount = await pool.query(
+            `SELECT COUNT(DISTINCT reporter_id) as cnt FROM user_reports
+             WHERE reason LIKE $1 AND status = 'pending'`,
+            [`[Post:${postId}]%`],
+        );
+        if (parseInt(reportCount.rows[0].cnt) >= 3) {
+            await pool.query(
+                `UPDATE user_posts SET visibility = 'private' WHERE id = $1 AND visibility = 'public'`,
+                [postId],
+            );
+            postLog.warn(`Post ${postId} auto-hidden due to ${reportCount.rows[0].cnt} reports`);
+        }
+
+        return res.json({ success: true, data: { reported: true } });
+    } catch (err: any) {
+        postLog.error(`Post report error: ${err.message}`);
         return res.status(500).json({ success: false, message: "خطأ في الخادم" });
     }
 });

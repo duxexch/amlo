@@ -1834,7 +1834,16 @@
     "shareReelTitle": "Bu reeli Ablox'ta izle",
     "linkCopied": "Bağlantı kopyalandı!",
     "reelNotFound": "Reel bulunamadı",
-    "durationTooLong": "Maksimum reel süresi {{max}} saniyedir"
+    "durationTooLong": "Maksimum reel süresi {{max}} saniyedir",
+    "reportTitle": "Bu reeli bildir",
+    "reportSent": "Bildirim gönderildi",
+    "report_spam": "Spam",
+    "report_inappropriate": "Uygunsuz içerik",
+    "report_harassment": "Taciz",
+    "report_other": "Diğer",
+    "notInterested": "İlgilenmiyorum",
+    "videoError": "Video yüklenemedi",
+    "refreshFeed": "Yenile"
   },
   "userProfile": {
     "followers": "Takipçiler",
