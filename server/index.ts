@@ -1103,6 +1103,7 @@ io.on("connection", (socket) => {
         if (db) {
           const { calls } = await import("../shared/schema");
           const { eq, or, and } = await import("drizzle-orm");
+          const { finalizeCallEnd } = await import("./routes/social");
           const activeCalls = await db.select({ id: calls.id, callerId: calls.callerId, receiverId: calls.receiverId })
             .from(calls)
             .where(
@@ -1112,9 +1113,14 @@ io.on("connection", (socket) => {
               )
             ).limit(5);
           for (const call of activeCalls) {
-            await db.update(calls)
-              .set({ status: "ended", endedAt: new Date() })
-              .where(and(eq(calls.id, call.id), or(eq(calls.status, "active"), eq(calls.status, "ringing"))));
+            // Use finalizeCallEnd for proper billing (duration + coins)
+            await finalizeCallEnd({
+              callId: call.id,
+              actorUserId: userId,
+              reason: "user_end",
+            });
+            // Notify other party — finalizeCallEnd already emits to otherId,
+            // but also send peer_disconnected reason for UI clarity
             const otherId = call.callerId === userId ? call.receiverId : call.callerId;
             io.to(`user:${otherId}`).emit("call-ended", {
               callId: call.id,

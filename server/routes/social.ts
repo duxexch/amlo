@@ -5960,3 +5960,4 @@ setInterval(async () => {
 }, 6 * 60 * 60 * 1000).unref(); // Every 6 hours
 
 export default router;
+export { finalizeCallEnd };

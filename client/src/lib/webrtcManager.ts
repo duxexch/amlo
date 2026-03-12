@@ -267,9 +267,17 @@ class WebRTCManager {
 
     try {
       if (signal.type === "offer") {
-        // Glare handling: if we're also making an offer
+        // Glare handling: if we're also making an offer, rollback and accept the remote
         const offerCollision = this.makingOffer || this.pc.signalingState !== "stable";
-        if (offerCollision) return; // polite peer would rollback; we'll skip for simplicity
+        if (offerCollision) {
+          // Rollback our pending local description and accept the remote offer
+          try {
+            await this.pc.setLocalDescription({ type: "rollback" } as RTCSessionDescriptionInit);
+          } catch {
+            // Rollback may fail if already stable — ignore
+            return;
+          }
+        }
 
         await this.pc.setRemoteDescription(new RTCSessionDescription(signal));
         const answer = await this.pc.createAnswer();
@@ -454,6 +462,18 @@ class WebRTCManager {
       }
       this.remoteStream.addTrack(event.track);
       this.handlers.onRemoteStream?.(this.remoteStream);
+
+      // Detect when remote track ends (peer stopped camera/mic)
+      event.track.onended = () => {
+        if (event.track.kind === "video") {
+          this.handlers.onError?.("الطرف الآخر أوقف الكاميرا");
+        }
+      };
+      event.track.onmute = () => {
+        if (event.track.kind === "video") {
+          this.handlers.onError?.("فيديو الطرف الآخر متوقف مؤقتاً");
+        }
+      };
     };
 
     // ── Negotiation needed ──
@@ -644,10 +664,11 @@ class WebRTCManager {
   }
 
   /**
-   * Start duration counter
+   * Start duration counter (only if not already running)
    */
   private startDurationTimer(): void {
-    this.duration = 0;
+    // Don't reset duration on ICE reconnect — preserve the elapsed time
+    if (this.durationInterval) return;
     this.durationInterval = setInterval(() => {
       this.duration++;
       this.handlers.onDurationTick?.(this.duration);
