@@ -1613,7 +1613,23 @@ export function Profile() {
         <ExpandableSection icon={Settings} title={t("profile.accountSettings")} desc={t("profile.accountSettingsDesc")}>
           <div className="space-y-3">
             <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all"><Download className="w-4 h-4 text-white/50" /><span className="text-white text-sm font-medium">{t("profile.downloadData")}</span></button>
-            <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all"><Globe className="w-4 h-4 text-white/50" /><span className="text-white text-sm font-medium">{t("profile.changeLanguage")}</span></button>
+            <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-white/50" />
+                <span className="text-white text-sm font-medium">{t("profile.changeLanguage")}</span>
+              </div>
+              <select
+                value={i18n.language}
+                onChange={(e) => i18n.changeLanguage(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-primary appearance-none cursor-pointer"
+              >
+                {LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code} className="bg-[#0c0c1d] text-white">
+                    {lang.flag} {lang.nativeLabel} ({lang.label})
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {/* Translation Language Preference */}
             <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
