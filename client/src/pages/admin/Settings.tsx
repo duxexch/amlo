@@ -1218,9 +1218,30 @@ function PricingTab() {
   const [voiceRate, setVoiceRate] = useState("5");
   const [videoRate, setVideoRate] = useState("10");
   const [messageCost, setMessageCost] = useState("1");
+  const [scope, setScope] = useState<"request" | "global" | "tenant">("request");
+  const [tenantId, setTenantId] = useState("");
+  const [scopeError, setScopeError] = useState("");
 
-  useEffect(() => {
-    adminPricing.getAll()
+  const buildScopePayload = useCallback(() => {
+    if (scope === "global") {
+      return { scope: "global" as const };
+    }
+    if (scope === "tenant") {
+      return {
+        scope: "tenant" as const,
+        tenantId: tenantId.trim(),
+      };
+    }
+    return { scope: "request" as const };
+  }, [scope, tenantId]);
+
+  const loadPricing = useCallback(() => {
+    const payload = buildScopePayload();
+    if (payload.scope === "tenant" && !payload.tenantId) {
+      return Promise.resolve();
+    }
+
+    return adminPricing.getAll(payload)
       .then((res) => {
         const data = res.data;
         if (!data) return;
@@ -1229,11 +1250,26 @@ function PricingTab() {
         if (data.messages?.message_cost !== undefined) setMessageCost(String(data.messages.message_cost));
       })
       .catch(() => { });
-  }, []);
+  }, [buildScopePayload]);
+
+  useEffect(() => {
+    loadPricing();
+  }, [loadPricing]);
 
   const handleSave = async () => {
     setSaving(true);
+    setScopeError("");
     try {
+      const payload = buildScopePayload();
+      if (payload.scope === "tenant" && !payload.tenantId) {
+        setScopeError("Tenant ID is required when tenant scope is selected.");
+        return;
+      }
+      if (payload.scope === "tenant" && !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.tenantId)) {
+        setScopeError("Tenant ID must be 1-64 chars (letters, numbers, _ or -).");
+        return;
+      }
+
       const voice = Number(voiceRate);
       const video = Number(videoRate);
       const message = Number(messageCost);
@@ -1242,14 +1278,17 @@ function PricingTab() {
         adminPricing.updateCallRates({
           voiceCallRate: Number.isFinite(voice) ? voice : 0,
           videoCallRate: Number.isFinite(video) ? video : 0,
+          ...payload,
         }),
         adminPricing.updateMessageCosts({
           messageCost: Number.isFinite(message) ? message : 0,
+          ...payload,
         }),
       ]);
 
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      await loadPricing();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -1293,6 +1332,57 @@ function PricingTab() {
           <p className="text-amber-400 text-sm font-bold">{t("admin.settings.pricing.title")}</p>
           <p className="text-amber-400/60 text-xs mt-1">{t("admin.settings.pricing.subtitle")}</p>
         </div>
+      </div>
+
+      {/* Scope Controls */}
+      <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5 space-y-3">
+        <div>
+          <p className="text-white text-sm font-bold">Pricing Update Scope</p>
+          <p className="text-white/40 text-xs mt-1">Choose whether this update applies to current request tenant, global defaults, or a specific tenant.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button
+            type="button"
+            onClick={() => setScope("request")}
+            className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "request" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}
+          >
+            Request Tenant
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope("global")}
+            className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "global" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}
+          >
+            Global Defaults
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope("tenant")}
+            className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "tenant" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}
+          >
+            Specific Tenant
+          </button>
+        </div>
+        {scope === "tenant" && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-white/60">Tenant ID</label>
+            <input
+              type="text"
+              value={tenantId}
+              onChange={(e) => {
+                setTenantId(e.target.value);
+                setScopeError("");
+              }}
+              placeholder="tenant-a"
+              className="w-full md:w-72 bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white font-mono focus:outline-none focus:border-primary/40 transition-colors"
+            />
+          </div>
+        )}
+        {scopeError && (
+          <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            {scopeError}
+          </div>
+        )}
       </div>
 
       {/* Pricing Cards */}
@@ -1623,30 +1713,113 @@ function WorldPricingTab() {
 interface AppDownloadForm {
   enabled: boolean;
   domain: string;
+  rollout: {
+    enabled: boolean;
+    apkPercent: number;
+    aabPercent: number;
+    allowTenants: string[];
+    blockTenants: string[];
+  };
   pwa: { enabled: boolean; url: string; extension: string; description: string };
-  apk: { enabled: boolean; url: string; extension: string; description: string };
-  aab: { enabled: boolean; url: string; extension: string; description: string };
+  apk: { enabled: boolean; url: string; extension: string; description: string; version: string; build: string; checksum: string; sizeBytes: number };
+  aab: { enabled: boolean; url: string; extension: string; description: string; version: string; build: string; checksum: string; sizeBytes: number };
 }
 
 const defaultAppDownload: AppDownloadForm = {
   enabled: true,
   domain: "https://mrco.live",
+  rollout: {
+    enabled: false,
+    apkPercent: 100,
+    aabPercent: 100,
+    allowTenants: [],
+    blockTenants: [],
+  },
   pwa: { enabled: true, url: "", extension: "/", description: "" },
-  apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "" },
-  aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "" },
+  apk: { enabled: false, url: "", extension: "/download/ablox.apk", description: "", version: "", build: "", checksum: "", sizeBytes: 0 },
+  aab: { enabled: false, url: "", extension: "/download/ablox.aab", description: "", version: "", build: "", checksum: "", sizeBytes: 0 },
 };
 
-function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+function AppDownloadTab({
+  data,
+  onSave,
+  onLoad,
+}: {
+  data: any;
+  onSave: (d: any) => Promise<void>;
+  onLoad: (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => Promise<any>;
+}) {
   const { t } = useTranslation();
   const [form, setForm] = useState<AppDownloadForm>(defaultAppDownload);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [scope, setScope] = useState<"request" | "global" | "tenant">("request");
+  const [tenantId, setTenantId] = useState("");
+  const [scopeError, setScopeError] = useState("");
+  const [loadingScopeData, setLoadingScopeData] = useState(false);
 
-  useEffect(() => { if (data) setForm({ ...defaultAppDownload, ...data }); }, [data]);
+  useEffect(() => {
+    if (!data) return;
+    setForm({
+      ...defaultAppDownload,
+      ...data,
+      rollout: { ...defaultAppDownload.rollout, ...(data?.rollout || {}) },
+      pwa: { ...defaultAppDownload.pwa, ...(data?.pwa || {}) },
+      apk: { ...defaultAppDownload.apk, ...(data?.apk || {}) },
+      aab: { ...defaultAppDownload.aab, ...(data?.aab || {}) },
+    });
+  }, [data]);
+
+  const buildScopePayload = () => {
+    if (scope === "global") return { scope: "global" as const };
+    if (scope === "tenant") return { scope: "tenant" as const, tenantId: tenantId.trim() };
+    return { scope: "request" as const };
+  };
+
+  const ensureValidScope = () => {
+    const payload = buildScopePayload();
+    if (payload.scope === "tenant" && !payload.tenantId) {
+      setScopeError("Tenant ID is required when tenant scope is selected.");
+      return null;
+    }
+    if (payload.scope === "tenant" && !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.tenantId)) {
+      setScopeError("Tenant ID must be 1-64 chars (letters, numbers, _ or -).");
+      return null;
+    }
+    setScopeError("");
+    return payload;
+  };
+
+  const handleLoadScope = async () => {
+    const payload = ensureValidScope();
+    if (!payload) return;
+    setLoadingScopeData(true);
+    try {
+      const scoped = await onLoad(payload);
+      if (scoped) {
+        setForm({
+          ...defaultAppDownload,
+          ...scoped,
+          rollout: { ...defaultAppDownload.rollout, ...(scoped?.rollout || {}) },
+          pwa: { ...defaultAppDownload.pwa, ...(scoped?.pwa || {}) },
+          apk: { ...defaultAppDownload.apk, ...(scoped?.apk || {}) },
+          aab: { ...defaultAppDownload.aab, ...(scoped?.aab || {}) },
+        });
+      }
+    } finally {
+      setLoadingScopeData(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
-    try { await onSave(form); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    try {
+      const payload = ensureValidScope();
+      if (!payload) return;
+      await onSave({ ...form, ...payload });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
     catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -1666,6 +1839,36 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
 
   return (
     <div className="space-y-5">
+      <SectionCard title="Scope" icon={Globe}>
+        <div className="space-y-3">
+          <p className="text-xs text-white/40">Choose where App Download settings should be read/saved.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setScope("request")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "request" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Request Tenant</button>
+            <button type="button" onClick={() => setScope("global")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "global" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Global Defaults</button>
+            <button type="button" onClick={() => setScope("tenant")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "tenant" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Specific Tenant</button>
+          </div>
+          {scope === "tenant" && (
+            <input
+              type="text"
+              value={tenantId}
+              onChange={(e) => { setTenantId(e.target.value); setScopeError(""); }}
+              placeholder="tenant-a"
+              className="w-full md:w-80 bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white font-mono focus:outline-none focus:border-primary/40 transition-colors"
+            />
+          )}
+          {scopeError && <p className="text-xs text-rose-300">{scopeError}</p>}
+          <button
+            type="button"
+            onClick={handleLoadScope}
+            disabled={loadingScopeData}
+            className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10 disabled:opacity-60"
+          >
+            {loadingScopeData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Load Selected Scope
+          </button>
+        </div>
+      </SectionCard>
+
       {/* Master Toggle */}
       <SectionCard title={t("admin.settings.appDownload.sectionTitle")} icon={Download}>
         <ToggleField
@@ -1690,6 +1893,64 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
             {t("admin.settings.appDownload.domainHint")}
           </p>
         </div>
+      </SectionCard>
+
+      <SectionCard title="Staged Rollout" icon={Users}>
+        <ToggleField
+          label="Enable staged rollout"
+          description="Gate APK/AAB availability by tenant buckets and allow/block lists"
+          checked={form.rollout.enabled}
+          onChange={(v) => setForm((prev) => ({ ...prev, rollout: { ...prev.rollout, enabled: v } }))}
+        />
+
+        {form.rollout.enabled && (
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <InputField
+                label="APK rollout percent"
+                value={String(form.rollout.apkPercent ?? 100)}
+                onChange={(v) => setForm((prev) => ({ ...prev, rollout: { ...prev.rollout, apkPercent: Math.max(0, Math.min(100, Number(v || 0))) } }))}
+                type="number"
+                dir="ltr"
+              />
+              <InputField
+                label="AAB rollout percent"
+                value={String(form.rollout.aabPercent ?? 100)}
+                onChange={(v) => setForm((prev) => ({ ...prev, rollout: { ...prev.rollout, aabPercent: Math.max(0, Math.min(100, Number(v || 0))) } }))}
+                type="number"
+                dir="ltr"
+              />
+            </div>
+
+            <InputField
+              label="Allow Tenants (comma separated)"
+              value={(form.rollout.allowTenants || []).join(", ")}
+              onChange={(v) => setForm((prev) => ({
+                ...prev,
+                rollout: {
+                  ...prev.rollout,
+                  allowTenants: v.split(",").map((x) => x.trim()).filter(Boolean),
+                },
+              }))}
+              placeholder="tenant-a, tenant-b"
+              dir="ltr"
+            />
+
+            <InputField
+              label="Block Tenants (comma separated)"
+              value={(form.rollout.blockTenants || []).join(", ")}
+              onChange={(v) => setForm((prev) => ({
+                ...prev,
+                rollout: {
+                  ...prev.rollout,
+                  blockTenants: v.split(",").map((x) => x.trim()).filter(Boolean),
+                },
+              }))}
+              placeholder="tenant-x, tenant-y"
+              dir="ltr"
+            />
+          </div>
+        )}
       </SectionCard>
 
       {/* Version Cards */}
@@ -1761,6 +2022,41 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
                 dir="rtl"
               />
 
+              {(key === "apk" || key === "aab") && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InputField
+                    label="Artifact Version"
+                    value={String(form[key].version || "")}
+                    onChange={(v) => updateVersion(key, "version", v)}
+                    placeholder="1.0.0"
+                    dir="ltr"
+                  />
+                  <InputField
+                    label="Build"
+                    value={String(form[key].build || "")}
+                    onChange={(v) => updateVersion(key, "build", v)}
+                    placeholder="100"
+                    dir="ltr"
+                  />
+                  <InputField
+                    label="Checksum (SHA-256)"
+                    value={String(form[key].checksum || "")}
+                    onChange={(v) => updateVersion(key, "checksum", v)}
+                    placeholder="a3f1..."
+                    dir="ltr"
+                    mono
+                  />
+                  <InputField
+                    label="Size (bytes)"
+                    value={String(form[key].sizeBytes ?? 0)}
+                    onChange={(v) => updateVersion(key, "sizeBytes", Number(v || 0))}
+                    placeholder="0"
+                    type="number"
+                    dir="ltr"
+                  />
+                </div>
+              )}
+
               {/* Preview Badge */}
               <div className="mt-3 p-4 bg-black/40 rounded-xl border border-white/5">
                 <p className="text-[11px] text-white/30 mb-3">{t("admin.settings.appDownload.preview")}</p>
@@ -1798,7 +2094,15 @@ function AppDownloadTab({ data, onSave }: { data: any; onSave: (d: any) => Promi
 
 type NotificationSoundSlotKey = "message" | "call" | "friend-request" | "admin" | "system";
 
-function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+function NotificationSoundsTab({
+  data,
+  onSave,
+  onLoad,
+}: {
+  data: any;
+  onSave: (d: any) => Promise<void>;
+  onLoad: (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => Promise<any>;
+}) {
   const [form, setForm] = useState<Record<NotificationSoundSlotKey, any>>({
     message: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
     call: { enabled: false, kind: "tone", mediaType: "audio", url: "", volume: 1 },
@@ -1809,6 +2113,10 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const [scope, setScope] = useState<"request" | "global" | "tenant">("request");
+  const [tenantId, setTenantId] = useState("");
+  const [scopeError, setScopeError] = useState("");
+  const [loadingScopeData, setLoadingScopeData] = useState(false);
 
   const slots: Array<{ key: NotificationSoundSlotKey; label: string; hint: string }> = [
     { key: "call", label: "نغمة الرنين للمكالمات", hint: "تُستخدم عند المكالمة الواردة" },
@@ -1837,6 +2145,55 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
       return next;
     });
   }, [data]);
+
+  const buildScopePayload = () => {
+    if (scope === "global") return { scope: "global" as const };
+    if (scope === "tenant") return { scope: "tenant" as const, tenantId: tenantId.trim() };
+    return { scope: "request" as const };
+  };
+
+  const ensureValidScope = () => {
+    const payload = buildScopePayload();
+    if (payload.scope === "tenant" && !payload.tenantId) {
+      setScopeError("Tenant ID is required when tenant scope is selected.");
+      return null;
+    }
+    if (payload.scope === "tenant" && !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.tenantId)) {
+      setScopeError("Tenant ID must be 1-64 chars (letters, numbers, _ or -).");
+      return null;
+    }
+    setScopeError("");
+    return payload;
+  };
+
+  const handleLoadScope = async () => {
+    const payload = ensureValidScope();
+    if (!payload) return;
+    setLoadingScopeData(true);
+    try {
+      const scoped = await onLoad(payload);
+      if (scoped && typeof scoped === "object") {
+        setForm((prev) => {
+          const next = { ...prev };
+          for (const slot of ["message", "call", "friend-request", "admin", "system"] as const) {
+            const incoming = scoped[slot];
+            if (incoming && typeof incoming === "object") {
+              next[slot] = {
+                enabled: Boolean(incoming.enabled),
+                kind: incoming.kind === "file" ? "file" : "tone",
+                mediaType: incoming.mediaType === "video" || incoming.mediaType === "voice" ? incoming.mediaType : "audio",
+                url: typeof incoming.url === "string" ? incoming.url : "",
+                volume: typeof incoming.volume === "number" ? Math.max(0, Math.min(1, incoming.volume)) : 1,
+              };
+            }
+          }
+          return next;
+        });
+      }
+    } finally {
+      setLoadingScopeData(false);
+    }
+  };
 
   const updateSlot = (slot: NotificationSoundSlotKey, patch: Record<string, any>) => {
     setForm((prev) => ({
@@ -1868,7 +2225,9 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(form);
+      const payload = ensureValidScope();
+      if (!payload) return;
+      await onSave({ ...form, ...payload });
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
     } catch (err) {
@@ -1880,6 +2239,36 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
 
   return (
     <div className="space-y-5">
+      <SectionCard title="Scope" icon={Globe}>
+        <div className="space-y-3">
+          <p className="text-xs text-white/40">Choose where Notification Sounds settings should be read/saved.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setScope("request")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "request" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Request Tenant</button>
+            <button type="button" onClick={() => setScope("global")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "global" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Global Defaults</button>
+            <button type="button" onClick={() => setScope("tenant")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "tenant" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Specific Tenant</button>
+          </div>
+          {scope === "tenant" && (
+            <input
+              type="text"
+              value={tenantId}
+              onChange={(e) => { setTenantId(e.target.value); setScopeError(""); }}
+              placeholder="tenant-a"
+              className="w-full md:w-80 bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white font-mono focus:outline-none focus:border-primary/40 transition-colors"
+            />
+          )}
+          {scopeError && <p className="text-xs text-rose-300">{scopeError}</p>}
+          <button
+            type="button"
+            onClick={handleLoadScope}
+            disabled={loadingScopeData}
+            className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10 disabled:opacity-60"
+          >
+            {loadingScopeData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Load Selected Scope
+          </button>
+        </div>
+      </SectionCard>
+
       <SectionCard title="إدارة نغمات الإشعارات والرنين" icon={Phone}>
         <p className="text-xs text-white/40">
           يمكنك هنا إضافة أو تغيير نغمة كل نوع إشعار. يدعم ملفات صوت وفيديو ورسائل صوتية.
@@ -1984,22 +2373,71 @@ function NotificationSoundsTab({ data, onSave }: { data: any; onSave: (d: any) =
   );
 }
 
-function DailyMissionsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+function DailyMissionsTab({
+  data,
+  onSave,
+  onLoad,
+}: {
+  data: any;
+  onSave: (d: any) => Promise<void>;
+  onLoad: (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => Promise<any>;
+}) {
   const [enabled, setEnabled] = useState(true);
   const [text, setText] = useState("[]");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [scope, setScope] = useState<"request" | "global" | "tenant">("request");
+  const [tenantId, setTenantId] = useState("");
+  const [scopeError, setScopeError] = useState("");
+  const [loadingScopeData, setLoadingScopeData] = useState(false);
 
   useEffect(() => {
     setEnabled(data?.enabled !== false);
     setText(JSON.stringify(Array.isArray(data?.missions) ? data.missions : [], null, 2));
   }, [data]);
 
+  const buildScopePayload = () => {
+    if (scope === "global") return { scope: "global" as const };
+    if (scope === "tenant") return { scope: "tenant" as const, tenantId: tenantId.trim() };
+    return { scope: "request" as const };
+  };
+
+  const ensureValidScope = () => {
+    const payload = buildScopePayload();
+    if (payload.scope === "tenant" && !payload.tenantId) {
+      setScopeError("Tenant ID is required when tenant scope is selected.");
+      return null;
+    }
+    if (payload.scope === "tenant" && !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.tenantId)) {
+      setScopeError("Tenant ID must be 1-64 chars (letters, numbers, _ or -).");
+      return null;
+    }
+    setScopeError("");
+    return payload;
+  };
+
+  const handleLoadScope = async () => {
+    const payload = ensureValidScope();
+    if (!payload) return;
+    setLoadingScopeData(true);
+    try {
+      const scoped = await onLoad(payload);
+      if (scoped) {
+        setEnabled(scoped.enabled !== false);
+        setText(JSON.stringify(Array.isArray(scoped.missions) ? scoped.missions : [], null, 2));
+      }
+    } finally {
+      setLoadingScopeData(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
+      const payload = ensureValidScope();
+      if (!payload) return;
       const missions = JSON.parse(text);
-      await onSave({ enabled, missions });
+      await onSave({ enabled, missions, ...payload });
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
     } catch {
@@ -2012,6 +2450,34 @@ function DailyMissionsTab({ data, onSave }: { data: any; onSave: (d: any) => Pro
   return (
     <div className="space-y-5">
       <SectionCard title="المهام اليومية" icon={Check}>
+        <div className="space-y-3 pb-1">
+          <p className="text-xs font-bold text-white/60">Scope</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setScope("request")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "request" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Request Tenant</button>
+            <button type="button" onClick={() => setScope("global")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "global" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Global Defaults</button>
+            <button type="button" onClick={() => setScope("tenant")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "tenant" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Specific Tenant</button>
+          </div>
+          {scope === "tenant" && (
+            <input
+              type="text"
+              value={tenantId}
+              onChange={(e) => { setTenantId(e.target.value); setScopeError(""); }}
+              placeholder="tenant-a"
+              className="w-full md:w-80 bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white font-mono focus:outline-none focus:border-primary/40 transition-colors"
+            />
+          )}
+          {scopeError && <p className="text-xs text-rose-300">{scopeError}</p>}
+          <button
+            type="button"
+            onClick={handleLoadScope}
+            disabled={loadingScopeData}
+            className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10 disabled:opacity-60"
+          >
+            {loadingScopeData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Load Selected Scope
+          </button>
+        </div>
+
         <ToggleField
           label="تفعيل المهام اليومية"
           description="يمكنك من هنا تشغيل/إيقاف النظام بالكامل."
@@ -2041,19 +2507,69 @@ function DailyMissionsTab({ data, onSave }: { data: any; onSave: (d: any) => Pro
 // TAB: CONTENT LIMITS — حدود المحتوى (ريلز + صور)
 // ══════════════════════════════════════════════════════════
 
-function ContentLimitsTab({ data, onSave }: { data: any; onSave: (d: any) => Promise<void> }) {
+function ContentLimitsTab({
+  data,
+  onSave,
+  onLoad,
+}: {
+  data: any;
+  onSave: (d: any) => Promise<void>;
+  onLoad: (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => Promise<any>;
+}) {
   const { t } = useTranslation();
   const [form, setForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [scope, setScope] = useState<"request" | "global" | "tenant">("request");
+  const [tenantId, setTenantId] = useState("");
+  const [scopeError, setScopeError] = useState("");
+  const [loadingScopeData, setLoadingScopeData] = useState(false);
 
   useEffect(() => { if (data) setForm({ ...data }); }, [data]);
+
+  const buildScopePayload = () => {
+    if (scope === "global") return { scope: "global" as const };
+    if (scope === "tenant") return { scope: "tenant" as const, tenantId: tenantId.trim() };
+    return { scope: "request" as const };
+  };
+
+  const ensureValidScope = () => {
+    const payload = buildScopePayload();
+    if (payload.scope === "tenant" && !payload.tenantId) {
+      setScopeError("Tenant ID is required when tenant scope is selected.");
+      return null;
+    }
+    if (payload.scope === "tenant" && !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.tenantId)) {
+      setScopeError("Tenant ID must be 1-64 chars (letters, numbers, _ or -).");
+      return null;
+    }
+    setScopeError("");
+    return payload;
+  };
+
+  const handleLoadScope = async () => {
+    const payload = ensureValidScope();
+    if (!payload) return;
+    setLoadingScopeData(true);
+    try {
+      const scoped = await onLoad(payload);
+      if (scoped) setForm({ ...scoped });
+    } finally {
+      setLoadingScopeData(false);
+    }
+  };
 
   const update = (key: string, val: string) => setForm((f: any) => ({ ...f, [key]: parseInt(val) || 0 }));
 
   const handleSave = async () => {
     setSaving(true);
-    try { await onSave(form); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    try {
+      const payload = ensureValidScope();
+      if (!payload) return;
+      await onSave({ ...form, ...payload });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
     catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -2061,6 +2577,34 @@ function ContentLimitsTab({ data, onSave }: { data: any; onSave: (d: any) => Pro
   return (
     <div className="space-y-5">
       <SectionCard title={t("admin.settings.contentLimits.title", "حدود المحتوى اليومي")} icon={Film}>
+        <div className="space-y-3 pb-1">
+          <p className="text-xs font-bold text-white/60">Scope</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setScope("request")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "request" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Request Tenant</button>
+            <button type="button" onClick={() => setScope("global")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "global" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Global Defaults</button>
+            <button type="button" onClick={() => setScope("tenant")} className={`h-10 rounded-xl border text-sm font-bold transition-colors ${scope === "tenant" ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/70 hover:text-white"}`}>Specific Tenant</button>
+          </div>
+          {scope === "tenant" && (
+            <input
+              type="text"
+              value={tenantId}
+              onChange={(e) => { setTenantId(e.target.value); setScopeError(""); }}
+              placeholder="tenant-a"
+              className="w-full md:w-80 bg-white/5 border border-white/10 rounded-xl h-10 px-4 text-sm text-white font-mono focus:outline-none focus:border-primary/40 transition-colors"
+            />
+          )}
+          {scopeError && <p className="text-xs text-rose-300">{scopeError}</p>}
+          <button
+            type="button"
+            onClick={handleLoadScope}
+            disabled={loadingScopeData}
+            className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-white/10 bg-white/5 text-white/80 text-xs font-bold hover:bg-white/10 disabled:opacity-60"
+          >
+            {loadingScopeData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Load Selected Scope
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <InputField
             label={t("admin.settings.contentLimits.maxDailyReels", "الحد الأقصى للريلز يومياً")}
@@ -2118,6 +2662,14 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab && TABS.some((t) => t.id === tab)) {
+      setActiveTab(tab as TabId);
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -2148,8 +2700,24 @@ export function SettingsPage() {
   const handleSavePolicies = async (docKey: string, d: any) => { const res = await adminSettings.updatePolicies(docKey, d); if (res.success) setData((prev: any) => ({ ...prev, policies: res.data })); };
   const handleSaveAppDownload = async (d: any) => { const res = await adminSettings.updateAppDownload(d); if (res.success) setData((prev: any) => ({ ...prev, appDownload: res.data })); };
   const handleSaveNotificationSounds = async (d: any) => { const res = await adminSettings.updateNotificationSounds(d); if (res.success) setData((prev: any) => ({ ...prev, notificationSounds: res.data })); };
+  const handleLoadAppDownload = async (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => {
+    const res = await adminSettings.getAppDownload(scope);
+    return res.success ? res.data : null;
+  };
+  const handleLoadNotificationSounds = async (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => {
+    const res = await adminSettings.getNotificationSounds(scope);
+    return res.success ? res.data : null;
+  };
   const handleSaveDailyMissions = async (d: any) => { const res = await adminSettings.updateDailyMissions(d); if (res.success) setData((prev: any) => ({ ...prev, dailyMissions: res.data })); };
   const handleSaveContentLimits = async (d: any) => { const res = await adminSettings.updateContentLimits(d); if (res.success) setData((prev: any) => ({ ...prev, contentLimits: res.data })); };
+  const handleLoadDailyMissions = async (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => {
+    const res = await adminSettings.getDailyMissions(scope);
+    return res.success ? res.data : null;
+  };
+  const handleLoadContentLimits = async (scope?: { scope?: "request" | "global" | "tenant"; tenantId?: string }) => {
+    const res = await adminSettings.getContentLimits(scope);
+    return res.success ? res.data : null;
+  };
 
   return (
     <div className="space-y-6">
@@ -2215,10 +2783,10 @@ export function SettingsPage() {
             {activeTab === "pricing" && <PricingTab />}
             {activeTab === "milesPricing" && <MilesPricingTab />}
             {activeTab === "worldPricing" && <WorldPricingTab />}
-            {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} />}
-            {activeTab === "notificationSounds" && <NotificationSoundsTab data={data?.notificationSounds} onSave={handleSaveNotificationSounds} />}
-            {activeTab === "dailyMissions" && <DailyMissionsTab data={data?.dailyMissions} onSave={handleSaveDailyMissions} />}
-            {activeTab === "contentLimits" && <ContentLimitsTab data={data?.contentLimits} onSave={handleSaveContentLimits} />}
+            {activeTab === "appDownload" && <AppDownloadTab data={data?.appDownload} onSave={handleSaveAppDownload} onLoad={handleLoadAppDownload} />}
+            {activeTab === "notificationSounds" && <NotificationSoundsTab data={data?.notificationSounds} onSave={handleSaveNotificationSounds} onLoad={handleLoadNotificationSounds} />}
+            {activeTab === "dailyMissions" && <DailyMissionsTab data={data?.dailyMissions} onSave={handleSaveDailyMissions} onLoad={handleLoadDailyMissions} />}
+            {activeTab === "contentLimits" && <ContentLimitsTab data={data?.contentLimits} onSave={handleSaveContentLimits} onLoad={handleLoadContentLimits} />}
           </motion.div>
         </AnimatePresence>
       )}

@@ -54,6 +54,14 @@ export function FinancesPage() {
     { key: "currencies", labelKey: "admin.finances.tabCurrencies", icon: Coins },
   ];
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab") as FinanceTab | null;
+    if (tab && tabs.some((t) => t.key === tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
+
   return (
     <div className="space-y-2.5">
       {/* Financial Dashboard */}
@@ -98,8 +106,8 @@ export function FinancesPage() {
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`relative flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === tab.key
-                ? "text-white"
-                : "text-white/40 hover:text-white/60"
+              ? "text-white"
+              : "text-white/40 hover:text-white/60"
               }`}
           >
             {activeTab === tab.key && (

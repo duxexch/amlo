@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-03-23T12:23:32.408Z",
+  "signing": {
+    "keystorePath": "C:\\Users\\cex\\Desktop\\amlo\\signing\\ablox-release.keystore",
+    "alias": "ablox"
+  },
+  "apk": {
+    "path": "C:\\Users\\cex\\Desktop\\amlo\\client\\public\\download\\ablox.apk",
+    "sizeBytes": 1502084,
+    "sha256": "7fec82bf6223b5ca5410a69cde098ee5ea212392863e115e9d048168fe19d18a"
+  },
+  "aab": {
+    "path": "C:\\Users\\cex\\Desktop\\amlo\\client\\public\\download\\ablox.aab",
+    "sizeBytes": 1622144,
+    "sha256": "c0cb39cb02fd66adb3efc4a738563cad2b5a74c4bc362934e0c3ea3818430d58"
+  }
+}

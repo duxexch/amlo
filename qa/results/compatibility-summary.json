@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-03-23T11:15:06.746Z",
+  "totalDevices": 20,
+  "invalidCells": 0,
+  "compatibility": {
+    "permissionsFlow": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "backgroundBehavior": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "batteryOptimization": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    }
+  },
+  "tier1": {
+    "checks": 21,
+    "completedChecks": 0,
+    "completionPct": 0,
+    "hasFail": false
+  },
+  "decision": "IN_PROGRESS"
+}

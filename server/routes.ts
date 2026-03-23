@@ -202,9 +202,53 @@ export async function registerRoutes(
   const APP_DOWNLOAD_DEFAULT = {
     enabled: true,
     domain: "https://mrco.live",
+    rollout: {
+      enabled: false,
+      apkPercent: 100,
+      aabPercent: 100,
+      allowTenants: [] as string[],
+      blockTenants: [] as string[],
+    },
     pwa: { enabled: true, url: "https://mrco.live", extension: "/", description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل" },
-    apk: { enabled: true, url: "https://mrco.live/download/ablox.apk", extension: ".apk", description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد (1.4 MB)" },
-    aab: { enabled: true, url: "https://mrco.live/download/ablox.aab", extension: ".aab", description: "ملف AAB — لرفعه على متجر جوجل بلاي (1.5 MB)" },
+    apk: {
+      enabled: true,
+      url: "https://mrco.live/download/ablox.apk",
+      extension: ".apk",
+      description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد (1.4 MB)",
+      version: "",
+      build: "",
+      checksum: "",
+      sizeBytes: 0,
+    },
+    aab: {
+      enabled: true,
+      url: "https://mrco.live/download/ablox.aab",
+      extension: ".aab",
+      description: "ملف AAB — لرفعه على متجر جوجل بلاي (1.5 MB)",
+      version: "",
+      build: "",
+      checksum: "",
+      sizeBytes: 0,
+    },
+  };
+
+  const stableBucket = (input: string) => {
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+    }
+    return hash % 100;
+  };
+
+  const isArtifactRolledOut = (tenantId: string, rollout: any, artifact: "apk" | "aab") => {
+    if (!rollout?.enabled) return true;
+    const allow = Array.isArray(rollout.allowTenants) ? rollout.allowTenants.map((v: any) => String(v)) : [];
+    const block = Array.isArray(rollout.blockTenants) ? rollout.blockTenants.map((v: any) => String(v)) : [];
+    if (block.includes(tenantId)) return false;
+    if (allow.length > 0 && !allow.includes(tenantId)) return false;
+    const pct = artifact === "apk" ? Number(rollout.apkPercent ?? 100) : Number(rollout.aabPercent ?? 100);
+    const bounded = Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.floor(pct))) : 100;
+    return stableBucket(tenantId || "default") < bounded;
   };
 
   app.get("/api/app-download", async (_req, res) => {
@@ -216,14 +260,46 @@ export async function registerRoutes(
       if (!dl?.enabled) {
         return res.json({ success: true, data: { enabled: false } });
       }
+
+      const rollout = {
+        ...APP_DOWNLOAD_DEFAULT.rollout,
+        ...(dl.rollout && typeof dl.rollout === "object" ? dl.rollout : {}),
+      };
+      const tenantKey = tenantId || "default";
+      const apkEnabled = Boolean(dl.apk?.enabled) && isArtifactRolledOut(tenantKey, rollout, "apk");
+      const aabEnabled = Boolean(dl.aab?.enabled) && isArtifactRolledOut(tenantKey, rollout, "aab");
+
       return res.json({
         success: true,
         data: {
           enabled: dl.enabled,
           domain: dl.domain,
+          rollout,
           pwa: dl.pwa ? { enabled: dl.pwa.enabled, url: dl.pwa.url, extension: dl.pwa.extension, description: dl.pwa.description } : APP_DOWNLOAD_DEFAULT.pwa,
-          apk: dl.apk ? { enabled: dl.apk.enabled, url: dl.apk.url, extension: dl.apk.extension, description: dl.apk.description } : APP_DOWNLOAD_DEFAULT.apk,
-          aab: dl.aab ? { enabled: dl.aab.enabled, url: dl.aab.url, extension: dl.aab.extension, description: dl.aab.description } : APP_DOWNLOAD_DEFAULT.aab,
+          apk: dl.apk
+            ? {
+              enabled: apkEnabled,
+              url: dl.apk.url,
+              extension: dl.apk.extension,
+              description: dl.apk.description,
+              version: dl.apk.version || "",
+              build: dl.apk.build || "",
+              checksum: dl.apk.checksum || "",
+              sizeBytes: Number.isFinite(dl.apk.sizeBytes) && dl.apk.sizeBytes >= 0 ? Math.floor(dl.apk.sizeBytes) : 0,
+            }
+            : APP_DOWNLOAD_DEFAULT.apk,
+          aab: dl.aab
+            ? {
+              enabled: aabEnabled,
+              url: dl.aab.url,
+              extension: dl.aab.extension,
+              description: dl.aab.description,
+              version: dl.aab.version || "",
+              build: dl.aab.build || "",
+              checksum: dl.aab.checksum || "",
+              sizeBytes: Number.isFinite(dl.aab.sizeBytes) && dl.aab.sizeBytes >= 0 ? Math.floor(dl.aab.sizeBytes) : 0,
+            }
+            : APP_DOWNLOAD_DEFAULT.aab,
         },
       });
     } catch (err: any) {

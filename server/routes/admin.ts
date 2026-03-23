@@ -47,6 +47,8 @@ import { io } from "../index";
 import { getUserSocketId } from "../onlineUsers";
 import { decryptMessage } from "../utils/encryption";
 import { uploadToBunnyAsync } from "../services/bunnyCdn";
+import { resolveTenantSettingKeyByTenantId } from "../utils/tenantScope";
+import { ensureAdminProvidersOverviewData } from "../contracts/adminProvidersOverview";
 
 const router = Router();
 
@@ -81,6 +83,9 @@ const uploadNotificationTone = multer({
     else cb(new Error("نوع الملف غير مدعوم. المسموح: صوت أو فيديو فقط"));
   },
 });
+
+const CALL_QOS_INCIDENT_COOLDOWN_MS = 15 * 60 * 1000;
+const recentQosIncidentLogs = new Map<string, number>();
 
 // Financial/admin responses should never be cached by browser or proxies.
 router.use((_req, res, next) => {
@@ -1165,6 +1170,375 @@ router.get("/financial-stats", requireAdmin, async (_req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════
+// CALL QOS SNAPSHOT — لقطة تشغيلية لجودة المكالمات
+// ══════════════════════════════════════════════════════════
+
+router.get("/call-qos/snapshot", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const requestedWindow = Number(req.query.windowMinutes || 60);
+    const windowMinutes = Number.isFinite(requestedWindow)
+      ? Math.max(5, Math.min(1440, Math.floor(requestedWindow)))
+      : 60;
+    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000);
+
+    const [agg] = await db
+      .select({
+        totalCalls: count(),
+        activeCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'active' then 1 else 0 end), 0)`,
+        endedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'ended' then 1 else 0 end), 0)`,
+        rejectedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'rejected' then 1 else 0 end), 0)`,
+        missedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'missed' then 1 else 0 end), 0)`,
+        busyCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'busy' then 1 else 0 end), 0)`,
+        voiceCalls: sql<number>`coalesce(sum(case when ${schema.calls.type} = 'voice' then 1 else 0 end), 0)`,
+        videoCalls: sql<number>`coalesce(sum(case when ${schema.calls.type} = 'video' then 1 else 0 end), 0)`,
+        avgDurationSeconds: sql<number>`coalesce(avg(case when ${schema.calls.durationSeconds} > 0 then ${schema.calls.durationSeconds} end), 0)`,
+        p95DurationSeconds: sql<number>`coalesce(percentile_cont(0.95) within group (order by ${schema.calls.durationSeconds}), 0)`,
+        totalCoinsCharged: sql<number>`coalesce(sum(${schema.calls.coinsCharged}), 0)`,
+      })
+      .from(schema.calls)
+      .where(gte(schema.calls.createdAt, windowStart));
+
+    const totalCalls = Number(agg?.totalCalls || 0);
+    const endedCalls = Number(agg?.endedCalls || 0);
+    const rejectedCalls = Number(agg?.rejectedCalls || 0);
+    const missedCalls = Number(agg?.missedCalls || 0);
+    const busyCalls = Number(agg?.busyCalls || 0);
+    const failedCalls = rejectedCalls + missedCalls + busyCalls;
+
+    const pct = (n: number, d: number) => (d > 0 ? Number(((n / d) * 100).toFixed(2)) : 0);
+    const matchingStats = await getQueueStats();
+
+    return res.json({
+      success: true,
+      data: {
+        snapshotAt: new Date().toISOString(),
+        windowMinutes,
+        callVolume: {
+          totalCalls,
+          activeCalls: Number(agg?.activeCalls || 0),
+          endedCalls,
+          failedCalls,
+          voiceCalls: Number(agg?.voiceCalls || 0),
+          videoCalls: Number(agg?.videoCalls || 0),
+        },
+        reliability: {
+          connectRatePct: pct(endedCalls, totalCalls),
+          rejectRatePct: pct(rejectedCalls, totalCalls),
+          missedRatePct: pct(missedCalls, totalCalls),
+          busyRatePct: pct(busyCalls, totalCalls),
+        },
+        duration: {
+          avgDurationSeconds: Number(Math.round(Number(agg?.avgDurationSeconds || 0))),
+          p95DurationSeconds: Number(Math.round(Number(agg?.p95DurationSeconds || 0))),
+        },
+        billing: {
+          totalCoinsCharged: Number(agg?.totalCoinsCharged || 0),
+        },
+        qos: {
+          mos: null,
+          rttMs: null,
+          jitterMs: null,
+          packetLossPct: null,
+          source: "call-status-snapshot",
+          note: "Detailed RTC transport metrics are not persisted yet; Stage 32 will add metric aggregation pipeline.",
+        },
+        matchingStats,
+      },
+    });
+  } catch (err: any) {
+    log(`Call QoS snapshot error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل لقطة جودة المكالمات" });
+  }
+});
+
+router.get("/call-qos/aggregation", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const requestedWindow = Number(req.query.windowMinutes || 180);
+    const requestedBucket = Number(req.query.bucketMinutes || 15);
+
+    const windowMinutes = Number.isFinite(requestedWindow)
+      ? Math.max(15, Math.min(1440, Math.floor(requestedWindow)))
+      : 180;
+    const bucketMinutes = Number.isFinite(requestedBucket)
+      ? Math.max(1, Math.min(60, Math.floor(requestedBucket)))
+      : 15;
+
+    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000);
+    const rows = await db
+      .select({
+        createdAt: schema.calls.createdAt,
+        status: schema.calls.status,
+        type: schema.calls.type,
+        durationSeconds: schema.calls.durationSeconds,
+        coinsCharged: schema.calls.coinsCharged,
+      })
+      .from(schema.calls)
+      .where(gte(schema.calls.createdAt, windowStart))
+      .orderBy(asc(schema.calls.createdAt));
+
+    type BucketAgg = {
+      start: Date;
+      totalCalls: number;
+      activeCalls: number;
+      endedCalls: number;
+      rejectedCalls: number;
+      missedCalls: number;
+      busyCalls: number;
+      voiceCalls: number;
+      videoCalls: number;
+      totalDurationSeconds: number;
+      totalCoinsCharged: number;
+      durations: number[];
+    };
+
+    const bucketMs = bucketMinutes * 60 * 1000;
+    const buckets = new Map<number, BucketAgg>();
+
+    const ensureBucket = (bucketKey: number): BucketAgg => {
+      const existing = buckets.get(bucketKey);
+      if (existing) return existing;
+      const fresh: BucketAgg = {
+        start: new Date(bucketKey),
+        totalCalls: 0,
+        activeCalls: 0,
+        endedCalls: 0,
+        rejectedCalls: 0,
+        missedCalls: 0,
+        busyCalls: 0,
+        voiceCalls: 0,
+        videoCalls: 0,
+        totalDurationSeconds: 0,
+        totalCoinsCharged: 0,
+        durations: [],
+      };
+      buckets.set(bucketKey, fresh);
+      return fresh;
+    };
+
+    for (const row of rows) {
+      const ts = row.createdAt ? new Date(row.createdAt).getTime() : Date.now();
+      const bucketKey = Math.floor(ts / bucketMs) * bucketMs;
+      const b = ensureBucket(bucketKey);
+      b.totalCalls += 1;
+      if (row.status === "active") b.activeCalls += 1;
+      if (row.status === "ended") b.endedCalls += 1;
+      if (row.status === "rejected") b.rejectedCalls += 1;
+      if (row.status === "missed") b.missedCalls += 1;
+      if (row.status === "busy") b.busyCalls += 1;
+      if (row.type === "voice") b.voiceCalls += 1;
+      if (row.type === "video") b.videoCalls += 1;
+
+      const duration = Number(row.durationSeconds || 0);
+      if (duration > 0) {
+        b.totalDurationSeconds += duration;
+        b.durations.push(duration);
+      }
+      b.totalCoinsCharged += Number(row.coinsCharged || 0);
+    }
+
+    const pct = (n: number, d: number) => (d > 0 ? Number(((n / d) * 100).toFixed(2)) : 0);
+    const percentile = (values: number[], p: number) => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1));
+      return sorted[idx];
+    };
+
+    const series = [...buckets.values()]
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .map((b) => {
+        const failed = b.rejectedCalls + b.missedCalls + b.busyCalls;
+        const avgDurationSeconds = b.endedCalls > 0 ? Math.round(b.totalDurationSeconds / b.endedCalls) : 0;
+        const p95DurationSeconds = Math.round(percentile(b.durations, 0.95));
+        return {
+          bucketStart: b.start.toISOString(),
+          bucketEnd: new Date(b.start.getTime() + bucketMs).toISOString(),
+          volume: {
+            totalCalls: b.totalCalls,
+            activeCalls: b.activeCalls,
+            endedCalls: b.endedCalls,
+            failedCalls: failed,
+            voiceCalls: b.voiceCalls,
+            videoCalls: b.videoCalls,
+          },
+          reliability: {
+            connectRatePct: pct(b.endedCalls, b.totalCalls),
+            rejectRatePct: pct(b.rejectedCalls, b.totalCalls),
+            missedRatePct: pct(b.missedCalls, b.totalCalls),
+            busyRatePct: pct(b.busyCalls, b.totalCalls),
+          },
+          duration: {
+            avgDurationSeconds,
+            p95DurationSeconds,
+          },
+          billing: {
+            totalCoinsCharged: b.totalCoinsCharged,
+          },
+          qos: {
+            mos: null,
+            rttMs: null,
+            jitterMs: null,
+            packetLossPct: null,
+          },
+        };
+      });
+
+    return res.json({
+      success: true,
+      data: {
+        snapshotAt: new Date().toISOString(),
+        windowMinutes,
+        bucketMinutes,
+        points: series,
+        note: "RTT/jitter/loss/MOS transport telemetry is not persisted yet; current aggregation uses call outcome and duration-based operational quality.",
+      },
+    });
+  } catch (err: any) {
+    log(`Call QoS aggregation error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تحميل تجميع جودة المكالمات" });
+  }
+});
+
+router.post("/call-qos/evaluate-alerts", requireAdmin, async (req, res) => {
+  try {
+    const db = getDb();
+    const windowMinutesRaw = Number(req.body?.windowMinutes || 60);
+    const windowMinutes = Number.isFinite(windowMinutesRaw)
+      ? Math.max(5, Math.min(1440, Math.floor(windowMinutesRaw)))
+      : 60;
+    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000);
+
+    const thresholds = {
+      minCalls: Math.max(1, Number(req.body?.thresholds?.minCalls ?? 20)),
+      minConnectRatePct: Number(req.body?.thresholds?.minConnectRatePct ?? 65),
+      maxMissedRatePct: Number(req.body?.thresholds?.maxMissedRatePct ?? 20),
+      maxBusyRatePct: Number(req.body?.thresholds?.maxBusyRatePct ?? 15),
+      maxFailedRatePct: Number(req.body?.thresholds?.maxFailedRatePct ?? 35),
+    };
+
+    const [agg] = await db
+      .select({
+        totalCalls: count(),
+        endedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'ended' then 1 else 0 end), 0)`,
+        rejectedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'rejected' then 1 else 0 end), 0)`,
+        missedCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'missed' then 1 else 0 end), 0)`,
+        busyCalls: sql<number>`coalesce(sum(case when ${schema.calls.status} = 'busy' then 1 else 0 end), 0)`,
+      })
+      .from(schema.calls)
+      .where(gte(schema.calls.createdAt, windowStart));
+
+    const totalCalls = Number(agg?.totalCalls || 0);
+    const endedCalls = Number(agg?.endedCalls || 0);
+    const rejectedCalls = Number(agg?.rejectedCalls || 0);
+    const missedCalls = Number(agg?.missedCalls || 0);
+    const busyCalls = Number(agg?.busyCalls || 0);
+    const failedCalls = rejectedCalls + missedCalls + busyCalls;
+
+    const pct = (n: number, d: number) => (d > 0 ? Number(((n / d) * 100).toFixed(2)) : 0);
+    const metrics = {
+      connectRatePct: pct(endedCalls, totalCalls),
+      missedRatePct: pct(missedCalls, totalCalls),
+      busyRatePct: pct(busyCalls, totalCalls),
+      failedRatePct: pct(failedCalls, totalCalls),
+    };
+
+    const incidents: Array<{
+      code: string;
+      severity: "warning" | "critical";
+      metric: string;
+      value: number;
+      threshold: number;
+      logged: boolean;
+      details: string;
+    }> = [];
+
+    if (totalCalls >= thresholds.minCalls && metrics.connectRatePct < thresholds.minConnectRatePct) {
+      incidents.push({
+        code: "connect_rate_low",
+        severity: metrics.connectRatePct < thresholds.minConnectRatePct * 0.7 ? "critical" : "warning",
+        metric: "connectRatePct",
+        value: metrics.connectRatePct,
+        threshold: thresholds.minConnectRatePct,
+        logged: false,
+        details: `Connect rate dropped to ${metrics.connectRatePct}% (threshold: ${thresholds.minConnectRatePct}%).`,
+      });
+    }
+
+    if (totalCalls >= thresholds.minCalls && metrics.missedRatePct > thresholds.maxMissedRatePct) {
+      incidents.push({
+        code: "missed_rate_high",
+        severity: metrics.missedRatePct > thresholds.maxMissedRatePct * 1.5 ? "critical" : "warning",
+        metric: "missedRatePct",
+        value: metrics.missedRatePct,
+        threshold: thresholds.maxMissedRatePct,
+        logged: false,
+        details: `Missed call rate increased to ${metrics.missedRatePct}% (threshold: ${thresholds.maxMissedRatePct}%).`,
+      });
+    }
+
+    if (totalCalls >= thresholds.minCalls && metrics.busyRatePct > thresholds.maxBusyRatePct) {
+      incidents.push({
+        code: "busy_rate_high",
+        severity: metrics.busyRatePct > thresholds.maxBusyRatePct * 1.5 ? "critical" : "warning",
+        metric: "busyRatePct",
+        value: metrics.busyRatePct,
+        threshold: thresholds.maxBusyRatePct,
+        logged: false,
+        details: `Busy call rate increased to ${metrics.busyRatePct}% (threshold: ${thresholds.maxBusyRatePct}%).`,
+      });
+    }
+
+    if (totalCalls >= thresholds.minCalls && metrics.failedRatePct > thresholds.maxFailedRatePct) {
+      incidents.push({
+        code: "failed_rate_high",
+        severity: metrics.failedRatePct > thresholds.maxFailedRatePct * 1.5 ? "critical" : "warning",
+        metric: "failedRatePct",
+        value: metrics.failedRatePct,
+        threshold: thresholds.maxFailedRatePct,
+        logged: false,
+        details: `Overall failed call rate is ${metrics.failedRatePct}% (threshold: ${thresholds.maxFailedRatePct}%).`,
+      });
+    }
+
+    const now = Date.now();
+    for (const incident of incidents) {
+      const key = `${incident.code}:${windowMinutes}`;
+      const last = recentQosIncidentLogs.get(key) || 0;
+      if (now - last < CALL_QOS_INCIDENT_COOLDOWN_MS) {
+        incident.logged = false;
+        continue;
+      }
+      recentQosIncidentLogs.set(key, now);
+      incident.logged = true;
+      await storage.addAdminLog(
+        req.session.adminId!,
+        "call_qos_incident",
+        "call-qos",
+        incident.code,
+        `[window=${windowMinutes}m][severity=${incident.severity}] ${incident.details}`,
+      );
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        snapshotAt: new Date().toISOString(),
+        windowMinutes,
+        totalCalls,
+        thresholds,
+        metrics,
+        incidents,
+      },
+    });
+  } catch (err: any) {
+    log(`Call QoS evaluate alerts error: ${err.message}`, "admin");
+    return res.status(500).json({ success: false, message: "خطأ في تقييم تنبيهات جودة المكالمات" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
 // WITHDRAWAL REQUESTS — إدارة طلبات السحب
 // ══════════════════════════════════════════════════════════
 
@@ -1572,6 +1946,10 @@ function sanitizePaymentGatewaysForAdmin(config: Record<string, GatewayConfig>) 
   );
 }
 
+function hasAnyCredential(values: Record<string, string> | undefined): boolean {
+  return Object.values(values || {}).some((val) => String(val || "").trim().length > 0);
+}
+
 router.get("/payment-methods", requireAdmin, async (_req, res) => {
   try {
     const methods = await storage.getPaymentMethods();
@@ -1788,6 +2166,106 @@ router.patch("/payment-gateways/:provider", requireAdmin, async (req, res) => {
   }
 });
 
+router.get("/providers/overview", requireAdmin, async (req, res) => {
+  try {
+    const socialLogin = await getAdvancedSettingsCategory("socialLogin");
+    const otp = await getAdvancedSettingsCategory("otp");
+    const appDownload = await getAdvancedSettingsCategoryForTenant("appDownload", req.tenantContext?.tenantId || "default");
+
+    const gatewaySetting = await storage.getSetting(PAYMENT_GATEWAY_SETTINGS_KEY);
+    const gatewayRaw = gatewaySetting?.value ? JSON.parse(gatewaySetting.value) : {};
+    const gateways = mergePaymentGatewayConfig(gatewayRaw);
+
+    const paymentMethods = await storage.getPaymentMethods();
+
+    const socialProviders = Object.entries(socialLogin || {}).map(([provider, raw]) => {
+      const cfg = raw as Record<string, unknown>;
+      const enabled = Boolean(cfg?.enabled);
+      const configured = Object.entries(cfg || {}).some(([key, value]) => {
+        if (key === "enabled") return false;
+        return String(value || "").trim().length > 0;
+      });
+      return {
+        provider,
+        enabled,
+        configured,
+      };
+    });
+
+    const gatewayProviders = Object.entries(gateways).map(([provider, cfg]) => ({
+      provider,
+      enabled: Boolean(cfg.enabled),
+      configured: hasAnyCredential(cfg.credentials),
+      mode: cfg.mode,
+      countries: cfg.countries,
+      priority: cfg.priority,
+    }));
+
+    const methodSummaries = (paymentMethods || []).map((method: any) => {
+      const details = parsePaymentMethodDetails(method.accountDetails);
+      return {
+        id: method.id,
+        name: method.name,
+        isActive: Boolean(method.isActive),
+        provider: details.provider || "manual",
+        usageTarget: details.usageTarget,
+        countries: details.countries,
+      };
+    });
+
+    const methodsByProvider = methodSummaries.reduce<Record<string, number>>((acc, item) => {
+      const key = item.provider || "manual";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    const smsCfg = (otp?.sms || {}) as Record<string, unknown>;
+
+    const data = ensureAdminProvidersOverviewData({
+      socialLogin: {
+        total: socialProviders.length,
+        enabled: socialProviders.filter((p) => p.enabled).length,
+        configured: socialProviders.filter((p) => p.configured).length,
+        providers: socialProviders,
+      },
+      otpSms: {
+        enabled: Boolean(smsCfg.enabled),
+        provider: String(smsCfg.provider || ""),
+        configured: ["phoneNumber", "apiKey", "apiSecret"].every((key) => String(smsCfg[key] || "").trim().length > 0),
+      },
+      paymentGateways: {
+        total: gatewayProviders.length,
+        enabled: gatewayProviders.filter((p) => p.enabled).length,
+        configured: gatewayProviders.filter((p) => p.configured).length,
+        providers: gatewayProviders,
+      },
+      paymentMethods: {
+        total: methodSummaries.length,
+        active: methodSummaries.filter((m) => m.isActive).length,
+        byProvider: methodsByProvider,
+        methods: methodSummaries,
+      },
+      appDownload: {
+        enabled: Boolean(appDownload?.enabled),
+        pwaEnabled: Boolean(appDownload?.pwa?.enabled),
+        apkEnabled: Boolean(appDownload?.apk?.enabled),
+        aabEnabled: Boolean(appDownload?.aab?.enabled),
+      },
+    });
+
+    return res.json({
+      success: true,
+      data,
+      summary: {
+        tenantId: req.tenantContext?.tenantId || "default",
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "تعذر تحميل ملخص المزودات" });
+  }
+});
+
 // ══════════════════════════════════════════════════════════
 // REPORTS — البلاغات والتقارير (DB-backed)
 // ══════════════════════════════════════════════════════════
@@ -1982,6 +2460,13 @@ const defaultAdvancedSettings: Record<string, any> = {
   appDownload: {
     enabled: true,
     domain: "https://mrco.live",
+    rollout: {
+      enabled: false,
+      apkPercent: 100,
+      aabPercent: 100,
+      allowTenants: [],
+      blockTenants: [],
+    },
     pwa: {
       enabled: true,
       url: "",
@@ -1989,16 +2474,24 @@ const defaultAdvancedSettings: Record<string, any> = {
       description: "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل",
     },
     apk: {
-      enabled: false,
-      url: "",
+      enabled: true,
+      url: "https://mrco.live/download/ablox.apk",
       extension: "/download/ablox.apk",
       description: "ملف APK — للتثبيت المباشر على أجهزة أندرويد",
+      version: "",
+      build: "",
+      checksum: "",
+      sizeBytes: 0,
     },
     aab: {
-      enabled: false,
-      url: "",
+      enabled: true,
+      url: "https://mrco.live/download/ablox.aab",
       extension: "/download/ablox.aab",
       description: "ملف AAB — لرفعه على متجر جوجل بلاي",
+      version: "",
+      build: "",
+      checksum: "",
+      sizeBytes: 0,
     },
   },
   notificationSounds: {
@@ -2055,15 +2548,50 @@ const updateDailyMissionsSchema = z.object({
 
 /** Load a settings category from DB, falling back to defaults */
 async function getAdvancedSettingsCategory(category: string): Promise<any> {
+  const defaultValue = defaultAdvancedSettings[category] || {};
   try {
-    const cfg = await storage.getSystemConfig(category);
-    if (cfg && cfg.configData) {
+    const scopedCategory = resolveTenantSettingKeyByTenantId("default", category);
+    const cfg = await storage.getSystemConfig(scopedCategory);
+    if (cfg?.configData) {
       return typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
     }
   } catch (err) {
     // Fall back to defaults
   }
-  return defaultAdvancedSettings[category] || {};
+  return defaultValue;
+}
+
+async function getAdvancedSettingsCategoryForTenant(category: string, tenantId: string): Promise<any> {
+  const defaultValue = defaultAdvancedSettings[category] || {};
+  const scopedCategory = resolveTenantSettingKeyByTenantId(tenantId, category);
+
+  try {
+    if (scopedCategory !== category) {
+      const scoped = await storage.getSystemConfig(scopedCategory);
+      if (scoped?.configData) {
+        return typeof scoped.configData === "string" ? JSON.parse(scoped.configData) : scoped.configData;
+      }
+    }
+
+    const globalCfg = await storage.getSystemConfig(category);
+    if (globalCfg?.configData) {
+      return typeof globalCfg.configData === "string" ? JSON.parse(globalCfg.configData) : globalCfg.configData;
+    }
+  } catch {
+    // Fall back to defaults
+  }
+
+  return defaultValue;
+}
+
+async function getScopedSettingWithFallback(tenantId: string, key: string) {
+  const scopedKey = resolveTenantSettingKeyByTenantId(tenantId, key);
+  if (scopedKey !== key) {
+    const scopedSetting = await storage.getSetting(scopedKey);
+    if (scopedSetting) return { setting: scopedSetting, key: scopedKey };
+  }
+  const globalSetting = await storage.getSetting(key);
+  return { setting: globalSetting, key };
 }
 
 /** Load ALL advanced settings from DB, merging with defaults */
@@ -2108,10 +2636,21 @@ router.get("/settings/advanced", requireAdmin, async (_req, res) => {
   }
 });
 
-router.get("/settings/daily-missions", requireAdmin, async (_req, res) => {
+router.get("/settings/daily-missions", requireAdmin, async (req, res) => {
   try {
-    const configRow = await storage.getSetting(DAILY_MISSIONS_SETTING_KEY);
-    const enabledRow = await storage.getSetting(DAILY_MISSIONS_ENABLED_KEY);
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const configResult = await getScopedSettingWithFallback(target.tenantId, DAILY_MISSIONS_SETTING_KEY);
+    const enabledResult = await getScopedSettingWithFallback(target.tenantId, DAILY_MISSIONS_ENABLED_KEY);
+    const configRow = configResult.setting;
+    const enabledRow = enabledResult.setting;
     const defaultCfg = defaultAdvancedSettings.dailyMissions;
 
     let missions = defaultCfg.missions;
@@ -2128,17 +2667,35 @@ router.get("/settings/daily-missions", requireAdmin, async (_req, res) => {
       ? !["false", "0", "off", "no"].includes(String(enabledRow.value).toLowerCase())
       : true;
 
-    return res.json({ success: true, data: { enabled, missions } });
+    return res.json({
+      success: true,
+      data: { enabled, missions },
+      summary: {
+        scope: target.scope,
+        tenantId: target.tenantId,
+        missionKey: configResult.key,
+        enabledKey: enabledResult.key,
+      },
+    });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ في تحميل المهام اليومية" });
   }
 });
 
 // ── Content Limits (reels & photos daily limits) ──
-router.get("/settings/content-limits", requireAdmin, async (_req, res) => {
+router.get("/settings/content-limits", requireAdmin, async (req, res) => {
   try {
-    const cfg = await getAdvancedSettingsCategory("contentLimits");
-    return res.json({ success: true, data: cfg });
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const cfg = await getAdvancedSettingsCategoryForTenant("contentLimits", target.tenantId);
+    return res.json({ success: true, data: cfg, summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
@@ -2146,12 +2703,28 @@ router.get("/settings/content-limits", requireAdmin, async (_req, res) => {
 
 router.put("/settings/content-limits", requireAdmin, async (req, res) => {
   try {
-    const current = await getAdvancedSettingsCategory("contentLimits");
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const current = await getAdvancedSettingsCategoryForTenant("contentLimits", target.tenantId);
     const allowed = ["maxDailyReels", "maxDailyPhotos", "maxReelDurationSec"];
     for (const k of allowed) { if (req.body[k] !== undefined) current[k] = parseInt(req.body[k]) || current[k]; }
-    await storage.upsertSystemConfig("contentLimits", current, req.session.adminId);
-    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "content-limits", "Content limits updated");
-    return res.json({ success: true, data: current });
+    const categoryKey = resolveTenantSettingKeyByTenantId(target.tenantId, "contentLimits");
+    await storage.upsertSystemConfig(categoryKey, current, req.session.adminId);
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_settings",
+      "setting",
+      "content-limits",
+      `[scope=${target.scope}] category=${categoryKey}`,
+    );
+    return res.json({ success: true, data: current, summary: { scope: target.scope, tenantId: target.tenantId, category: categoryKey } });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
@@ -2165,6 +2738,15 @@ router.put("/settings/daily-missions", requireAdmin, async (req, res) => {
     }
 
     const payload = parsed.data;
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
     const missions = payload.missions
       .map((m, i) => ({
         ...m,
@@ -2179,18 +2761,29 @@ router.put("/settings/daily-missions", requireAdmin, async (req, res) => {
       }))
       .sort((a, b) => a.order - b.order);
 
-    await storage.upsertSetting(DAILY_MISSIONS_SETTING_KEY, JSON.stringify(missions), "gamification", "Daily missions configuration");
+    const missionKey = resolveTenantSettingKeyByTenantId(target.tenantId, DAILY_MISSIONS_SETTING_KEY);
+    const enabledKey = resolveTenantSettingKeyByTenantId(target.tenantId, DAILY_MISSIONS_ENABLED_KEY);
+
+    await storage.upsertSetting(missionKey, JSON.stringify(missions), "gamification", "Daily missions configuration");
     let enabledValue = true;
     if (payload.enabled !== undefined) {
-      await storage.upsertSetting(DAILY_MISSIONS_ENABLED_KEY, payload.enabled ? "true" : "false", "gamification", "Daily missions enabled");
+      await storage.upsertSetting(enabledKey, payload.enabled ? "true" : "false", "gamification", "Daily missions enabled");
       enabledValue = payload.enabled;
     } else {
-      const existingEnabled = await storage.getSetting(DAILY_MISSIONS_ENABLED_KEY);
-      enabledValue = existingEnabled?.value ? !["false", "0", "off", "no"].includes(String(existingEnabled.value).toLowerCase()) : true;
+      const existingEnabled = await getScopedSettingWithFallback(target.tenantId, DAILY_MISSIONS_ENABLED_KEY);
+      enabledValue = existingEnabled.setting?.value
+        ? !["false", "0", "off", "no"].includes(String(existingEnabled.setting.value).toLowerCase())
+        : true;
     }
 
-    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "daily-missions", `missions=${missions.length}, enabled=${payload.enabled ?? "unchanged"}`);
-    return res.json({ success: true, data: { enabled: enabledValue, missions } });
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_settings",
+      "setting",
+      "daily-missions",
+      `[scope=${target.scope}] missions=${missions.length}, enabled=${payload.enabled ?? "unchanged"}, missionKey=${missionKey}, enabledKey=${enabledKey}`,
+    );
+    return res.json({ success: true, data: { enabled: enabledValue, missions }, summary: { scope: target.scope, tenantId: target.tenantId, missionKey, enabledKey } });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ في حفظ المهام اليومية" });
   }
@@ -2332,12 +2925,57 @@ router.put("/settings/policies", requireAdmin, async (req, res) => {
   }
 });
 
+router.get("/settings/app-download", requireAdmin, async (req, res) => {
+  try {
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const cfg = await getAdvancedSettingsCategoryForTenant("appDownload", target.tenantId);
+    return res.json({ success: true, data: cfg, summary: { scope: target.scope, tenantId: target.tenantId } });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في تحميل إعدادات التحميل" });
+  }
+});
+
 router.put("/settings/app-download", requireAdmin, async (req, res) => {
   try {
-    const current = await getAdvancedSettingsCategory("appDownload");
-    const { enabled, domain, pwa, apk, aab } = req.body;
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const current = await getAdvancedSettingsCategoryForTenant("appDownload", target.tenantId);
+    const { enabled, domain, rollout, pwa, apk, aab } = req.body;
     if (typeof enabled === "boolean") current.enabled = enabled;
     if (typeof domain === "string") current.domain = domain;
+    if (rollout && typeof rollout === "object") {
+      if (!current.rollout || typeof current.rollout !== "object") {
+        current.rollout = { enabled: false, apkPercent: 100, aabPercent: 100, allowTenants: [], blockTenants: [] };
+      }
+      if (typeof rollout.enabled === "boolean") current.rollout.enabled = rollout.enabled;
+      if (Number.isFinite(rollout.apkPercent)) current.rollout.apkPercent = Math.max(0, Math.min(100, Math.floor(rollout.apkPercent)));
+      if (Number.isFinite(rollout.aabPercent)) current.rollout.aabPercent = Math.max(0, Math.min(100, Math.floor(rollout.aabPercent)));
+      if (Array.isArray(rollout.allowTenants)) {
+        current.rollout.allowTenants = rollout.allowTenants
+          .map((v: any) => String(v || "").trim())
+          .filter((v: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(v));
+      }
+      if (Array.isArray(rollout.blockTenants)) {
+        current.rollout.blockTenants = rollout.blockTenants
+          .map((v: any) => String(v || "").trim())
+          .filter((v: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(v));
+      }
+    }
     for (const key of ["pwa", "apk", "aab"] as const) {
       const incoming = req.body[key];
       if (incoming && typeof incoming === "object") {
@@ -2346,20 +2984,114 @@ router.put("/settings/app-download", requireAdmin, async (req, res) => {
         if (typeof incoming.url === "string") current[key].url = incoming.url;
         if (typeof incoming.extension === "string") current[key].extension = incoming.extension;
         if (typeof incoming.description === "string") current[key].description = incoming.description;
+        if ((key === "apk" || key === "aab") && typeof incoming.version === "string") current[key].version = incoming.version;
+        if ((key === "apk" || key === "aab") && typeof incoming.build === "string") current[key].build = incoming.build;
+        if ((key === "apk" || key === "aab") && typeof incoming.checksum === "string") current[key].checksum = incoming.checksum;
+        if ((key === "apk" || key === "aab") && Number.isFinite(incoming.sizeBytes) && incoming.sizeBytes >= 0) {
+          current[key].sizeBytes = Math.floor(incoming.sizeBytes);
+        }
       }
     }
-    await storage.upsertSystemConfig("appDownload", current, req.session.adminId);
-    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "app-download", "App download settings updated");
+
+    const parseHttpUrl = (value: string) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    };
+
+    const metadataErrors: string[] = [];
+    const validateArtifact = (key: "apk" | "aab") => {
+      const artifact = current[key] || {};
+      if (!artifact.enabled) return;
+
+      const rawUrl = typeof artifact.url === "string" ? artifact.url.trim() : "";
+      const extension = typeof artifact.extension === "string" ? artifact.extension.trim() : "";
+      const resolvedUrl = rawUrl || ((typeof current.domain === "string" ? current.domain : "") + extension);
+
+      if (!resolvedUrl || !parseHttpUrl(resolvedUrl)) {
+        metadataErrors.push(`${key.toUpperCase()} URL is required and must be a valid http(s) URL.`);
+      }
+
+      if (!artifact.version || String(artifact.version).trim().length === 0) {
+        metadataErrors.push(`${key.toUpperCase()} version is required when enabled.`);
+      }
+      if (!artifact.build || String(artifact.build).trim().length === 0) {
+        metadataErrors.push(`${key.toUpperCase()} build is required when enabled.`);
+      }
+
+      const checksum = String(artifact.checksum || "").trim();
+      if (!/^[A-Fa-f0-9]{32,128}$/.test(checksum)) {
+        metadataErrors.push(`${key.toUpperCase()} checksum must be 32-128 hex characters.`);
+      }
+
+      const sizeBytes = Number(artifact.sizeBytes);
+      if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+        metadataErrors.push(`${key.toUpperCase()} sizeBytes must be a positive integer.`);
+      }
+    };
+
+    if (current.enabled) {
+      validateArtifact("apk");
+      validateArtifact("aab");
+    }
+
+    if (metadataErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "App download metadata validation failed",
+        errors: metadataErrors,
+      });
+    }
+
+    const categoryKey = resolveTenantSettingKeyByTenantId(target.tenantId, "appDownload");
+    await storage.upsertSystemConfig(categoryKey, current, req.session.adminId);
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_settings",
+      "setting",
+      "app-download",
+      `[scope=${target.scope}] category=${categoryKey}`,
+    );
     invalidateResponseCache("/api/app-download");
-    return res.json({ success: true, data: current });
+    return res.json({ success: true, data: current, summary: { scope: target.scope, tenantId: target.tenantId, category: categoryKey } });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
 });
 
+router.get("/settings/notification-sounds", requireAdmin, async (req, res) => {
+  try {
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const cfg = await getAdvancedSettingsCategoryForTenant("notificationSounds", target.tenantId);
+    return res.json({ success: true, data: cfg, summary: { scope: target.scope, tenantId: target.tenantId } });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في تحميل إعدادات النغمات" });
+  }
+});
+
 router.put("/settings/notification-sounds", requireAdmin, async (req, res) => {
   try {
-    const current = await getAdvancedSettingsCategory("notificationSounds");
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const current = await getAdvancedSettingsCategoryForTenant("notificationSounds", target.tenantId);
     const slots = ["message", "call", "friend-request", "admin", "system"] as const;
 
     for (const slot of slots) {
@@ -2381,9 +3113,16 @@ router.put("/settings/notification-sounds", requireAdmin, async (req, res) => {
       }
     }
 
-    await storage.upsertSystemConfig("notificationSounds", current, req.session.adminId);
-    await storage.addAdminLog(req.session.adminId!, "update_settings", "setting", "notification-sounds", "Notification sounds updated");
-    return res.json({ success: true, data: current });
+    const categoryKey = resolveTenantSettingKeyByTenantId(target.tenantId, "notificationSounds");
+    await storage.upsertSystemConfig(categoryKey, current, req.session.adminId);
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_settings",
+      "setting",
+      "notification-sounds",
+      `[scope=${target.scope}] category=${categoryKey}`,
+    );
+    return res.json({ success: true, data: current, summary: { scope: target.scope, tenantId: target.tenantId, category: categoryKey } });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في حفظ إعدادات النغمات" });
   }
@@ -2867,10 +3606,73 @@ router.post("/users/:id/set-level", requireAdmin, async (req, res) => {
 // CURRENCIES / PRICING — إدارة العملات والأسعار
 // ══════════════════════════════════════════════════════════
 
+type PricingScope = "request" | "tenant" | "global";
+
+function sanitizeTenantId(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const value = input.trim();
+  if (!value) return null;
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(value)) return null;
+  return value;
+}
+
+function sanitizePricingScope(input: unknown): PricingScope {
+  if (typeof input !== "string") return "request";
+  const value = input.trim().toLowerCase();
+  if (value === "tenant") return "tenant";
+  if (value === "global") return "global";
+  return "request";
+}
+
+function resolvePricingTarget(
+  scopeInput: unknown,
+  tenantInput: unknown,
+  requestTenantInput: unknown,
+): { tenantId: string; scope: "tenant" | "global" } | null {
+  const scope = sanitizePricingScope(scopeInput);
+  const explicitTenant = sanitizeTenantId(tenantInput);
+  const requestTenant = sanitizeTenantId(requestTenantInput) || "default";
+
+  if (scope === "global") {
+    return { tenantId: "default", scope: "global" };
+  }
+
+  if (scope === "tenant") {
+    const chosenTenant = explicitTenant || (requestTenant !== "default" ? requestTenant : null);
+    if (!chosenTenant || chosenTenant === "default") {
+      return null;
+    }
+    return { tenantId: chosenTenant, scope: "tenant" };
+  }
+
+  if (explicitTenant && explicitTenant !== "default") {
+    return { tenantId: explicitTenant, scope: "tenant" };
+  }
+
+  if (requestTenant !== "default") {
+    return { tenantId: requestTenant, scope: "tenant" };
+  }
+
+  return { tenantId: "default", scope: "global" };
+}
+
+function resolvePricingAuditTargetByTenantId(tenantId: string): string {
+  return `tenant:${tenantId || "default"}`;
+}
+
 // Get all pricing data (unified)
-router.get("/pricing/all", requireAdmin, async (_req, res) => {
+router.get("/pricing/all", requireAdmin, async (req, res) => {
   try {
-    const pricing = await getAllPricing();
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const pricing = await getAllPricing(target.tenantId);
     const stats = await getQueueStats();
     return res.json({ success: true, data: { ...pricing, matchingStats: stats } });
   } catch (err: any) {
@@ -2959,15 +3761,32 @@ router.delete("/pricing/coin-packages/:id", requireAdmin, async (req, res) => {
 // Update call rates
 router.put("/pricing/call-rates", requireAdmin, async (req, res) => {
   try {
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
     const { voiceCallRate, videoCallRate } = req.body;
+    const voiceKey = resolveTenantSettingKeyByTenantId(target.tenantId, "voice_call_rate");
+    const videoKey = resolveTenantSettingKeyByTenantId(target.tenantId, "video_call_rate");
     if (voiceCallRate !== undefined) {
-      await storage.upsertSetting("voice_call_rate", String(voiceCallRate), "pricing", "Voice call rate (coins/min)");
+      await storage.upsertSetting(voiceKey, String(voiceCallRate), "pricing", "Voice call rate (coins/min)");
     }
     if (videoCallRate !== undefined) {
-      await storage.upsertSetting("video_call_rate", String(videoCallRate), "pricing", "Video call rate (coins/min)");
+      await storage.upsertSetting(videoKey, String(videoCallRate), "pricing", "Video call rate (coins/min)");
     }
-    await invalidatePricingCache();
-    await storage.addAdminLog(req.session.adminId!, "update_call_rates", "setting", "call-rates", `voice: ${voiceCallRate}, video: ${videoCallRate}`);
+    await invalidatePricingCache(target.scope === "global" ? undefined : target.tenantId);
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_call_rates",
+      "setting",
+      resolvePricingAuditTargetByTenantId(target.tenantId),
+      `[scope=${target.scope}] voice(${voiceKey}): ${voiceCallRate}, video(${videoKey}): ${videoCallRate}`
+    );
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -3036,25 +3855,44 @@ router.put("/pricing/filters", requireAdmin, async (req, res) => {
 // Update message/chat costs
 router.put("/pricing/message-costs", requireAdmin, async (req, res) => {
   try {
+    const target = resolvePricingTarget(
+      req.body?.scope,
+      req.body?.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
     const { messageCost, mediaEnabled, voiceCallEnabled, videoCallEnabled, timeLimit } = req.body;
+    const messageKey = resolveTenantSettingKeyByTenantId(target.tenantId, "chat_message_cost");
+    const mediaKey = resolveTenantSettingKeyByTenantId(target.tenantId, "chat_media_enabled");
+    const voiceKey = resolveTenantSettingKeyByTenantId(target.tenantId, "chat_voice_call_enabled");
+    const videoKey = resolveTenantSettingKeyByTenantId(target.tenantId, "chat_video_call_enabled");
+    const limitKey = resolveTenantSettingKeyByTenantId(target.tenantId, "chat_time_limit");
     if (messageCost !== undefined) {
-      await storage.upsertSetting("chat_message_cost", String(messageCost), "pricing", "Message cost (coins)");
+      await storage.upsertSetting(messageKey, String(messageCost), "pricing", "Message cost (coins)");
     }
     if (mediaEnabled !== undefined) {
-      await storage.upsertSetting("chat_media_enabled", String(!!mediaEnabled), "chat", "Enable media messages");
+      await storage.upsertSetting(mediaKey, String(!!mediaEnabled), "chat", "Enable media messages");
     }
     if (voiceCallEnabled !== undefined) {
-      await storage.upsertSetting("chat_voice_call_enabled", String(!!voiceCallEnabled), "chat", "Enable voice calls");
+      await storage.upsertSetting(voiceKey, String(!!voiceCallEnabled), "chat", "Enable voice calls");
     }
     if (videoCallEnabled !== undefined) {
-      await storage.upsertSetting("chat_video_call_enabled", String(!!videoCallEnabled), "chat", "Enable video calls");
+      await storage.upsertSetting(videoKey, String(!!videoCallEnabled), "chat", "Enable video calls");
     }
     if (timeLimit !== undefined) {
-      await storage.upsertSetting("chat_time_limit", String(timeLimit), "chat", "Chat time limit (minutes, 0 = unlimited)");
+      await storage.upsertSetting(limitKey, String(timeLimit), "chat", "Chat time limit (minutes, 0 = unlimited)");
     }
-    await invalidatePricingCache();
-    await storage.addAdminLog(req.session.adminId!, "update_message_costs", "setting", "message-costs",
-      `msg: ${messageCost}, media: ${mediaEnabled}, voice: ${voiceCallEnabled}, video: ${videoCallEnabled}, limit: ${timeLimit}`);
+    await invalidatePricingCache(target.scope === "global" ? undefined : target.tenantId);
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_message_costs",
+      "setting",
+      resolvePricingAuditTargetByTenantId(target.tenantId),
+      `[scope=${target.scope}] msg(${messageKey}): ${messageCost}, media(${mediaKey}): ${mediaEnabled}, voice(${voiceKey}): ${voiceCallEnabled}, video(${videoKey}): ${videoCallEnabled}, limit(${limitKey}): ${timeLimit}`
+    );
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
@@ -3069,14 +3907,28 @@ import { validateEnv } from "../config";
 
 const SECTION_KEYS = ["live", "cex", "friends", "wallet"] as const;
 
-router.get("/sections", requireAdmin, async (_req, res) => {
+router.get("/sections", requireAdmin, async (req, res) => {
   try {
+    const target = resolvePricingTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
     const sections: Record<string, boolean> = {};
     for (const key of SECTION_KEYS) {
-      const setting = await storage.getSetting(`section_visible_${key}`);
+      const globalSetting = await storage.getSetting(`section_visible_${key}`);
+      const scopedKey = resolveTenantSettingKeyByTenantId(target.tenantId, `section_visible_${key}`);
+      const scopedSetting = scopedKey === `section_visible_${key}`
+        ? globalSetting
+        : await storage.getSetting(scopedKey);
+      const setting = scopedSetting ?? globalSetting;
       sections[key] = setting ? setting.value !== "false" : true;
     }
-    return res.json({ success: true, data: sections });
+    return res.json({ success: true, data: sections, summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
@@ -3088,24 +3940,36 @@ router.put("/sections", requireAdmin, async (req, res) => {
       key: z.enum(SECTION_KEYS),
       visible: z.boolean(),
       password: z.string().min(1),
+      scope: z.enum(["request", "tenant", "global"]).optional(),
+      tenantId: z.string().optional(),
     });
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
     }
 
-    const { key, visible, password } = parsed.data;
+    const { key, visible, password, scope, tenantId } = parsed.data;
     const env = validateEnv();
     if (password !== env.SECTIONS_PASSWORD) {
       return res.status(403).json({ success: false, message: "كلمة مرور الأقسام غير صحيحة" });
     }
 
-    await storage.upsertSetting(`section_visible_${key}`, String(visible), "sections", `Visibility of ${key} section`);
+    const target = resolvePricingTarget(
+      scope,
+      tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const settingKey = resolveTenantSettingKeyByTenantId(target.tenantId, `section_visible_${key}`);
+    await storage.upsertSetting(settingKey, String(visible), "sections", `Visibility of ${key} section`);
     await storage.addAdminLog(req.session.adminId!, "toggle_section", "setting", key,
-      `Section ${key} → ${visible ? "visible" : "hidden"}`);
+      `[scope=${target.scope}] Section ${key} (${settingKey}) → ${visible ? "visible" : "hidden"}`);
     invalidateResponseCache();
 
-    return res.json({ success: true });
+    return res.json({ success: true, summary: { scope: target.scope, tenantId: target.tenantId, key: settingKey } });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }

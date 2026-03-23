@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════
 # Ablox — Production Docker Compose
-# Uses classitest's Traefik for reverse proxy + SSL
-# ablox_app joins classitest_classify-network for Traefik discovery
+# Uses external Traefik for reverse proxy + SSL
+# ablox_app joins traefik-gemj_default for Traefik discovery
 # DB/Redis stay internal on ablox_network
 # ═══════════════════════════════════════════════════════
 
@@ -78,6 +78,8 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 3
+    expose:
+      - "3000"
     volumes:
       - ablox_logs:/app/logs
       - ablox_uploads:/app/uploads
@@ -87,7 +89,7 @@ services:
     labels:
       # ── Traefik routing (discovered by classitest's Traefik) ──
       - "traefik.enable=true"
-      - "traefik.docker.network=classitest_classify-network"
+      - "traefik.docker.network=traefik-gemj_default"
       # HTTP → HTTPS redirect
       - "traefik.http.routers.ablox-http.rule=Host(`${DOMAIN:-mrco.live}`) || Host(`www.${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.ablox-http.entrypoints=web"
@@ -205,7 +207,7 @@ services:
       - traefik_net
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=classitest_classify-network"
+      - "traefik.docker.network=traefik-gemj_default"
       # LiveKit WebSocket route
       - "traefik.http.routers.livekit.rule=Host(`lk.${DOMAIN:-mrco.live}`)"
       - "traefik.http.routers.livekit.entrypoints=websecure"
@@ -285,7 +287,7 @@ networks:
     driver: bridge
   traefik_net:
     external: true
-    name: classitest_classify-network
+    name: traefik-gemj_default
 
 volumes:
   ablox_pgdata:

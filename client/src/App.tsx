@@ -59,6 +59,7 @@ const SettingsPage = lazy(() => import("@/pages/admin/Settings").then(m => ({ de
 const FraudDetectionPage = lazy(() => import("@/pages/admin/FraudDetection").then(m => ({ default: m.FraudDetectionPage })));
 const ChatManagementPage = lazy(() => import("@/pages/admin/ChatManagement").then(m => ({ default: m.ChatManagementPage })));
 const SectionsVisibilityPage = lazy(() => import("@/pages/admin/SectionsVisibility").then(m => ({ default: m.SectionsVisibilityPage })));
+const ProvidersHubPage = lazy(() => import("@/pages/admin/ProvidersHub").then(m => ({ default: m.ProvidersHubPage })));
 
 // Agent Pages (separate chunk)
 const AgentProvider = lazy(() => import("@/pages/agent/AgentPanel").then(m => ({ default: m.AgentProvider })));
@@ -110,6 +111,9 @@ function AdminRouter() {
           </Route>
           <Route path="/admin/sections">
             <AdminLayout><SectionsVisibilityPage /></AdminLayout>
+          </Route>
+          <Route path="/admin/providers">
+            <AdminLayout><ProvidersHubPage /></AdminLayout>
           </Route>
           <Route component={NotFound} />
         </Switch>

@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-03-23T11:42:42.063Z",
+  "checks": [
+    {
+      "key": "goNoGoDecision",
+      "ok": false,
+      "value": "NO-GO",
+      "expected": "GO"
+    },
+    {
+      "key": "finalQaDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "rollbackRunbook",
+      "ok": true,
+      "value": "PRESENT",
+      "expected": "PRESENT"
+    },
+    {
+      "key": "decisionBoardTemplate",
+      "ok": true,
+      "value": "PRESENT",
+      "expected": "PRESENT"
+    }
+  ],
+  "failedChecks": [
+    {
+      "key": "goNoGoDecision",
+      "ok": false,
+      "value": "NO-GO",
+      "expected": "GO"
+    },
+    {
+      "key": "finalQaDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    }
+  ],
+  "decision": "NOT_READY"
+}
