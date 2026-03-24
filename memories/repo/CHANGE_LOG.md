@@ -198,6 +198,25 @@ Change:
 - Added backend endpoints in `server/routes/admin.ts`:
   - `GET /api/admin/auth/profile`
   - `PATCH /api/admin/auth/profile` (change admin email/password with current-password verification)
+
+---
+
+Date: 2026-03-24
+Area: production streaming diagnosis (ICE/TURN path)
+Change:
+
+- Verified app and DB flow healthy in production logs (`db:push` success, stream creation and token generation 200).
+- Correlated repeated LiveKit `SIGNAL_SOURCE_CLOSE` with ICE candidate-pair failures and no successful responses.
+- Confirmed `coturn` receives no observable TURN traffic during test window (`tcpdump` on 3478/5349 captured 0 packets).
+- Noted runtime drift risk: server showed published 5432/6379 while repo compose keeps DB/Redis internal-only.
+Reason:
+- User requested log-level root cause confirmation and actionable next steps.
+Impact:
+- Root cause remains network path to TURN/ICE (firewall/provider/routing), not auth, DB, or application token logic.
+- Security priority raised for immediate closure of external DB/Redis exposure on server runtime.
+Follow-up:
+- Compare effective server compose config (`docker compose config`) against repo and remove external DB/Redis port publishing.
+- Open required TURN/LiveKit ports at host/provider firewall and re-run packet-capture validation during live attempt.
   - `PATCH /api/admin/sections/password` (change sections password)
 - Updated `/api/admin/auth/me` to include `email`.
 - Added hashed sections password storage via setting key `sections_password_hash` with backward compatibility fallback to `SECTIONS_PASSWORD` env var.
@@ -656,6 +675,23 @@ Impact:
 - Scoped whitelist and can-stream actions now fail gracefully with immediate feedback and reduced risk of duplicate writes.
 Follow-up:
 - Consider adding success toasts for parity and audit visibility in future UX pass.
+
+---
+
+Date: 2026-03-24
+Area: production network reachability runbook + verification tooling
+Change:
+
+- Added `script/network-universal-check.sh` to validate DNS alignment, listeners, compose-effective TURN/Traefik settings, firewall snapshot, and live capture commands.
+- Added `RUNBOOK-UNIVERSAL-NETWORK-REACHABILITY.md` with end-to-end steps for broad network compatibility (Wi-Fi/mobile/corporate).
+- Updated `.env.example` with explicit optional `turns:443` fallback guidance for restrictive networks (only with dedicated TURN endpoint/IP).
+Reason:
+- User requested a prepared, actionable setup to maximize successful access from all network types and cover edge-case paths.
+Impact:
+- Operators can run one script for quick readiness diagnosis and follow a deterministic runbook to close DNS/firewall/TURN path gaps.
+- Risk of unsafe `443` TURN assumptions is reduced by clear constraint notes.
+Follow-up:
+- Execute `script/network-universal-check.sh` on production host and attach outputs from each external network test profile.
 
 ---
 
