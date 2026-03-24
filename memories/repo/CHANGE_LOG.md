@@ -247,6 +247,22 @@ Follow-up:
 
 ---
 
+Date: 2026-03-24
+Area: streaming TURN endpoint defaults
+Change:
+
+- Updated `.env.example` `LIVEKIT_TURN_SERVERS` default to include `turn:3478` (udp+tcp) and `turns:5349`.
+- Updated `docker-compose.yml` LiveKit default `LIVEKIT_TURN_SERVERS` to the same values.
+- Removed prior default dependency on `turns:443` because host port `443` is typically occupied by HTTPS reverse proxy and may not terminate TURN.
+Reason:
+- Mobile streaming troubleshooting showed infra healthy but TURN-over-443 ambiguity; default config could advertise a non-TURN endpoint.
+Impact:
+- Safer production defaults for NAT traversal, especially on mobile networks.
+Follow-up:
+- On production host, set `LIVEKIT_TURN_SERVERS` explicitly and verify coturn listens on `TURN_TLS_LISTEN_PORT` (5349 unless intentionally changed).
+
+---
+
 Date: 2026-03-23
 Area: four-axis execution blueprint alignment
 Change:
