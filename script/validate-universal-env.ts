@@ -116,6 +116,25 @@ function validateNumericRange(
     return { key, valid: true };
 }
 
+function validateOtpEmailConfig(env: Record<string, string>): Check[] {
+    const otpEnabled = (env.OTP_ENABLED || "").toLowerCase() === "true";
+    const otpProvider = (env.OTP_PROVIDER || "").toLowerCase();
+    const emailEnabled = (env.OTP_EMAIL_ENABLED || "").toLowerCase() === "true";
+
+    if (!otpEnabled || (otpProvider !== "email" && !emailEnabled)) {
+        return [];
+    }
+
+    return [
+        hasNonEmpty(env, "SMTP_HOST"),
+        validateNumericRange(env, "SMTP_PORT", 1, 65535),
+        hasNonEmpty(env, "SMTP_USER"),
+        hasNonEmpty(env, "SMTP_PASS"),
+        hasNonEmpty(env, "SMTP_SENDER_NAME"),
+        hasNonEmpty(env, "SMTP_SENDER_EMAIL"),
+    ];
+}
+
 function main() {
     const args = process.argv.slice(2);
     const envArgIndex = args.findIndex((arg) => arg === "--env");
@@ -142,6 +161,7 @@ function main() {
         validateNumericRange(env, "STREAM_ROOM_EMPTY_TIMEOUT_SEC", 60, 3600),
         validateNumericRange(env, "STREAM_FOLLOWER_NOTIFY_LIMIT", 20, 5000),
         validateNumericRange(env, "STREAM_AUTOSTART_BATCH_LIMIT", 1, 200),
+        ...validateOtpEmailConfig(env),
     ];
 
     const failed = checks.filter((c) => !c.valid);

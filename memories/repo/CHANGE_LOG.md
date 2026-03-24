@@ -1356,3 +1356,19 @@ Impact:
 - Domain migration is now centralized and safer; validator now supports future domain changes without code edits.
 Follow-up:
 - Point DNS A records for `vixo.uno`, `lk.vixo.uno`, and `turn.vixo.uno` to the chosen host IP before public testing.
+
+---
+
+Date: 2026-03-24
+Area: otp email production readiness (smtp)
+Change:
+
+- Added explicit SMTP production block in `.env.production.recommended` for OTP/password reset email flow (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SENDER_NAME`, `SMTP_SENDER_EMAIL`).
+- Extended `script/validate-universal-env.ts` with conditional SMTP validation when OTP-email mode is enabled.
+Reason:
+- User requested adding OTP mail settings after DNS/domain setup.
+Impact:
+- Production env template now includes end-to-end OTP email parameters.
+- Pre-go-live validator now catches incomplete SMTP setup in OTP-email mode.
+Follow-up:
+- Add provider-side DNS email records (MX/SPF/DKIM/DMARC) and run end-to-end OTP send test.
