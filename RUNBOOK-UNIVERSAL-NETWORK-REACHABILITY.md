@@ -4,19 +4,19 @@ This runbook is for making Ablox reachable from most network types (home Wi-Fi, 
 
 ## Scope
 
-- Web app domain: `vixo.uno`
-- LiveKit signaling domain: `lk.vixo.uno`
-- TURN domain: `turn.vixo.uno`
+- Web app domain: `mrco.live`
+- LiveKit signaling domain: `lk.mrco.live`
+- TURN domain: `turn.mrco.live`
 
 ## 1) Required DNS shape
 
-- `vixo.uno` A record -> VPS public IPv4
-- `lk.vixo.uno` A record -> VPS public IPv4
-- `turn.vixo.uno` A record -> VPS public IPv4
+- `mrco.live` A record -> VPS public IPv4
+- `lk.mrco.live` A record -> VPS public IPv4
+- `turn.mrco.live` A record -> VPS public IPv4
 - Remove AAAA records unless IPv6 is configured and tested.
 - If using Cloudflare:
-  - Keep `vixo.uno` proxied if desired.
-  - Set `lk.vixo.uno` and `turn.vixo.uno` to DNS Only for direct RTC/TURN paths.
+  - Keep `mrco.live` proxied if desired.
+  - Set `lk.mrco.live` and `turn.mrco.live` to DNS Only for direct RTC/TURN paths.
 
 ## 2) Required open ports (provider firewall + host firewall)
 
@@ -29,9 +29,9 @@ This runbook is for making Ablox reachable from most network types (home Wi-Fi, 
 ## 3) TURN strategy for broad compatibility
 
 - Keep all three TURN paths announced to clients:
-  - `turn:turn.vixo.uno:3478?transport=udp`
-  - `turn:turn.vixo.uno:3478?transport=tcp`
-  - `turns:turn.vixo.uno:5349?transport=tcp`
+  - `turn:turn.mrco.live:3478?transport=udp`
+  - `turn:turn.mrco.live:3478?transport=tcp`
+  - `turns:turn.mrco.live:5349?transport=tcp`
 - For very restrictive networks, add `turns:...:443` only if you can dedicate a separate endpoint/IP from Traefik 443.
 
 ## 4) Minimal .env target values
@@ -39,11 +39,11 @@ This runbook is for making Ablox reachable from most network types (home Wi-Fi, 
 Use these values in `.env`:
 
 ```env
-LIVEKIT_PUBLIC_URL=wss://lk.vixo.uno
+LIVEKIT_PUBLIC_URL=wss://lk.mrco.live
 LIVEKIT_URL=ws://livekit:7880
 TURN_EXTERNAL_IP=<YOUR_PUBLIC_VPS_IP>
 TURN_TLS_LISTEN_PORT=5349
-LIVEKIT_TURN_SERVERS=turn:turn.vixo.uno:3478?transport=udp,turn:turn.vixo.uno:3478?transport=tcp,turns:turn.vixo.uno:5349?transport=tcp
+LIVEKIT_TURN_SERVERS=turn:turn.mrco.live:3478?transport=udp,turn:turn.mrco.live:3478?transport=tcp,turns:turn.mrco.live:5349?transport=tcp
 ```
 
 ## 5) Execute integrated readiness check
