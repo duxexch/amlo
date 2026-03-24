@@ -1287,6 +1287,28 @@ router.get("/financial-stats", requireAdmin, async (_req, res) => {
 router.get("/call-qos/snapshot", requireAdmin, async (req, res) => {
   try {
     const db = getDb();
+    if (!db) {
+      return res.json({
+        success: true,
+        data: {
+          snapshotAt: new Date().toISOString(),
+          windowMinutes: Number(req.query.windowMinutes || 60),
+          callVolume: { totalCalls: 0, activeCalls: 0, endedCalls: 0, failedCalls: 0, voiceCalls: 0, videoCalls: 0 },
+          reliability: { connectRatePct: 0, rejectRatePct: 0, missedRatePct: 0, busyRatePct: 0 },
+          duration: { avgDurationSeconds: 0, p95DurationSeconds: 0 },
+          billing: { totalCoinsCharged: 0 },
+          qos: {
+            mos: null,
+            rttMs: null,
+            jitterMs: null,
+            packetLossPct: null,
+            source: "call-status-snapshot",
+            note: "Database unavailable",
+          },
+          matchingStats: await getQueueStats(),
+        },
+      });
+    }
     const requestedWindow = Number(req.query.windowMinutes || 60);
     const windowMinutes = Number.isFinite(requestedWindow)
       ? Math.max(5, Math.min(1440, Math.floor(requestedWindow)))
@@ -1366,6 +1388,18 @@ router.get("/call-qos/snapshot", requireAdmin, async (req, res) => {
 router.get("/call-qos/aggregation", requireAdmin, async (req, res) => {
   try {
     const db = getDb();
+    if (!db) {
+      return res.json({
+        success: true,
+        data: {
+          snapshotAt: new Date().toISOString(),
+          windowMinutes: Number(req.query.windowMinutes || 180),
+          bucketMinutes: Number(req.query.bucketMinutes || 15),
+          points: [],
+          note: "Database unavailable",
+        },
+      });
+    }
     const requestedWindow = Number(req.query.windowMinutes || 180);
     const requestedBucket = Number(req.query.bucketMinutes || 15);
 
@@ -1515,6 +1549,25 @@ router.get("/call-qos/aggregation", requireAdmin, async (req, res) => {
 router.post("/call-qos/evaluate-alerts", requireAdmin, async (req, res) => {
   try {
     const db = getDb();
+    if (!db) {
+      return res.json({
+        success: true,
+        data: {
+          windowMinutes: Number(req.body?.windowMinutes || 60),
+          thresholds: req.body?.thresholds || {},
+          metrics: {
+            totalCalls: 0,
+            connectRatePct: 0,
+            missedRatePct: 0,
+            busyRatePct: 0,
+            failedRatePct: 0,
+          },
+          incidents: [],
+          triggered: false,
+          note: "Database unavailable",
+        },
+      });
+    }
     const windowMinutesRaw = Number(req.body?.windowMinutes || 60);
     const windowMinutes = Number.isFinite(windowMinutesRaw)
       ? Math.max(5, Math.min(1440, Math.floor(windowMinutesRaw)))

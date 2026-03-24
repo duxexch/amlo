@@ -71,6 +71,17 @@ async function request<T>(
   }
 }
 
+type ScopeParams = { scope?: "request" | "global" | "tenant"; tenantId?: string };
+
+function buildScopeQuery(scope?: ScopeParams): string {
+  if (!scope) return "";
+  const params = new URLSearchParams();
+  if (scope.scope) params.set("scope", scope.scope);
+  if (scope.tenantId) params.set("tenantId", scope.tenantId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
 // ── Auth ──────────────────────────────────────────────────
 
 export const adminAuth = {
@@ -474,13 +485,21 @@ export const adminSettings = {
   updateAppDownload: (data: Record<string, any>) =>
     request("/settings/app-download", { method: "PUT", body: JSON.stringify(data) }),
 
+  getAppDownload: (scope?: ScopeParams) =>
+    request<any>(`/settings/app-download${buildScopeQuery(scope)}`),
+
   updateNotificationSounds: (data: Record<string, any>) =>
     request("/settings/notification-sounds", { method: "PUT", body: JSON.stringify(data) }),
 
-  getContentLimits: () => request<{ maxDailyReels: number; maxDailyPhotos: number; maxReelDurationSec: number }>("/settings/content-limits"),
+  getNotificationSounds: (scope?: ScopeParams) =>
+    request<any>(`/settings/notification-sounds${buildScopeQuery(scope)}`),
+
+  getContentLimits: (scope?: ScopeParams) =>
+    request<{ maxDailyReels: number; maxDailyPhotos: number; maxReelDurationSec: number }>(`/settings/content-limits${buildScopeQuery(scope)}`),
   updateContentLimits: (data: Record<string, any>) =>
     request("/settings/content-limits", { method: "PUT", body: JSON.stringify(data) }),
-  getDailyMissions: () => request<{ enabled: boolean; missions: any[] }>("/settings/daily-missions"),
+  getDailyMissions: (scope?: ScopeParams) =>
+    request<{ enabled: boolean; missions: any[] }>(`/settings/daily-missions${buildScopeQuery(scope)}`),
 
   updateDailyMissions: (data: { enabled?: boolean; missions: any[] }) =>
     request<{ enabled: boolean; missions: any[] }>("/settings/daily-missions", { method: "PUT", body: JSON.stringify(data) }),
@@ -862,7 +881,7 @@ export const adminChatManagement = {
 // ── Pricing / Currencies ──────────────────────────────
 
 export const adminPricing = {
-  getAll: () => request<any>("/pricing/all"),
+  getAll: (scope?: ScopeParams) => request<any>(`/pricing/all${buildScopeQuery(scope)}`),
   getCoinPackages: () => request<any[]>("/pricing/coin-packages"),
   createCoinPackage: (data: { coins: number; bonusCoins?: number; priceUsd: string; isPopular?: boolean; sortOrder?: number }) =>
     request("/pricing/coin-packages", { method: "POST", body: JSON.stringify(data) }),
@@ -879,4 +898,40 @@ export const adminPricing = {
     request("/pricing/call-rates", { method: "PUT", body: JSON.stringify(data) }),
   updateMessageCosts: (data: Record<string, any>) =>
     request("/pricing/message-costs", { method: "PUT", body: JSON.stringify(data) }),
+};
+
+export type ProvidersOverviewResponse = {
+  socialLogin: {
+    total: number;
+    enabled: number;
+    configured: number;
+    providers: Array<{ provider: string; enabled: boolean; configured: boolean }>;
+  };
+  otpSms: {
+    enabled: boolean;
+    provider: string;
+    configured: boolean;
+  };
+  paymentGateways: {
+    total: number;
+    enabled: number;
+    configured: number;
+    providers: Array<{ provider: string; enabled: boolean; configured: boolean; mode: string; countries: string[]; priority: number }>;
+  };
+  paymentMethods: {
+    total: number;
+    active: number;
+    byProvider: Record<string, number>;
+    methods: Array<{ id: string; name: string; isActive: boolean; provider: string; usageTarget: string; countries: string[] }>;
+  };
+  appDownload: {
+    enabled: boolean;
+    pwaEnabled: boolean;
+    apkEnabled: boolean;
+    aabEnabled: boolean;
+  };
+};
+
+export const adminProviders = {
+  getOverview: () => request<ProvidersOverviewResponse>("/providers/overview"),
 };

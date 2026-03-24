@@ -251,7 +251,7 @@ export async function registerRoutes(
     return stableBucket(tenantId || "default") < bounded;
   };
 
-  app.get("/api/app-download", async (_req, res) => {
+  app.get("/api/app-download", async (req, res) => {
     try {
       const cfg = await storage.getSystemConfig("appDownload");
       let dl: any = cfg?.configData
@@ -265,7 +265,9 @@ export async function registerRoutes(
         ...APP_DOWNLOAD_DEFAULT.rollout,
         ...(dl.rollout && typeof dl.rollout === "object" ? dl.rollout : {}),
       };
-      const tenantKey = tenantId || "default";
+      const headerTenant = typeof req.headers["x-tenant-id"] === "string" ? req.headers["x-tenant-id"] : "";
+      const queryTenant = typeof req.query.tenantId === "string" ? req.query.tenantId : "";
+      const tenantKey = (queryTenant || headerTenant || "default").trim() || "default";
       const apkEnabled = Boolean(dl.apk?.enabled) && isArtifactRolledOut(tenantKey, rollout, "apk");
       const aabEnabled = Boolean(dl.aab?.enabled) && isArtifactRolledOut(tenantKey, rollout, "aab");
 

@@ -63,7 +63,7 @@ const MEM_CACHE_TTL = 60_000; // 1 minute in-memory
  * Get all pricing data (cached).
  * Used by both client API and internal matching engine.
  */
-export async function getAllPricing(): Promise<AllPricing> {
+export async function getAllPricing(_tenantId?: string): Promise<AllPricing> {
   // 1. In-memory cache (fastest)
   if (memCache && Date.now() - memCache.ts < MEM_CACHE_TTL) {
     return memCache.data;
@@ -88,7 +88,7 @@ export async function getAllPricing(): Promise<AllPricing> {
   // Store in caches
   memCache = { data: pricing, ts: Date.now() };
   if (redis) {
-    redis.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(pricing)).catch(() => {});
+    redis.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(pricing)).catch(() => { });
   }
 
   return pricing;
@@ -97,11 +97,11 @@ export async function getAllPricing(): Promise<AllPricing> {
 /**
  * Invalidate all pricing caches (call after admin updates).
  */
-export async function invalidatePricingCache(): Promise<void> {
+export async function invalidatePricingCache(_tenantId?: string): Promise<void> {
   memCache = null;
   const redis = getRedis();
   if (redis) {
-    await redis.del(CACHE_KEY).catch(() => {});
+    await redis.del(CACHE_KEY).catch(() => { });
   }
   log.info("Pricing cache invalidated");
 }

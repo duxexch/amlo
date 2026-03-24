@@ -79,7 +79,7 @@ function sensitiveContentBlocked(res: Response) {
 // ══════════════════════════════════════════════════════════
 
 router.get("/overview/stats", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) {
     // No DB — return zeros
     return res.json({
@@ -161,7 +161,7 @@ router.get("/overview/stats", requireAdmin, async (_req, res) => {
 
 // Trend data (messages + calls per day, last 14 days)
 router.get("/overview/trends", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
 
   // Generate last 14 days with default zeros
   const days: { date: string; messages: number; calls: number; revenue: number }[] = [];
@@ -224,7 +224,7 @@ router.get("/overview/trends", requireAdmin, async (_req, res) => {
 
 // Top chatters
 router.get("/overview/top-chatters", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) {
     return res.json({ success: true, data: [] });
   }
@@ -298,7 +298,7 @@ router.get("/overview/top-chatters", requireAdmin, async (_req, res) => {
 router.get("/conversations", requireAdmin, async (req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   const search = (req.query.search as string) || "";
@@ -394,7 +394,7 @@ router.get("/conversations", requireAdmin, async (req, res) => {
 router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
   const offset = (page - 1) * limit;
@@ -439,7 +439,7 @@ router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
 
 // Delete conversation (soft: deactivate + delete messages)
 router.delete("/conversations/:id", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, message: "تم الحذف" });
 
   try {
@@ -476,7 +476,7 @@ router.delete("/conversations/:id", requireAdmin, async (req, res) => {
 router.get("/messages", requireAdmin, async (req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   const page = parseInt(req.query.page as string) || 1;
   const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
   const search = (req.query.search as string) || "";
@@ -492,7 +492,7 @@ router.get("/messages", requireAdmin, async (req, res) => {
     if (type) conditions.push(eq(schema.messages.type, type));
 
     // Search by sender name (content is encrypted so we search sender)
-    let senderIdFilter: string[] | null = null;
+    let senderIdFilter: string[] = [];
     if (search) {
       const matchedUsers = await db.select({ id: schema.users.id })
         .from(schema.users)
@@ -546,7 +546,7 @@ router.get("/messages", requireAdmin, async (req, res) => {
 
 // Delete message
 router.delete("/messages/:id", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, message: "تم الحذف" });
 
   try {
@@ -578,7 +578,7 @@ router.delete("/messages/:id", requireAdmin, async (req, res) => {
 
 // Bulk delete messages
 router.post("/messages/bulk-delete", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ success: false, message: "لا توجد رسائل" });
   if (ids.length > 500) return res.status(400).json({ success: false, message: "الحد الأقصى 500 رسالة" });
@@ -624,7 +624,7 @@ router.post("/messages/bulk-delete", requireAdmin, async (req, res) => {
 router.get("/calls", requireAdmin, async (req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   const type = (req.query.type as string) || "";
@@ -680,7 +680,7 @@ router.get("/calls", requireAdmin, async (req, res) => {
 
 // Force end a call
 router.post("/calls/:id/force-end", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, message: "تم إنهاء المكالمة" });
 
   try {
@@ -890,7 +890,7 @@ router.get("/settings", requireAdmin, async (req, res) => {
     return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
   }
 
-  const db = getDb();
+  const db = getDb()!;
   const defaults = {
     voice_call_rate: 5,
     video_call_rate: 10,
@@ -952,7 +952,7 @@ router.put("/settings", requireAdmin, async (req, res) => {
     return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
   }
 
-  const db = getDb();
+  const db = getDb()!;
   const { settings } = req.body;
   if (!Array.isArray(settings)) return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
 
@@ -1283,7 +1283,7 @@ async function saveStreamAlertConfigForTenant(tenantId: string, config: typeof d
 }
 
 router.get("/streams/active", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: [] });
 
   try {
@@ -1324,7 +1324,7 @@ router.get("/streams/active", requireAdmin, async (_req, res) => {
 });
 
 router.get("/streams/stats", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: { activeNow: 0, totalViewers: 0, totalToday: 0, avgDuration: 0, avgViewers: 0, totalGiftsToday: 0, totalRevenueToday: 0, peakConcurrent: 0, topCategories: [] } });
 
   try {
@@ -1586,7 +1586,7 @@ router.put("/streams/telemetry/alert-config", requireAdmin, async (req, res) => 
 });
 
 router.post("/streams/:id/end", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   const streamId = p(req.params.id);
 
   if (db) {
@@ -1624,7 +1624,7 @@ router.post("/streams/:id/end", requireAdmin, async (req, res) => {
 
 // Get all message reports
 router.get("/message-reports", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: [], total: 0 });
 
   const page = parseInt(req.query.page as string) || 1;
@@ -1693,7 +1693,7 @@ router.get("/message-reports", requireAdmin, async (req, res) => {
 
 // Get report stats
 router.get("/message-reports/stats", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: { pending: 0, reviewed: 0, resolved: 0, dismissed: 0, total: 0 } });
 
   try {
@@ -1723,7 +1723,7 @@ router.get("/message-reports/stats", requireAdmin, async (_req, res) => {
 
 // Update report status
 router.put("/message-reports/:id", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
 
   const reportId = p(req.params.id);
@@ -1762,7 +1762,7 @@ router.put("/message-reports/:id", requireAdmin, async (req, res) => {
 
 // List all chat blocks
 router.get("/chat-blocks", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: [], total: 0 });
 
   const page = parseInt(req.query.page as string) || 1;
@@ -1801,7 +1801,7 @@ router.get("/chat-blocks", requireAdmin, async (req, res) => {
 
 // Force remove a chat block (admin)
 router.delete("/chat-blocks/:id", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
 
   const blockId = p(req.params.id);
@@ -1821,7 +1821,7 @@ router.delete("/chat-blocks/:id", requireAdmin, async (req, res) => {
 
 // GET stream whitelist users (users who can stream even when globally disabled)
 router.get("/streams/whitelist", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: [] });
 
   const target = resolveScopeTarget(
@@ -1886,7 +1886,7 @@ router.get("/streams/whitelist", requireAdmin, async (req, res) => {
 
 // PUT add/remove user from stream whitelist
 router.put("/streams/whitelist/:userId", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB" });
 
   const target = resolveScopeTarget(
@@ -1926,7 +1926,7 @@ router.put("/streams/whitelist/:userId", requireAdmin, async (req, res) => {
 
 // PUT toggle user's canStream permission
 router.put("/users/:userId/can-stream", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB" });
 
   const target = resolveScopeTarget(
@@ -1998,7 +1998,7 @@ router.put("/users/:userId/can-stream", requireAdmin, async (req, res) => {
 
 // GET search users for whitelist management
 router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.json({ success: true, data: [] });
 
   const target = resolveScopeTarget(
@@ -2043,7 +2043,7 @@ function toCsv(headers: string[], rows: string[][]): string {
 router.get("/export/conversations", requireAdmin, async (_req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
     const convs = await db.select({
@@ -2087,7 +2087,7 @@ router.get("/export/conversations", requireAdmin, async (_req, res) => {
 router.get("/export/messages", requireAdmin, async (_req, res) => {
   return sensitiveContentBlocked(res);
 
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
     const msgs = await db.select({
@@ -2135,7 +2135,7 @@ router.get("/export/messages", requireAdmin, async (_req, res) => {
 
 // Export reports as CSV
 router.get("/export/reports", requireAdmin, async (_req, res) => {
-  const db = getDb();
+  const db = getDb()!;
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
     const reports = await db.select({
@@ -2177,3 +2177,4 @@ router.get("/export/reports", requireAdmin, async (_req, res) => {
 });
 
 export default router;
+
