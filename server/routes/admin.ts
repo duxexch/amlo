@@ -188,12 +188,123 @@ router.get("/auth/me", requireAdmin, async (req, res) => {
       data: {
         id: admin.id,
         username: admin.username,
+        email: admin.email,
         displayName: admin.displayName,
         role: admin.role,
         avatar: admin.avatar,
       },
     });
   } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.get("/auth/profile", requireAdmin, async (req, res) => {
+  try {
+    const admin = await storage.getAdmin(req.session.adminId!);
+    if (!admin) {
+      return res.status(401).json({ success: false, message: "جلسة غير صالحة" });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        id: admin.id,
+        username: admin.username,
+        email: admin.email,
+        displayName: admin.displayName,
+        role: admin.role,
+      },
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.patch("/auth/profile", requireAdmin, async (req, res) => {
+  try {
+    const bodySchema = z.object({
+      currentPassword: z.string().min(1),
+      newEmail: z.string().email().optional(),
+      newPassword: z.string().min(6).optional(),
+    });
+
+    const parsed = bodySchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    const { currentPassword, newEmail, newPassword } = parsed.data;
+    const hasEmailChange = typeof newEmail === "string" && newEmail.trim().length > 0;
+    const hasPasswordChange = typeof newPassword === "string" && newPassword.length > 0;
+    if (!hasEmailChange && !hasPasswordChange) {
+      return res.status(400).json({ success: false, message: "لا توجد تغييرات للحفظ" });
+    }
+
+    const admin = await storage.getAdmin(req.session.adminId!);
+    if (!admin) {
+      return res.status(401).json({ success: false, message: "جلسة غير صالحة" });
+    }
+
+    const valid = await verifyPasswordAsync(currentPassword, admin.passwordHash);
+    if (!valid) {
+      return res.status(403).json({ success: false, message: "كلمة المرور الحالية غير صحيحة" });
+    }
+
+    const updateData: Partial<schema.Admin> = {};
+
+    if (hasEmailChange) {
+      const nextEmail = String(newEmail).trim().toLowerCase();
+      if (nextEmail !== admin.email.toLowerCase()) {
+        const db = getDb();
+        if (!db) {
+          return res.status(500).json({ success: false, message: "قاعدة البيانات غير متاحة" });
+        }
+        const [exists] = await db
+          .select({ id: schema.admins.id })
+          .from(schema.admins)
+          .where(and(eq(schema.admins.email, nextEmail), ne(schema.admins.id, admin.id)))
+          .limit(1);
+        if (exists) {
+          return res.status(409).json({ success: false, message: "هذا البريد مستخدم بالفعل" });
+        }
+        updateData.email = nextEmail;
+      }
+    }
+
+    if (hasPasswordChange) {
+      updateData.passwordHash = await hashPasswordAsync(String(newPassword));
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.json({ success: true, message: "لا توجد تغييرات", data: { email: admin.email } });
+    }
+
+    const updated = await storage.updateAdmin(admin.id, updateData as any);
+    if (!updated) {
+      return res.status(500).json({ success: false, message: "تعذر تحديث البيانات" });
+    }
+
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "update_admin_profile_credentials",
+      "admin",
+      admin.id,
+      `emailChanged=${Boolean(updateData.email)} passwordChanged=${Boolean(updateData.passwordHash)}`,
+    );
+
+    return res.json({
+      success: true,
+      message: "تم تحديث بيانات الدخول بنجاح",
+      data: {
+        id: updated.id,
+        username: updated.username,
+        email: updated.email,
+        displayName: updated.displayName,
+        role: updated.role,
+      },
+    });
+  } catch {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
 });
@@ -3906,6 +4017,18 @@ router.put("/pricing/message-costs", requireAdmin, async (req, res) => {
 import { validateEnv } from "../config";
 
 const SECTION_KEYS = ["live", "cex", "friends", "wallet"] as const;
+const SECTIONS_PASSWORD_HASH_KEY = "sections_password_hash";
+
+async function verifySectionsPassword(input: string): Promise<boolean> {
+  const storedHash = await storage.getSetting(SECTIONS_PASSWORD_HASH_KEY);
+  if (storedHash?.value) {
+    return verifyPasswordAsync(input, storedHash.value);
+  }
+
+  // Backward compatibility with older deployments using env-only sections password.
+  const env = validateEnv();
+  return input === env.SECTIONS_PASSWORD;
+}
 
 router.get("/sections", requireAdmin, async (req, res) => {
   try {
@@ -3949,8 +4072,7 @@ router.put("/sections", requireAdmin, async (req, res) => {
     }
 
     const { key, visible, password, scope, tenantId } = parsed.data;
-    const env = validateEnv();
-    if (password !== env.SECTIONS_PASSWORD) {
+    if (!(await verifySectionsPassword(password))) {
       return res.status(403).json({ success: false, message: "كلمة مرور الأقسام غير صحيحة" });
     }
 
@@ -3971,6 +4093,39 @@ router.put("/sections", requireAdmin, async (req, res) => {
 
     return res.json({ success: true, summary: { scope: target.scope, tenantId: target.tenantId, key: settingKey } });
   } catch (err: any) {
+    return res.status(500).json({ success: false, message: "خطأ في الخادم" });
+  }
+});
+
+router.patch("/sections/password", requireAdmin, async (req, res) => {
+  try {
+    const bodySchema = z.object({
+      currentPassword: z.string().min(1),
+      newPassword: z.string().min(6),
+    });
+    const parsed = bodySchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
+    }
+
+    const { currentPassword, newPassword } = parsed.data;
+    const isCurrentValid = await verifySectionsPassword(currentPassword);
+    if (!isCurrentValid) {
+      return res.status(403).json({ success: false, message: "كلمة المرور الحالية غير صحيحة" });
+    }
+
+    const hash = await hashPasswordAsync(newPassword);
+    await storage.upsertSetting(SECTIONS_PASSWORD_HASH_KEY, hash, "sections", "Hashed sections management password");
+    await storage.addAdminLog(
+      req.session.adminId!,
+      "change_sections_password",
+      "setting",
+      SECTIONS_PASSWORD_HASH_KEY,
+      "Sections password was updated",
+    );
+
+    return res.json({ success: true, message: "تم تغيير كلمة مرور الأقسام بنجاح" });
+  } catch {
     return res.status(500).json({ success: false, message: "خطأ في الخادم" });
   }
 });

@@ -87,10 +87,26 @@ export const adminAuth = {
     request<{
       id: string;
       username: string;
+      email?: string;
       displayName: string;
       role: string;
       avatar: string | null;
     }>("/auth/me"),
+
+  profile: () =>
+    request<{
+      id: string;
+      username: string;
+      email: string;
+      displayName: string;
+      role: string;
+    }>("/auth/profile"),
+
+  updateProfile: (data: { currentPassword: string; newEmail?: string; newPassword?: string }) =>
+    request<{ id: string; username: string; email: string; displayName: string; role: string }>("/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ── Dashboard ────────────────────────────────────────────
@@ -107,6 +123,11 @@ export const adminSections = {
     request("/sections", {
       method: "PUT",
       body: JSON.stringify({ key, visible, password }),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ success: boolean; message?: string }>("/sections/password", {
+      method: "PATCH",
+      body: JSON.stringify({ currentPassword, newPassword }),
     }),
 };
 

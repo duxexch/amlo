@@ -191,6 +191,29 @@ Follow-up:
 
 ---
 
+Date: 2026-03-24
+Area: admin credentials + sections password management
+Change:
+
+- Added backend endpoints in `server/routes/admin.ts`:
+  - `GET /api/admin/auth/profile`
+  - `PATCH /api/admin/auth/profile` (change admin email/password with current-password verification)
+  - `PATCH /api/admin/sections/password` (change sections password)
+- Updated `/api/admin/auth/me` to include `email`.
+- Added hashed sections password storage via setting key `sections_password_hash` with backward compatibility fallback to `SECTIONS_PASSWORD` env var.
+- Added client API methods in `client/src/lib/adminApi.ts` for profile and sections password updates.
+- Added sections password change UI in `client/src/pages/admin/SectionsVisibility.tsx`.
+- Added new Admin Account tab in `client/src/pages/admin/Settings.tsx` to update admin email/password from the panel.
+Reason:
+- User requested missing admin email/password change controls and missing sections password change option in admin panel.
+Impact:
+- Admin can now update own login email/password from settings UI.
+- Sections password can be rotated from `/admin/sections` without editing env files.
+Follow-up:
+- Optionally add localization keys for new account tab labels/messages in locale files.
+
+---
+
 Date: 2026-03-23
 Area: stage 23 provider control plane baseline (admin)
 Change:
@@ -1104,7 +1127,7 @@ Reason:
 Impact:
 - Production flow now includes reproducible signing and provider bootstrap with machine-readable outputs and safer dry-run defaults.
 Follow-up:
-- Run 
+- Run
 pm run prod:bootstrap:services:apply on production host with final real credentials and verify provider overview endpoint.
 
 ---
@@ -1116,7 +1139,7 @@ Change:
 - Fixed script/production-bootstrap-services.ts to load env before storage init via dynamic import.
 - Added explicit DB pool shutdown (pool.end()) after apply writes to avoid hanging process/timeouts.
 - Aligned local .env.production DATABASE_URL with active local Postgres credentials for execution verification.
-- Re-ran 
+- Re-ran
 pm run prod:bootstrap:services:apply and confirmed successful completion message.
 Reason:
 - Apply path previously either failed DB auth (placeholder URL) or completed writes then timed out due open pool.
@@ -1131,8 +1154,8 @@ Date: 2026-03-23
 Area: Traefik network alignment for mrco.live
 Change:
 
-- Updated docker-compose.yml to route through external Traefik network 	raefik-gemj_default.
-- Replaced 	raefik.docker.network labels from classitest_classify-network to 	raefik-gemj_default for pp and livekit.
+- Updated docker-compose.yml to route through external Traefik network  raefik-gemj_default.
+- Replaced  raefik.docker.network labels from classitest_classify-network to  raefik-gemj_default for pp and livekit.
 - Added explicit xpose: [\"3000\"] to pp for internal reverse-proxy discovery.
 - Kept no 80/443 host port publishing on application service.
 - Validated compose syntax with docker compose config (OK).
@@ -1141,7 +1164,7 @@ Reason:
 Impact:
 - App stack now matches Traefik-gateway pattern expected for shared host ingress.
 Follow-up:
-- Ensure mrco.live and www.mrco.live DNS A records point to 72.61.187.119.
+- Ensure mrco.live and <www.mrco.live> DNS A records point to 72.61.187.119.
 
 ---
 
@@ -1149,11 +1172,11 @@ Date: 2026-03-23
 Area: mobile artifact refresh execute
 Change:
 
-- Re-ran 
+- Re-ran
 pm run mobile:sign:artifacts to refresh signed APK/AAB artifacts.
 - New manifest generated at qa/results/signed-artifacts-manifest.json with updated hashes/sizes.
 - Updated .env.production values: APK_SHA256, APK_SIZE_BYTES, AAB_SHA256, AAB_SIZE_BYTES to match latest signed outputs.
-- Applied updates via 
+- Applied updates via
 pm run prod:bootstrap:services:apply successfully.
 Reason:
 - User requested to execute release replacement flow for current APK/AAB in download path.

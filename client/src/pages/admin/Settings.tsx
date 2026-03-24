@@ -9,7 +9,7 @@ import {
   Phone, Navigation, MapPin, Download, Link as LinkIcon, Info, Upload,
   Film,
 } from "lucide-react";
-import { adminSettings, adminFeatured, adminAnnouncementPopup, adminPricing } from "@/lib/adminApi";
+import { adminSettings, adminFeatured, adminAnnouncementPopup, adminPricing, adminAuth } from "@/lib/adminApi";
 import { worldAdminApi } from "@/lib/worldApi";
 import { useTranslation } from "react-i18next";
 
@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 // TYPES
 // ══════════════════════════════════════════════════════════
 
-type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds" | "dailyMissions" | "contentLimits";
+type TabId = "seo" | "aso" | "socialLogin" | "otp" | "branding" | "seoTexts" | "policies" | "featured" | "popup" | "pricing" | "milesPricing" | "worldPricing" | "appDownload" | "notificationSounds" | "dailyMissions" | "contentLimits" | "account";
 
 interface TabConfig {
   id: TabId;
@@ -2633,11 +2633,110 @@ function ContentLimitsTab({
   );
 }
 
+function AdminAccountTab() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  useEffect(() => {
+    adminAuth.profile()
+      .then((res) => {
+        if (res.success && res.data) {
+          setUsername(res.data.username || "");
+          setEmail(res.data.email || "");
+        }
+      })
+      .catch(() => setError("تعذر تحميل بيانات الحساب"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setError("");
+    const hasEmailChange = email.trim().length > 0;
+    const hasPasswordChange = newPassword.trim().length > 0;
+
+    if (!hasEmailChange && !hasPasswordChange) {
+      setError("أدخل بريدًا جديدًا أو كلمة مرور جديدة");
+      return;
+    }
+    if (!currentPassword.trim()) {
+      setError("أدخل كلمة المرور الحالية للتأكيد");
+      return;
+    }
+    if (hasPasswordChange && newPassword.length < 6) {
+      setError("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل");
+      return;
+    }
+    if (hasPasswordChange && newPassword !== confirmPassword) {
+      setError("تأكيد كلمة المرور غير مطابق");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await adminAuth.updateProfile({
+        currentPassword,
+        newEmail: email.trim(),
+        newPassword: hasPasswordChange ? newPassword : undefined,
+      });
+      if (res.success) {
+        setSaved(true);
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setTimeout(() => setSaved(false), 2000);
+      } else {
+        setError(res.message || "تعذر حفظ التغييرات");
+      }
+    } catch (err: any) {
+      setError(err?.message || "تعذر حفظ التغييرات");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl h-40 animate-pulse" />;
+  }
+
+  return (
+    <div className="space-y-5">
+      <SectionCard title="بيانات دخول الادمن" icon={UserCheck}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <InputField label="اسم المستخدم" value={username} onChange={setUsername} disabled />
+          <InputField label="الإيميل" value={email} onChange={setEmail} type="email" placeholder="admin@example.com" />
+          <PasswordField label="كلمة المرور الحالية (إلزامي للتأكيد)" value={currentPassword} onChange={setCurrentPassword} />
+          <PasswordField label="كلمة المرور الجديدة (اختياري)" value={newPassword} onChange={setNewPassword} />
+          <PasswordField label="تأكيد كلمة المرور الجديدة" value={confirmPassword} onChange={setConfirmPassword} />
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 text-rose-200 text-sm px-4 py-2">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <SaveButton saving={saving} saved={saved} onClick={handleSave} label="حفظ بيانات الدخول" />
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════
 // MAIN SETTINGS PAGE
 // ══════════════════════════════════════════════════════════
 
 const TABS: TabConfig[] = [
+  { id: "account", icon: UserCheck, labelKey: "admin.settings.tabs.account", fallbackLabel: "Admin Account" },
   { id: "seo", icon: Search, labelKey: "admin.settings.tabs.seo", fallbackLabel: "SEO" },
   { id: "aso", icon: Store, labelKey: "admin.settings.tabs.aso", fallbackLabel: "ASO" },
   { id: "socialLogin", icon: Users, labelKey: "admin.settings.tabs.socialLogin", fallbackLabel: "Social Login" },
@@ -2772,6 +2871,7 @@ export function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             {activeTab === "seo" && <SeoTab data={data?.seo} onSave={handleSaveSeo} />}
+            {activeTab === "account" && <AdminAccountTab />}
             {activeTab === "aso" && <AsoTab data={data?.aso} onSave={handleSaveAso} />}
             {activeTab === "socialLogin" && <SocialLoginTab data={data?.socialLogin} onSave={handleSaveSocialLogin} />}
             {activeTab === "otp" && <OtpTab data={data?.otp} onSave={handleSaveOtp} />}

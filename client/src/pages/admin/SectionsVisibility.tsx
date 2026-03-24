@@ -29,6 +29,10 @@ export function SectionsVisibilityPage() {
     const [loading, setLoading] = useState(true);
     const [toggling, setToggling] = useState<string | null>(null);
     const [password, setPassword] = useState("");
+    const [currentSectionsPassword, setCurrentSectionsPassword] = useState("");
+    const [newSectionsPassword, setNewSectionsPassword] = useState("");
+    const [confirmSectionsPassword, setConfirmSectionsPassword] = useState("");
+    const [changingPassword, setChangingPassword] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
 
@@ -61,6 +65,41 @@ export function SectionsVisibilityPage() {
             setError(err.message || t("admin.sectionsVisibility.error"));
         } finally {
             setToggling(null);
+        }
+    };
+
+    const handleChangeSectionsPassword = async () => {
+        if (!currentSectionsPassword.trim() || !newSectionsPassword.trim() || !confirmSectionsPassword.trim()) {
+            setError("يرجى إدخال كل الحقول المطلوبة");
+            return;
+        }
+        if (newSectionsPassword.length < 6) {
+            setError("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل");
+            return;
+        }
+        if (newSectionsPassword !== confirmSectionsPassword) {
+            setError("تأكيد كلمة المرور غير مطابق");
+            return;
+        }
+
+        setError("");
+        setSuccess("");
+        setChangingPassword(true);
+        try {
+            const res = await adminSections.changePassword(currentSectionsPassword, newSectionsPassword);
+            if (res.success) {
+                setSuccess(res.message || "تم تغيير كلمة مرور الأقسام بنجاح");
+                setCurrentSectionsPassword("");
+                setNewSectionsPassword("");
+                setConfirmSectionsPassword("");
+                setTimeout(() => setSuccess(""), 3000);
+            } else {
+                setError(res.message || "فشل تغيير كلمة المرور");
+            }
+        } catch (err: any) {
+            setError(err.message || "فشل تغيير كلمة المرور");
+        } finally {
+            setChangingPassword(false);
         }
     };
 
@@ -98,6 +137,43 @@ export function SectionsVisibilityPage() {
                     />
                 </div>
                 <p className="text-[11px] text-white/20 mt-2">{t("admin.sectionsVisibility.passwordHint")}</p>
+            </div>
+
+            <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5 space-y-4">
+                <h2 className="text-sm font-black text-white">تغيير كلمة مرور الأقسام</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input
+                        type="password"
+                        value={currentSectionsPassword}
+                        onChange={(e) => { setCurrentSectionsPassword(e.target.value); setError(""); }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                        placeholder="كلمة المرور الحالية"
+                    />
+                    <input
+                        type="password"
+                        value={newSectionsPassword}
+                        onChange={(e) => { setNewSectionsPassword(e.target.value); setError(""); }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                        placeholder="كلمة المرور الجديدة"
+                    />
+                    <input
+                        type="password"
+                        value={confirmSectionsPassword}
+                        onChange={(e) => { setConfirmSectionsPassword(e.target.value); setError(""); }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                        placeholder="تأكيد كلمة المرور"
+                    />
+                </div>
+                <div className="flex justify-end">
+                    <button
+                        onClick={handleChangeSectionsPassword}
+                        disabled={changingPassword}
+                        className="inline-flex items-center gap-2 px-4 h-10 rounded-xl bg-primary/20 border border-primary/30 text-primary text-sm font-bold hover:bg-primary/30 transition-all disabled:opacity-50"
+                    >
+                        {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                        تحديث كلمة مرور الأقسام
+                    </button>
+                </div>
             </div>
 
             {/* Messages */}
@@ -152,8 +228,8 @@ export function SectionsVisibilityPage() {
                                     onClick={() => handleToggle(section.key, visible)}
                                     disabled={isToggling}
                                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${visible
-                                            ? "bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20"
-                                            : "bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20"
+                                        ? "bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20"
+                                        : "bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20"
                                         } disabled:opacity-50`}
                                 >
                                     {isToggling ? (
