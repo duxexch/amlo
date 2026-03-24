@@ -126,6 +126,8 @@ function main() {
     validateNumericRange(env, "CLUSTER_WORKERS", 1, 8),
     validateNumericRange(env, "DB_POOL_MAX", 5, 80),
     validateNumericRange(env, "SOCKET_MAX_CONNECTIONS_PER_IP", 50, 5000),
+    validateNumericRange(env, "SOCIAL_WRITE_LIMIT_MAX", 10, 500),
+    validateNumericRange(env, "SOCIAL_WRITE_LIMIT_WINDOW_MS", 1000, 300000),
     validateNumericRange(env, "STREAM_MAX_PARTICIPANTS_PER_ROOM", 5, 5000),
     validateNumericRange(env, "STREAM_ROOM_EMPTY_TIMEOUT_SEC", 60, 3600),
     validateNumericRange(env, "STREAM_FOLLOWER_NOTIFY_LIMIT", 20, 5000),

@@ -1371,3 +1371,29 @@ Impact:
 - Project tracked configuration/docs are back to non-vixo domain setup suitable for server flow.
 Follow-up:
 - If local `.env` was manually modified for vixo testing, keep it aligned with server domain before run/deploy.
+
+---
+
+Date: 2026-03-24
+Area: dedicated high-power single-server production hardening
+Change:
+
+- Upgraded `.env.production.recommended` baseline for dedicated high-resource single-server runtime while preserving explicit consumption controls:
+  - `CLUSTER_WORKERS=4`
+  - `DB_POOL_MAX=35`, `DB_POOL_MIN=8`
+  - `SOCKET_MAX_CONNECTIONS_PER_IP=350`
+  - Added social write governance (`SOCIAL_WRITE_LIMIT_MAX`, `SOCIAL_WRITE_LIMIT_WINDOW_MS`, `SOCIAL_WRITE_LIMIT_DISABLED`)
+  - Raised stream controls to high-capacity baseline (`STREAM_MAX_PARTICIPANTS_PER_ROOM=220`, `STREAM_FOLLOWER_NOTIFY_LIMIT=1000`, `STREAM_AUTOSTART_BATCH_LIMIT=40`).
+- Extended `SINGLE-SERVER-ENV-PROFILES.md` with new `Profile E - Dedicated High-Power Server (Full Production)` and staged upgrade guardrail.
+- Expanded `SINGLE-SERVER-PRODUCTION-MASTER-PLAN.md` with:
+  - detailed compatibility matrix (phones + browsers + networks)
+  - AAB/APK production path and strict commands
+  - phased cutover timeline and rollback triggers.
+- Extended `script/validate-universal-env.ts` to validate social write controls in addition to existing RTC/mobile/email checks.
+- Executed validation command (`npm run prod:validate:universal:recommended`) and confirmed `RESULT: PASSED` with zero failed checks.
+Reason:
+- User requested a very large, production-oriented single-server setup where resource usage is controllable and live streaming is real and robust across all phone/network/browser scenarios.
+Impact:
+- Project now has a stronger default high-capacity production baseline plus stricter configuration gates and an execution-grade rollout plan.
+Follow-up:
+- Apply Profile B/C first, then Profile D/E only after matrix gates pass to avoid quality regressions during ramp-up.

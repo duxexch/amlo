@@ -195,3 +195,106 @@ When usage outgrows single server:
 - Move LiveKit to dedicated node first.
 - Keep app + db + redis separate by role.
 - Maintain the same capacity-control variables to reduce migration risk.
+
+## 13) Dedicated High-Power Baseline (Server-Only Project)
+
+Use this as the initial dedicated-server baseline once low-risk gates pass:
+
+- CLUSTER_WORKERS=4
+- DB_POOL_MAX=35
+- DB_POOL_MIN=8
+- SOCKET_MAX_CONNECTIONS_PER_IP=350
+- SOCIAL_WRITE_LIMIT_MAX=90
+- STREAM_MAX_PARTICIPANTS_PER_ROOM=220
+- STREAM_FOLLOWER_NOTIFY_LIMIT=1000
+- STREAM_AUTOSTART_BATCH_LIMIT=40
+
+Control policy:
+
+- Never raise more than 1-2 knobs in the same release window.
+- After each increase, run fixed-duration stream tests and compare CPU/memory/packet-loss deltas.
+- If P95 stream join latency rises more than 25%, rollback to the previous profile.
+
+## 14) Real Compatibility Matrix (Phones + Browsers + Networks)
+
+Device coverage target:
+
+- Android 8/9/10/11/12/13/14 (low, mid, flagship)
+- iOS 16/17/18
+
+Browser coverage target:
+
+- Android Chrome stable + one previous major
+- Android WebView (TWA)
+- iOS Safari stable + one previous major
+- Desktop Chrome, Edge, Firefox, Safari
+
+Network coverage target:
+
+- Home Wi-Fi (2.4 GHz and 5 GHz)
+- Mobile 4G and 5G from at least 2 carriers
+- Corporate/VPN restricted network
+
+Pass criteria per matrix cell:
+
+- Stream publish success in less than 8 seconds
+- Stream join success in less than 6 seconds
+- No forced reconnect loop within 10-minute session
+- Audio continuity and acceptable video quality
+
+## 15) AAB/APK Production Readiness Path
+
+Release workflow:
+
+1. Build signed APK/AAB artifacts.
+2. Publish metadata (version/build/hash/size).
+3. Run lifecycle audits (install/upgrade/uninstall/reinstall).
+4. Run compatibility/call/reliability audits in strict mode.
+5. Run final GO/NO-GO gate.
+
+Mandatory commands before publishing:
+
+- `npm run mobile:sign:artifacts`
+- `npm run qa:lifecycle:audit:strict`
+- `npm run qa:compat:audit:strict`
+- `npm run qa:call:audit:strict`
+- `npm run qa:reliability:audit:strict`
+- `npm run qa:go-no-go`
+
+## 16) Operations Timeline (Production Cutover)
+
+Wave 1 (Day 0):
+
+- Apply Profile B.
+- Verify health + TURN relay traffic + 5-user live test.
+
+Wave 2 (Day 1-2):
+
+- Apply Profile C.
+- Run 10-user and 20-user tests across mixed networks.
+
+Wave 3 (Day 3-5):
+
+- Apply Profile D for universal compatibility validation.
+- Execute full phone/network/browser matrix.
+
+Wave 4 (After pass):
+
+- Apply Profile E for dedicated high-power server.
+- Keep hard rollback path to Profile C if quality regresses.
+
+## 17) Rollback Triggers and Safety Limits
+
+Immediate rollback trigger examples:
+
+- Stream early-close rate > 3% for 15 minutes.
+- TURN allocation failures spike continuously.
+- CPU > 90% for 10 minutes with rising latency.
+- Container restart loop appears.
+
+Rollback action order:
+
+1. Reduce `STREAM_MAX_PARTICIPANTS_PER_ROOM` by 20-30%.
+2. Reduce `STREAM_AUTOSTART_BATCH_LIMIT`.
+3. Reduce `CLUSTER_WORKERS` only if process thrashing appears.
+4. Re-run 10-minute validation stream before reopening full traffic.
