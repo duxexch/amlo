@@ -78,3 +78,8 @@ AAB_URL=https://mrco.live/download/ablox.aab
 3. Run 10-minute live test with 5 concurrent users from different networks.
 4. If stable, move up one profile step only.
 5. For universal compatibility target, switch to Profile D only after Gate 2 and Gate 3 pass.
+6. Validate env before go-live:
+
+```bash
+npm run prod:validate:universal -- --env .env
+```

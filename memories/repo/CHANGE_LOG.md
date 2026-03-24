@@ -1317,3 +1317,22 @@ Impact:
 - Operations now have a direct high-strength profile to apply when targeting widest compatibility, with TURN transport layering designed for varied network restrictions.
 Follow-up:
 - On production host, set real `TURN_EXTERNAL_IP`, keep DNS alignment (`mrco.live`, `lk.mrco.live`, `turn.mrco.live`), then run universal network validation runbook before load increase.
+
+---
+
+Date: 2026-03-24
+Area: universal production env validation automation
+Change:
+
+- Added executable validator `script/validate-universal-env.ts` to enforce critical production compatibility settings for browsers + APK/AAB + mixed networks.
+- Added npm commands:
+  - `prod:validate:universal`
+  - `prod:validate:universal:recommended`
+- Updated `SINGLE-SERVER-ENV-PROFILES.md` apply procedure to include mandatory pre-go-live env validation command.
+- Executed validation on `.env.production.recommended` and confirmed `RESULT: PASSED`.
+Reason:
+- User requested continuation toward very strong production readiness covering full browser/mobile/network compatibility; this adds automated gate checks to prevent misconfiguration before launch.
+Impact:
+- Operators can now fail fast on missing or weak universal compatibility settings instead of discovering issues during live traffic.
+Follow-up:
+- Run `npm run prod:validate:universal -- --env .env` on the real production host before each release.
