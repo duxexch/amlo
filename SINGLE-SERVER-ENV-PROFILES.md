@@ -142,3 +142,18 @@ npm run prod:gate:single-server:strict -- --env .env
 1. For dedicated high-power deployment, you can start from:
 
 `.env.production.high-power.template`
+
+## One Command Production Setup + Run
+
+If `.env.production` does not exist, the command creates it from `.env.production.high-power.template`.
+If `.env.production` already exists, the command backfills missing required keys and normalizes invalid production limits from the same template.
+
+```bash
+npm run prod:one-command
+```
+
+Dry-run (validate + build only, without starting server):
+
+```bash
+npm run prod:one-command:dry
+```

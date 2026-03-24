@@ -37,6 +37,8 @@
     "mobile:sign:artifacts": "tsx script/sign-mobile-artifacts.ts",
     "prod:bootstrap:services": "tsx script/production-bootstrap-services.ts",
     "prod:bootstrap:services:apply": "tsx script/production-bootstrap-services.ts --execute",
+    "prod:one-command": "tsx script/prod-one-command.ts",
+    "prod:one-command:dry": "tsx script/prod-one-command.ts --dry-run",
     "prod:validate:universal": "tsx script/validate-universal-env.ts",
     "prod:validate:universal:recommended": "tsx script/validate-universal-env.ts --env .env.production.recommended",
     "prod:validate:universal:strict": "tsx script/validate-universal-env.ts --strict-secrets",
