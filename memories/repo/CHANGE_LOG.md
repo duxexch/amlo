@@ -1397,3 +1397,27 @@ Impact:
 - Project now has a stronger default high-capacity production baseline plus stricter configuration gates and an execution-grade rollout plan.
 Follow-up:
 - Apply Profile B/C first, then Profile D/E only after matrix gates pass to avoid quality regressions during ramp-up.
+
+---
+
+Date: 2026-03-24
+Area: single-server production gate hardening (template + strict secret mode)
+Change:
+
+- Added dedicated template `.env.production.high-power.template` for high-capacity single-server deployment (copy-and-fill format).
+- Enhanced `script/validate-universal-env.ts` with:
+  - boolean checks for `APP_DOWNLOAD_ENABLED`, `APK_ENABLED`, `AAB_ENABLED`, `SOCKET_WEBSOCKET_ONLY`, `SOCIAL_WRITE_LIMIT_DISABLED`
+  - strict secret validation mode (`--strict-secrets`) for real production `.env`
+  - template-safe mode for recommended/template files.
+- Added npm command `prod:validate:universal:strict`.
+- Added npm command `prod:gate:single-server` for one-command gate (`prod:validate:universal` + `readiness:gate`).
+- Updated `SINGLE-SERVER-ENV-PROFILES.md` with strict validation command and high-power template reference.
+- Validation run results:
+  - `prod:validate:universal:recommended` => PASSED
+  - `prod:validate:universal:strict -- --env .env.production.high-power.template` => FAILED intentionally on placeholder secrets (expected behavior).
+Reason:
+- User requested continuation toward complete production readiness for a dedicated single server with controllable resource usage and reliable real streaming/mobile rollout.
+Impact:
+- Team can now separate template validation from strict production-secret enforcement and reduce go-live misconfiguration risk.
+Follow-up:
+- Before go-live, copy high-power template to real `.env`, replace all secret placeholders, then run strict validator.

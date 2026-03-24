@@ -86,6 +86,35 @@ function validateNumericRange(
   return { key, valid: true };
 }
 
+function validateBoolean(env: Record<string, string>, key: string): Check {
+  const raw = (env[key] || "").trim().toLowerCase();
+  if (!raw) return { key, valid: false, message: "missing or empty" };
+  if (raw !== "true" && raw !== "false") {
+    return { key, valid: false, message: "must be true or false" };
+  }
+  return { key, valid: true };
+}
+
+function validateBooleanTrue(env: Record<string, string>, key: string): Check {
+  const raw = (env[key] || "").trim().toLowerCase();
+  if (raw !== "true") {
+    return { key, valid: false, message: "must be true for production rollout" };
+  }
+  return { key, valid: true };
+}
+
+function validateSecretLike(env: Record<string, string>, key: string, minLength: number): Check {
+  const raw = (env[key] || "").trim();
+  if (!raw) return { key, valid: false, message: "missing or empty" };
+  if (raw.startsWith("REPLACE_") || raw.startsWith("CHANGE_ME")) {
+    return { key, valid: false, message: "placeholder value not allowed" };
+  }
+  if (raw.length < minLength) {
+    return { key, valid: false, message: `too short (min ${minLength})` };
+  }
+  return { key, valid: true };
+}
+
 function validateOtpEmailConfig(env: Record<string, string>): Check[] {
   const otpEnabled = (env.OTP_ENABLED || "").toLowerCase() === "true";
   const otpProvider = (env.OTP_PROVIDER || "").toLowerCase();
@@ -108,6 +137,7 @@ function validateOtpEmailConfig(env: Record<string, string>): Check[] {
 function main() {
   const args = process.argv.slice(2);
   const envArgIndex = args.findIndex((arg) => arg === "--env");
+  const strictSecrets = args.includes("--strict-secrets");
   const envPath = envArgIndex >= 0 && args[envArgIndex + 1]
     ? args[envArgIndex + 1]
     : ".env.production.recommended";
@@ -115,6 +145,24 @@ function main() {
   const env = readEnvFile(envPath);
 
   const checks: Check[] = [
+    validateBooleanTrue(env, "APP_DOWNLOAD_ENABLED"),
+    validateBooleanTrue(env, "APK_ENABLED"),
+    validateBooleanTrue(env, "AAB_ENABLED"),
+    validateBoolean(env, "SOCKET_WEBSOCKET_ONLY"),
+    validateBoolean(env, "SOCIAL_WRITE_LIMIT_DISABLED"),
+    ...(strictSecrets
+      ? [
+        validateSecretLike(env, "SESSION_SECRET", 32),
+        validateSecretLike(env, "JWT_SECRET", 32),
+        validateSecretLike(env, "ENCRYPTION_SECRET", 32),
+        validateSecretLike(env, "TURN_SECRET", 16),
+      ]
+      : [
+        hasNonEmpty(env, "SESSION_SECRET"),
+        hasNonEmpty(env, "JWT_SECRET"),
+        hasNonEmpty(env, "ENCRYPTION_SECRET"),
+        hasNonEmpty(env, "TURN_SECRET"),
+      ]),
     hasNonEmpty(env, "LIVEKIT_PUBLIC_URL"),
     hasNonEmpty(env, "LIVEKIT_URL"),
     hasNonEmpty(env, "TURN_EXTERNAL_IP"),
@@ -139,6 +187,7 @@ function main() {
 
   process.stdout.write(`=== Universal Env Validation ===\n`);
   process.stdout.write(`Target file: ${path.resolve(envPath)}\n`);
+  process.stdout.write(`Secret mode: ${strictSecrets ? "strict" : "template-safe"}\n`);
   process.stdout.write(`Checks: ${checks.length}, Failed: ${failed.length}\n\n`);
 
   for (const c of checks) {

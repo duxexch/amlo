@@ -120,3 +120,19 @@ AAB_URL=https://mrco.live/download/ablox.aab
 ```bash
 npm run prod:validate:universal -- --env .env
 ```
+
+For real production secrets validation (no placeholders allowed):
+
+```bash
+npm run prod:validate:universal:strict -- --env .env
+```
+
+1. Run single-server production gate:
+
+```bash
+npm run prod:gate:single-server
+```
+
+1. For dedicated high-power deployment, you can start from:
+
+`.env.production.high-power.template`

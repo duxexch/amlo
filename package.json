@@ -38,6 +38,8 @@
     "prod:bootstrap:services:apply": "tsx script/production-bootstrap-services.ts --execute",
     "prod:validate:universal": "tsx script/validate-universal-env.ts",
     "prod:validate:universal:recommended": "tsx script/validate-universal-env.ts --env .env.production.recommended",
+    "prod:validate:universal:strict": "tsx script/validate-universal-env.ts --strict-secrets",
+    "prod:gate:single-server": "npm run prod:validate:universal && npm run readiness:gate",
     "pwa:icons": "node script/generate-icons.cjs",
     "brand:generate": "node script/generate-brand.cjs",
     "signing:setup": "bash script/setup-signing.sh",
