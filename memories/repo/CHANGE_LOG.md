@@ -1251,3 +1251,51 @@ Impact:
 - Download artifacts and published app-download metadata are now aligned to latest signed binaries.
 Follow-up:
 - If deploying to server, sync updated client/public/download/* and .env.production, then restart app service.
+
+---
+
+Date: 2026-03-24
+Area: single-server production control plan + stream runtime capacity knobs
+Change:
+
+- Added `SINGLE-SERVER-PRODUCTION-MASTER-PLAN.md` with a full single-server production execution model: capacity profiles, cross-device/network/browser compatibility gates, TURN/firewall baseline, staged load validation, observability thresholds, and APK/AAB readiness flow.
+- Updated `server/utils/livekit.ts` with env-driven stream room limits:
+  - `STREAM_MAX_PARTICIPANTS_PER_ROOM`
+  - `STREAM_ROOM_EMPTY_TIMEOUT_SEC`
+  - Added helper `getLiveKitRuntimeLimits()` and wired defaults into `createLiveKitRoom(...)`.
+- Updated `server/routes/social.ts` to replace hardcoded stream limits with runtime env controls:
+  - `STREAM_FOLLOWER_NOTIFY_LIMIT` for follower notification fan-out query cap.
+  - `STREAM_AUTOSTART_BATCH_LIMIT` for scheduled auto-start batch size.
+  - Switched room creation calls to use runtime limits from LiveKit utility.
+- Updated `.env.example` to document and expose the new operational knobs, plus conservative `CLUSTER_WORKERS=2` default for controlled single-server launch.
+Reason:
+- User requested a large, production-focused single-server strategy with controllable resource usage and the ability to adjust concurrent stream behavior without code redeploys.
+Impact:
+- Stream scalability and load pressure controls are now configurable at runtime through environment variables.
+- Operations team can tune participant caps, room lifecycle, notification fan-out, and auto-start throughput per server profile (safe launch vs growth) using env-only changes.
+Follow-up:
+- Apply selected profile values in production `.env`, restart app/livekit services, and run 5-user cross-network validation before increasing limits.
+
+---
+
+Date: 2026-03-24
+Area: single-server production env baselines
+Change:
+
+- Updated `.env.production.recommended` with safer single-server baseline values for operational control:
+  - `CLUSTER_WORKERS=2`
+  - `DB_POOL_MAX=20`
+  - `SOCKET_MAX_CONNECTIONS_PER_IP=200`
+  - Added stream knobs (`STREAM_MAX_PARTICIPANTS_PER_ROOM`, `STREAM_ROOM_EMPTY_TIMEOUT_SEC`, `STREAM_FOLLOWER_NOTIFY_LIMIT`, `STREAM_AUTOSTART_BATCH_LIMIT`).
+- Added `SINGLE-SERVER-ENV-PROFILES.md` containing copy-paste profiles for:
+  - Safe Launch
+  - Controlled Growth
+  - High Capacity single-server mode
+  - Plus a step-by-step apply procedure.
+Reason:
+- User requested continuation with practical, controllable single-server production operations and direct ability to tune user capacity quickly.
+Impact:
+- Operations now have immediate env presets to scale up gradually without code edits.
+- Baseline defaults are more conservative and safer against sudden overload.
+Follow-up:
+- Apply one profile in production `.env` and validate 5-user then 10-user multi-network stream tests before raising limits.

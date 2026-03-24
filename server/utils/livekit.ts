@@ -28,6 +28,21 @@ function getLiveKitConfig() {
   };
 }
 
+function parseIntEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+export function getLiveKitRuntimeLimits() {
+  return {
+    roomEmptyTimeout: parseIntEnv("STREAM_ROOM_EMPTY_TIMEOUT_SEC", 300, 60, 3600),
+    roomMaxParticipants: parseIntEnv("STREAM_MAX_PARTICIPANTS_PER_ROOM", 120, 5, 5000),
+  };
+}
+
 /** Publicly accessible LiveKit WebSocket URL (for clients) */
 export function getLiveKitPublicUrl(): string {
   return getLiveKitConfig().publicUrl;
@@ -115,15 +130,19 @@ export async function generateLiveKitToken(
  */
 export async function createLiveKitRoom(
   roomName: string,
-  emptyTimeout: number = 300,
-  maxParticipants: number = 500
+  emptyTimeout?: number,
+  maxParticipants?: number
 ): Promise<void> {
+  const limits = getLiveKitRuntimeLimits();
+  const resolvedEmptyTimeout = emptyTimeout ?? limits.roomEmptyTimeout;
+  const resolvedMaxParticipants = maxParticipants ?? limits.roomMaxParticipants;
+
   try {
     const svc = getRoomService();
     await svc.createRoom({
       name: roomName,
-      emptyTimeout,
-      maxParticipants,
+      emptyTimeout: resolvedEmptyTimeout,
+      maxParticipants: resolvedMaxParticipants,
     });
   } catch (err: any) {
     // Room might already exist — that's fine

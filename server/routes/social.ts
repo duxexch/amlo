@@ -36,6 +36,7 @@ import {
   deleteLiveKitRoom,
   updateParticipantPermissions,
   removeParticipant,
+  getLiveKitRuntimeLimits,
 } from "../utils/livekit";
 
 // ── Shared helpers (centralized in socialHelpers.ts) ──
@@ -60,6 +61,17 @@ let lastStreamCacheInvalidationMs = 0;
 let liveFlagsCache: { value: LiveFeatureFlags; expiresAt: number } | null = null;
 let dailyMissionsFlagCache: { value: boolean; expiresAt: number } | null = null;
 const lockSkipStreak = new Map<number, number>();
+
+function parsePositiveIntEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+const STREAM_FOLLOWER_NOTIFY_LIMIT = parsePositiveIntEnv("STREAM_FOLLOWER_NOTIFY_LIMIT", 500, 20, 5000);
+const STREAM_AUTOSTART_BATCH_LIMIT = parsePositiveIntEnv("STREAM_AUTOSTART_BATCH_LIMIT", 20, 1, 200);
 
 function lockMetricKeys(lockKey: number): { acquired: SocialStabilityMetricKey; skipped: SocialStabilityMetricKey } | null {
   if (lockKey === LOCK_KEY_SCHEDULED_STREAMS) {
@@ -4686,7 +4698,7 @@ router.post("/streams/create", async (req: Request, res: Response) => {
       // Add host + room only for active streams
       await storage.addStreamViewer(stream.id, userId, "host");
       try {
-        await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
+        await createLiveKitRoom(`stream-${stream.id}`);
       } catch (lkErr: any) {
         socialLog.warn({ err: lkErr }, "LiveKit room creation failed (non-blocking)");
       }
@@ -4699,7 +4711,7 @@ router.post("/streams/create", async (req: Request, res: Response) => {
     if (!isScheduled && !isAnon && io && db) {
       try {
         const followers = await db.select({ followerId: schema.userFollows.followerId })
-          .from(schema.userFollows).where(eq(schema.userFollows.followingId, userId)).limit(500);
+          .from(schema.userFollows).where(eq(schema.userFollows.followingId, userId)).limit(STREAM_FOLLOWER_NOTIFY_LIMIT);
         const [hostUser] = await db.select({ displayName: schema.users.displayName, avatar: schema.users.avatar })
           .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
         for (const f of followers) {
@@ -5919,7 +5931,7 @@ setInterval(async () => {
         eq(schema.streams.status, "scheduled"),
         sql`${schema.streams.scheduledAt} <= NOW()`,
       ))
-      .limit(20);
+      .limit(STREAM_AUTOSTART_BATCH_LIMIT);
 
     for (const stream of dueStreams) {
       try {
@@ -5941,12 +5953,12 @@ setInterval(async () => {
 
         // Create LiveKit room
         try {
-          await createLiveKitRoom(`stream-${stream.id}`, 300, 500);
+          await createLiveKitRoom(`stream-${stream.id}`);
         } catch { /* non-blocking */ }
 
         // Notify followers
         const followers = await db.select({ followerId: schema.userFollows.followerId })
-          .from(schema.userFollows).where(eq(schema.userFollows.followingId, stream.userId)).limit(500);
+          .from(schema.userFollows).where(eq(schema.userFollows.followingId, stream.userId)).limit(STREAM_FOLLOWER_NOTIFY_LIMIT);
         const [hostUser] = await db.select({ displayName: schema.users.displayName, avatar: schema.users.avatar })
           .from(schema.users).where(eq(schema.users.id, stream.userId)).limit(1);
 
@@ -5960,7 +5972,16 @@ setInterval(async () => {
           });
         }
 
-        socialLog.info({ streamId: stream.id, userId: stream.userId }, "Scheduled stream auto-started");
+        const limits = getLiveKitRuntimeLimits();
+        socialLog.info(
+          {
+            streamId: stream.id,
+            userId: stream.userId,
+            roomMaxParticipants: limits.roomMaxParticipants,
+            roomEmptyTimeout: limits.roomEmptyTimeout,
+          },
+          "Scheduled stream auto-started"
+        );
         stabilityMetrics.streamAutoStartSucceeded += 1;
       } catch (err: any) {
         stabilityMetrics.streamAutoStartFailed += 1;

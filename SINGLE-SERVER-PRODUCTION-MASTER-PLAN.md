@@ -1,0 +1,197 @@
+# Ablox Single-Server Production Master Plan
+
+Date: 2026-03-24
+Scope: Dedicated single server with high resources, controllable consumption, and real live streaming reliability across phones, networks, and browsers.
+
+## 1) Objectives
+
+- Deliver real live streaming (not fake) with stable host + viewers.
+- Keep strict control over CPU, RAM, network, and concurrent users.
+- Run full project on one dedicated server with upgrade path.
+- Prepare mobile distribution pipeline for AAB/APK while preserving live streaming quality.
+
+## 2) Operating Principles
+
+- Capacity-first: every public feature has explicit limits.
+- Quality by profile: small/medium/high quality presets switch by load and network quality.
+- Blast-radius control: reject overload early, do not let server collapse.
+- Measurable SLOs: success is based on metrics, not subjective feeling.
+
+## 3) Capacity Control Levers (Now in Project)
+
+Environment controls available:
+
+- CLUSTER_WORKERS
+- DB_POOL_MAX
+- DB_POOL_MIN
+- SOCKET_MAX_CONNECTIONS_PER_IP
+- SOCKET_CONNECTION_WINDOW_MS
+- SOCIAL_WRITE_LIMIT_MAX
+- SOCIAL_WRITE_LIMIT_WINDOW_MS
+- STREAM_MAX_PARTICIPANTS_PER_ROOM
+- STREAM_ROOM_EMPTY_TIMEOUT_SEC
+- STREAM_FOLLOWER_NOTIFY_LIMIT
+- STREAM_AUTOSTART_BATCH_LIMIT
+
+Streaming transport controls:
+
+- LIVEKIT_TURN_SERVERS
+- TURN_EXTERNAL_IP
+- TURN_TLS_LISTEN_PORT
+- TURN_SECRET
+
+## 4) Recommended Runtime Profiles
+
+### Profile A: Safe Launch (5 to 30 users)
+
+- CLUSTER_WORKERS=1
+- STREAM_MAX_PARTICIPANTS_PER_ROOM=20
+- STREAM_ROOM_EMPTY_TIMEOUT_SEC=180
+- DB_POOL_MAX=10
+- SOCKET_MAX_CONNECTIONS_PER_IP=80
+- LOG_LEVEL=warn
+
+### Profile B: Controlled Growth (30 to 150 users)
+
+- CLUSTER_WORKERS=2
+- STREAM_MAX_PARTICIPANTS_PER_ROOM=80
+- STREAM_ROOM_EMPTY_TIMEOUT_SEC=240
+- DB_POOL_MAX=20
+- SOCKET_MAX_CONNECTIONS_PER_IP=150
+- LOG_LEVEL=info
+
+### Profile C: Dedicated Powerful Server (150+ users)
+
+- CLUSTER_WORKERS=3 or 4 (depends on vCPU)
+- STREAM_MAX_PARTICIPANTS_PER_ROOM=120 to 200
+- STREAM_ROOM_EMPTY_TIMEOUT_SEC=300
+- DB_POOL_MAX=30 (with DB monitoring)
+- SOCKET_MAX_CONNECTIONS_PER_IP=200+
+- LOG_LEVEL=info
+
+## 5) Browser and Network Compatibility Coverage
+
+Must support:
+
+- Android Chrome (multiple versions)
+- Android WebView inside TWA
+- iOS Safari (latest and one previous major)
+- Desktop Chrome, Edge, Firefox, Safari
+
+Network classes:
+
+- Home Wi-Fi
+- 4G and 5G (multiple carriers)
+- Corporate / restricted networks
+
+TURN and firewall baseline:
+
+- TCP: 80, 443, 3478, 5349
+- UDP: 3478, 5349, 49152-49999, 50000-50100
+
+Recommended TURN URIs:
+
+- turn:turn.domain:3478?transport=udp
+- turn:turn.domain:3478?transport=tcp
+- turns:turn.domain:5349?transport=tcp
+
+Optional strict-network fallback:
+
+- turns:turn.domain:443?transport=tcp (only with dedicated TURN endpoint/IP)
+
+## 6) Production Readiness Gates
+
+Gate 1: Core Health
+
+- app/livekit/coturn/postgres/redis are healthy
+- /api/health success
+- token generation success for host and viewer
+
+Gate 2: Connectivity
+
+- tcpdump confirms TURN/relay traffic during real attempts
+- coturn logs show relay allocations
+- live stream does not close immediately
+
+Gate 3: Stability
+
+- 10-minute stream with host + 4 viewers without repeated disconnects
+- CPU average below 75% and peaks below 90%
+- memory stable with no OOM restart
+
+Gate 4: Scale Step
+
+- 30-minute stream with host + 9 viewers
+- no major packet loss spikes causing continuous reconnect
+
+## 7) AAB/APK Delivery Plan (Live Streaming Safe)
+
+Build variants:
+
+- beta stream profile (more diagnostics, conservative quality)
+- production stream profile (balanced quality)
+
+Pre-release matrix:
+
+- Android 10/11/12/13/14
+- low-end, mid-range, flagship devices
+- at least two mobile carriers
+
+Must-pass mobile tests:
+
+- mic/camera permission flow
+- background/foreground transitions
+- rotation and reconnect behavior
+- stream join latency and stability
+
+## 8) Observability and Alerting
+
+Track at minimum:
+
+- stream start success rate
+- token generation failures
+- room auto-start failures
+- active stream count
+- per-room participant count
+- relay traffic presence
+- CPU, memory, load average
+
+Alerts:
+
+- no TURN traffic during active stream attempts
+- repeated stream early close events
+- high CPU over threshold for 5+ minutes
+- container restart loop
+
+## 9) Failure Policies
+
+- Overload mode: temporarily cap new stream joins by reducing room participant limits.
+- Degrade mode: force lower quality in clients on poor conditions.
+- Recovery mode: recreate only real-time containers, not full stack restart.
+
+## 10) Execution Order (High Priority)
+
+1. Lock safe launch profile in .env
+2. Validate firewall and TURN traffic
+3. Run 5-user live test (10 minutes)
+4. Run 10-user test (30 minutes)
+5. Tune limits with evidence
+6. Freeze production baseline
+7. Start AAB/APK beta rollout
+
+## 11) Acceptance Criteria
+
+Project is considered production-ready on one server when:
+
+- 5 concurrent live participants are stable and repeatable.
+- 10-participant test passes without critical failures.
+- Metrics and alerts are active.
+- Capacity controls are documented and adjustable without code changes.
+
+## 12) Next Upgrade Path
+
+When usage outgrows single server:
+
+- Move LiveKit to dedicated node first.
+- Keep app + db + redis separate by role.
+- Maintain the same capacity-control variables to reduce migration risk.
