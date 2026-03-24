@@ -38,9 +38,43 @@ STREAM_FOLLOWER_NOTIFY_LIMIT=800
 STREAM_AUTOSTART_BATCH_LIMIT=30
 ```
 
+## Profile D - Universal Compatibility (Browsers + APK/AAB + Restricted Networks)
+
+```env
+CLUSTER_WORKERS=3
+DB_POOL_MAX=30
+SOCKET_MAX_CONNECTIONS_PER_IP=300
+SOCKET_CONNECTION_WINDOW_MS=60000
+SOCKET_WEBSOCKET_ONLY=true
+
+STREAM_MAX_PARTICIPANTS_PER_ROOM=180
+STREAM_ROOM_EMPTY_TIMEOUT_SEC=300
+STREAM_FOLLOWER_NOTIFY_LIMIT=800
+STREAM_AUTOSTART_BATCH_LIMIT=30
+
+LOG_LEVEL=info
+CORS_ORIGIN=https://mrco.live,https://www.mrco.live
+
+LIVEKIT_PUBLIC_URL=wss://lk.mrco.live
+LIVEKIT_URL=ws://livekit:7880
+TURN_EXTERNAL_IP=REPLACE_WITH_PUBLIC_IPV4
+TURN_TLS_LISTEN_PORT=5349
+LIVEKIT_TURN_SERVERS=turn:turn.mrco.live:3478?transport=udp,turn:turn.mrco.live:3478?transport=tcp,turns:turn.mrco.live:5349?transport=tcp
+# Add this only if TURN 443 is on dedicated endpoint/IP (not shared with web TLS)
+# LIVEKIT_TURN_SERVERS=turn:turn.mrco.live:3478?transport=udp,turn:turn.mrco.live:3478?transport=tcp,turns:turn.mrco.live:5349?transport=tcp,turns:turn.mrco.live:443?transport=tcp
+LIVEKIT_STUN_SERVERS=stun:stun.l.google.com:19302,stun:turn.mrco.live:3478
+
+APP_DOWNLOAD_ENABLED=true
+APK_ENABLED=true
+AAB_ENABLED=true
+APK_URL=https://mrco.live/download/ablox.apk
+AAB_URL=https://mrco.live/download/ablox.aab
+```
+
 ## Apply Procedure
 
 1. Copy one profile to production `.env`.
 2. Restart app and livekit services.
 3. Run 10-minute live test with 5 concurrent users from different networks.
 4. If stable, move up one profile step only.
+5. For universal compatibility target, switch to Profile D only after Gate 2 and Gate 3 pass.

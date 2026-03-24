@@ -1299,3 +1299,21 @@ Impact:
 - Baseline defaults are more conservative and safer against sudden overload.
 Follow-up:
 - Apply one profile in production `.env` and validate 5-user then 10-user multi-network stream tests before raising limits.
+
+---
+
+Date: 2026-03-24
+Area: universal production compatibility presets (browser + APK/AAB + network diversity)
+Change:
+
+- Updated `.env.production.recommended` with explicit production compatibility defaults:
+  - `CORS_ORIGIN` supporting root and www domains.
+  - LiveKit/TURN transport variables for mixed network conditions (`LIVEKIT_PUBLIC_URL`, `LIVEKIT_URL`, `TURN_EXTERNAL_IP`, `TURN_TLS_LISTEN_PORT`, `LIVEKIT_TURN_SERVERS`, `LIVEKIT_STUN_SERVERS`).
+  - Added stable production logging baseline (`LOG_LEVEL=info`).
+- Extended `SINGLE-SERVER-ENV-PROFILES.md` with new `Profile D - Universal Compatibility` for stronger browser/mobile/restricted-network coverage and direct APK/AAB publication toggles.
+Reason:
+- User requested very strong production settings that support full browser operation, full APK/AAB operation, and broad network compatibility across phone/device/network types.
+Impact:
+- Operations now have a direct high-strength profile to apply when targeting widest compatibility, with TURN transport layering designed for varied network restrictions.
+Follow-up:
+- On production host, set real `TURN_EXTERNAL_IP`, keep DNS alignment (`mrco.live`, `lk.mrco.live`, `turn.mrco.live`), then run universal network validation runbook before load increase.
