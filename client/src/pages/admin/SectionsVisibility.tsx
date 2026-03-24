@@ -123,56 +123,73 @@ export function SectionsVisibilityPage() {
                 <p className="text-white/40 text-sm mt-1">{t("admin.sectionsVisibility.subtitle")}</p>
             </div>
 
-            {/* Password Input */}
-            <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5">
-                <label className="text-sm font-bold text-white/60 mb-2 block">{t("admin.sectionsVisibility.passwordLabel")}</label>
-                <div className="relative max-w-md">
-                    <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20" />
-                    <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => { setPassword(e.target.value); setError(""); }}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pr-12 pl-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                        placeholder="••••••••"
-                    />
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5 space-y-3">
+                    <div>
+                        <h2 className="text-sm font-black text-white">كلمة مرور التحكم بالأقسام</h2>
+                        <p className="text-[11px] text-white/30 mt-1">تُستخدم هذه الكلمة عند إظهار أو إخفاء أي قسم.</p>
+                    </div>
+                    <label className="text-xs font-bold text-white/50 block">{t("admin.sectionsVisibility.passwordLabel")}</label>
+                    <div className="relative max-w-xl">
+                        <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20" />
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pr-12 pl-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                            placeholder="••••••••"
+                        />
+                    </div>
+                    <p className="text-[11px] text-white/20">{t("admin.sectionsVisibility.passwordHint")}</p>
                 </div>
-                <p className="text-[11px] text-white/20 mt-2">{t("admin.sectionsVisibility.passwordHint")}</p>
-            </div>
 
-            <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5 space-y-4">
-                <h2 className="text-sm font-black text-white">تغيير كلمة مرور الأقسام</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <input
-                        type="password"
-                        value={currentSectionsPassword}
-                        onChange={(e) => { setCurrentSectionsPassword(e.target.value); setError(""); }}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                        placeholder="كلمة المرور الحالية"
-                    />
-                    <input
-                        type="password"
-                        value={newSectionsPassword}
-                        onChange={(e) => { setNewSectionsPassword(e.target.value); setError(""); }}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                        placeholder="كلمة المرور الجديدة"
-                    />
-                    <input
-                        type="password"
-                        value={confirmSectionsPassword}
-                        onChange={(e) => { setConfirmSectionsPassword(e.target.value); setError(""); }}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
-                        placeholder="تأكيد كلمة المرور"
-                    />
-                </div>
-                <div className="flex justify-end">
-                    <button
-                        onClick={handleChangeSectionsPassword}
-                        disabled={changingPassword}
-                        className="inline-flex items-center gap-2 px-4 h-10 rounded-xl bg-primary/20 border border-primary/30 text-primary text-sm font-bold hover:bg-primary/30 transition-all disabled:opacity-50"
-                    >
-                        {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                        تحديث كلمة مرور الأقسام
-                    </button>
+                <div className="bg-[#0c0c1d] border border-white/5 rounded-2xl p-5 space-y-4">
+                    <div>
+                        <h2 className="text-sm font-black text-white">تغيير كلمة مرور الأقسام</h2>
+                        <p className="text-[11px] text-white/30 mt-1">يفضل تغييرها دوريًا للحماية، ولن يتم القبول إلا بعد إدخال الكلمة الحالية بشكل صحيح.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-white/40">الحالية</label>
+                            <input
+                                type="password"
+                                value={currentSectionsPassword}
+                                onChange={(e) => { setCurrentSectionsPassword(e.target.value); setError(""); }}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                                placeholder="كلمة المرور الحالية"
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-white/40">الجديدة</label>
+                            <input
+                                type="password"
+                                value={newSectionsPassword}
+                                onChange={(e) => { setNewSectionsPassword(e.target.value); setError(""); }}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                                placeholder="كلمة المرور الجديدة"
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-white/40">تأكيد الجديدة</label>
+                            <input
+                                type="password"
+                                value={confirmSectionsPassword}
+                                onChange={(e) => { setConfirmSectionsPassword(e.target.value); setError(""); }}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl h-11 px-4 text-white text-sm focus:outline-none focus:border-primary/50 transition-all placeholder:text-white/20"
+                                placeholder="تأكيد كلمة المرور"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button
+                            onClick={handleChangeSectionsPassword}
+                            disabled={changingPassword}
+                            className="inline-flex items-center gap-2 px-4 h-10 rounded-xl bg-primary/20 border border-primary/30 text-primary text-sm font-bold hover:bg-primary/30 transition-all disabled:opacity-50 w-full sm:w-auto justify-center"
+                        >
+                            {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                            تحديث كلمة مرور الأقسام
+                        </button>
+                    </div>
                 </div>
             </div>
 

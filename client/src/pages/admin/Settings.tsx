@@ -2709,12 +2709,22 @@ function AdminAccountTab() {
   return (
     <div className="space-y-5">
       <SectionCard title="بيانات دخول الادمن" icon={UserCheck}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <InputField label="اسم المستخدم" value={username} onChange={setUsername} disabled />
-          <InputField label="الإيميل" value={email} onChange={setEmail} type="email" placeholder="admin@example.com" />
-          <PasswordField label="كلمة المرور الحالية (إلزامي للتأكيد)" value={currentPassword} onChange={setCurrentPassword} />
-          <PasswordField label="كلمة المرور الجديدة (اختياري)" value={newPassword} onChange={setNewPassword} />
-          <PasswordField label="تأكيد كلمة المرور الجديدة" value={confirmPassword} onChange={setConfirmPassword} />
+        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 md:p-5 space-y-4">
+          <div>
+            <h3 className="text-sm font-black text-white">تحديث إيميل/باسورد الأدمن</h3>
+            <p className="text-[11px] text-white/35 mt-1">لأي تغيير يجب إدخال كلمة المرور الحالية. يمكنك تغيير الإيميل فقط أو الباسورد فقط أو الاثنين معًا.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <InputField label="اسم المستخدم" value={username} onChange={setUsername} disabled />
+            <InputField label="الإيميل" value={email} onChange={setEmail} type="email" placeholder="admin@example.com" />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <PasswordField label="كلمة المرور الحالية (إلزامي)" value={currentPassword} onChange={setCurrentPassword} />
+            <PasswordField label="كلمة المرور الجديدة" value={newPassword} onChange={setNewPassword} />
+            <PasswordField label="تأكيد كلمة المرور الجديدة" value={confirmPassword} onChange={setConfirmPassword} />
+          </div>
         </div>
 
         {error && (

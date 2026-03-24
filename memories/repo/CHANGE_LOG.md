@@ -214,6 +214,21 @@ Follow-up:
 
 ---
 
+Date: 2026-03-24
+Area: admin password sections UI polish
+Change:
+
+- Refined password-management layout in `client/src/pages/admin/SectionsVisibility.tsx` by splitting control-password and change-password into clearer cards with labels and guidance text.
+- Refined admin credentials section in `client/src/pages/admin/Settings.tsx` with grouped fields and clearer instructional copy for email/password updates.
+Reason:
+- User requested better organization/formatting for password change sections in admin panel.
+Impact:
+- Password-related controls are easier to scan and less error-prone on desktop and mobile.
+Follow-up:
+- Optional: move hardcoded Arabic labels to i18n keys for full locale consistency.
+
+---
+
 Date: 2026-03-23
 Area: stage 23 provider control plane baseline (admin)
 Change:
