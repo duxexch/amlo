@@ -1336,3 +1336,23 @@ Impact:
 - Operators can now fail fast on missing or weak universal compatibility settings instead of discovering issues during live traffic.
 Follow-up:
 - Run `npm run prod:validate:universal -- --env .env` on the real production host before each release.
+
+---
+
+Date: 2026-03-24
+Area: domain migration to vixo.uno for local-first DNS testing
+Change:
+
+- Replaced operational domain references from `mrco.live` to `vixo.uno` across primary env templates and compatibility docs.
+- Updated LiveKit/TURN hostnames to:
+  - `lk.vixo.uno`
+  - `turn.vixo.uno`
+- Updated app download endpoints and CORS origins to `vixo.uno` domain set.
+- Enhanced universal env validator (`script/validate-universal-env.ts`) to resolve domain dynamically from env (`DOMAIN` / `APP_DOWNLOAD_DOMAIN` / `CORS_ORIGIN`) instead of hardcoded domain checks.
+- Revalidated recommended production env via npm command and confirmed `RESULT: PASSED`.
+Reason:
+- User requested adding `vixo.uno` and preparing local machine DNS-target testing flow.
+Impact:
+- Domain migration is now centralized and safer; validator now supports future domain changes without code edits.
+Follow-up:
+- Point DNS A records for `vixo.uno`, `lk.vixo.uno`, and `turn.vixo.uno` to the chosen host IP before public testing.

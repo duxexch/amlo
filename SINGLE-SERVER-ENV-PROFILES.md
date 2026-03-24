@@ -53,22 +53,22 @@ STREAM_FOLLOWER_NOTIFY_LIMIT=800
 STREAM_AUTOSTART_BATCH_LIMIT=30
 
 LOG_LEVEL=info
-CORS_ORIGIN=https://mrco.live,https://www.mrco.live
+CORS_ORIGIN=https://vixo.uno,https://www.vixo.uno
 
-LIVEKIT_PUBLIC_URL=wss://lk.mrco.live
+LIVEKIT_PUBLIC_URL=wss://lk.vixo.uno
 LIVEKIT_URL=ws://livekit:7880
 TURN_EXTERNAL_IP=REPLACE_WITH_PUBLIC_IPV4
 TURN_TLS_LISTEN_PORT=5349
-LIVEKIT_TURN_SERVERS=turn:turn.mrco.live:3478?transport=udp,turn:turn.mrco.live:3478?transport=tcp,turns:turn.mrco.live:5349?transport=tcp
+LIVEKIT_TURN_SERVERS=turn:turn.vixo.uno:3478?transport=udp,turn:turn.vixo.uno:3478?transport=tcp,turns:turn.vixo.uno:5349?transport=tcp
 # Add this only if TURN 443 is on dedicated endpoint/IP (not shared with web TLS)
-# LIVEKIT_TURN_SERVERS=turn:turn.mrco.live:3478?transport=udp,turn:turn.mrco.live:3478?transport=tcp,turns:turn.mrco.live:5349?transport=tcp,turns:turn.mrco.live:443?transport=tcp
-LIVEKIT_STUN_SERVERS=stun:stun.l.google.com:19302,stun:turn.mrco.live:3478
+# LIVEKIT_TURN_SERVERS=turn:turn.vixo.uno:3478?transport=udp,turn:turn.vixo.uno:3478?transport=tcp,turns:turn.vixo.uno:5349?transport=tcp,turns:turn.vixo.uno:443?transport=tcp
+LIVEKIT_STUN_SERVERS=stun:stun.l.google.com:19302,stun:turn.vixo.uno:3478
 
 APP_DOWNLOAD_ENABLED=true
 APK_ENABLED=true
 AAB_ENABLED=true
-APK_URL=https://mrco.live/download/ablox.apk
-AAB_URL=https://mrco.live/download/ablox.aab
+APK_URL=https://vixo.uno/download/ablox.apk
+AAB_URL=https://vixo.uno/download/ablox.aab
 ```
 
 ## Apply Procedure
