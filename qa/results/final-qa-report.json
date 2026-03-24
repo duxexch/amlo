@@ -1,0 +1,69 @@
+{
+  "generatedAt": "2026-03-23T11:42:33.390Z",
+  "inputs": {
+    "metricsPath": "C:\\Users\\cex\\Desktop\\amlo\\qa\\results\\current-run.json",
+    "lifecyclePath": "C:\\Users\\cex\\Desktop\\amlo\\qa\\results\\install-lifecycle-summary.json",
+    "compatibilityPath": "C:\\Users\\cex\\Desktop\\amlo\\qa\\results\\compatibility-summary.json",
+    "callPath": "C:\\Users\\cex\\Desktop\\amlo\\qa\\results\\call-setup-summary.json",
+    "reliabilityPath": "C:\\Users\\cex\\Desktop\\amlo\\qa\\results\\reliability-summary.json"
+  },
+  "checks": [
+    {
+      "key": "metricsInput",
+      "ok": true,
+      "value": "PRESENT",
+      "expected": "PRESENT"
+    },
+    {
+      "key": "lifecycleDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "compatibilityDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "callDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "reliabilityDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    }
+  ],
+  "failedChecks": [
+    {
+      "key": "lifecycleDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "compatibilityDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "callDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "reliabilityDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    }
+  ],
+  "decision": "IN_PROGRESS"
+}

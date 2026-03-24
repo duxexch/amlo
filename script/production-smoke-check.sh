@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 DOMAIN_URL="${DOMAIN_URL:-https://mrco.live}"
 RUN_ALERT_TEST="${RUN_ALERT_TEST:-1}"
+ADMIN_COOKIE="${ADMIN_COOKIE:-}"
 
 failures=0
 
@@ -35,6 +36,12 @@ check_cmd() {
 echo "=== AMLO Production Smoke Check ==="
 echo "Root: $ROOT_DIR"
 echo "Domain: $DOMAIN_URL"
+
+if [[ -n "$ADMIN_COOKIE" ]]; then
+  info "Admin cookie supplied: authenticated admin endpoint checks enabled"
+else
+  info "Admin cookie not supplied: admin endpoint checks run in unauthenticated mode (expect 401/403)"
+fi
 
 # 1) Core containers running
 core_containers=(
@@ -91,6 +98,78 @@ if curl -fsS --max-time 10 "$DOMAIN_URL/api/metrics" >/tmp/amlo_metrics_external
   pass "Metrics endpoint reachable via domain"
 else
   info "Metrics endpoint via domain not reachable: $(cat /tmp/amlo_metrics_external.err 2>/dev/null || true)"
+fi
+
+# 4.1) Public app-download endpoint is reachable
+APP_DL_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_app_download.json -w '%{http_code}' "$DOMAIN_URL/api/app-download" 2>/tmp/amlo_app_download.err || true)"
+if [[ "$APP_DL_CODE" == "200" ]]; then
+  pass "Public app-download endpoint reachable"
+  info "App-download payload sample: $(head -c 220 /tmp/amlo_app_download.json)"
+else
+  fail "Public app-download endpoint reachable (HTTP $APP_DL_CODE)"
+  info "App-download error: $(cat /tmp/amlo_app_download.err 2>/dev/null || true)"
+fi
+
+# 4.2) Admin provider + QoS endpoints smoke
+if [[ -n "$ADMIN_COOKIE" ]]; then
+  PROVIDERS_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_providers.json -w '%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$DOMAIN_URL/api/admin/providers/overview" || true)"
+  if [[ "$PROVIDERS_CODE" == "200" ]]; then
+    pass "Admin providers overview endpoint (authenticated)"
+  else
+    fail "Admin providers overview endpoint (authenticated) (HTTP $PROVIDERS_CODE)"
+  fi
+
+  QOS_SNAPSHOT_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_qos_snapshot.json -w '%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$DOMAIN_URL/api/admin/call-qos/snapshot?windowMinutes=60" || true)"
+  if [[ "$QOS_SNAPSHOT_CODE" == "200" ]]; then
+    pass "Admin call QoS snapshot endpoint (authenticated)"
+  else
+    fail "Admin call QoS snapshot endpoint (authenticated) (HTTP $QOS_SNAPSHOT_CODE)"
+  fi
+
+  QOS_AGG_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_qos_agg.json -w '%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$DOMAIN_URL/api/admin/call-qos/aggregation?windowMinutes=180&bucketMinutes=15" || true)"
+  if [[ "$QOS_AGG_CODE" == "200" ]]; then
+    pass "Admin call QoS aggregation endpoint (authenticated)"
+  else
+    fail "Admin call QoS aggregation endpoint (authenticated) (HTTP $QOS_AGG_CODE)"
+  fi
+
+  QOS_EVAL_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_qos_eval.json -w '%{http_code}' -X POST -H "Cookie: $ADMIN_COOKIE" -H 'Content-Type: application/json' -d '{"windowMinutes":60,"thresholds":{"minCalls":10,"minConnectRatePct":65,"maxMissedRatePct":20,"maxBusyRatePct":15,"maxFailedRatePct":35}}' "$DOMAIN_URL/api/admin/call-qos/evaluate-alerts" || true)"
+  if [[ "$QOS_EVAL_CODE" == "200" ]]; then
+    pass "Admin call QoS alert evaluation endpoint (authenticated)"
+  else
+    fail "Admin call QoS alert evaluation endpoint (authenticated) (HTTP $QOS_EVAL_CODE)"
+  fi
+
+  RESTRICTED_ADMIN_CHAT_ENDPOINTS=(
+    "/api/admin/chat-management/conversations"
+    "/api/admin/chat-management/messages"
+    "/api/admin/chat-management/calls"
+    "/api/admin/chat-management/export/conversations"
+    "/api/admin/chat-management/export/messages"
+  )
+
+  for endpoint in "${RESTRICTED_ADMIN_CHAT_ENDPOINTS[@]}"; do
+    RESTRICTED_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_restricted_check.json -w '%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$DOMAIN_URL$endpoint" || true)"
+    if [[ "$RESTRICTED_CODE" == "403" ]]; then
+      pass "Admin chat restriction enforced for $endpoint"
+    else
+      fail "Admin chat restriction enforced for $endpoint (HTTP $RESTRICTED_CODE)"
+    fi
+  done
+else
+  PROVIDERS_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_providers_unauth.json -w '%{http_code}' "$DOMAIN_URL/api/admin/providers/overview" || true)"
+  if [[ "$PROVIDERS_CODE" == "401" || "$PROVIDERS_CODE" == "403" ]]; then
+    pass "Admin providers overview endpoint protected (unauthenticated)"
+  else
+    fail "Admin providers overview endpoint protected (HTTP $PROVIDERS_CODE)"
+  fi
+
+  QOS_SNAPSHOT_CODE="$(curl -sS --max-time 10 -o /tmp/amlo_admin_qos_snapshot_unauth.json -w '%{http_code}' "$DOMAIN_URL/api/admin/call-qos/snapshot?windowMinutes=60" || true)"
+  if [[ "$QOS_SNAPSHOT_CODE" == "401" || "$QOS_SNAPSHOT_CODE" == "403" ]]; then
+    pass "Admin call QoS snapshot endpoint protected (unauthenticated)"
+  else
+    fail "Admin call QoS snapshot endpoint protected (HTTP $QOS_SNAPSHOT_CODE)"
+  fi
 fi
 
 # 5) Database health

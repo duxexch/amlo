@@ -1,0 +1,252 @@
+{
+  "generatedAt": "2026-03-23T11:41:55.051Z",
+  "totalDevices": 20,
+  "invalidCells": 0,
+  "reliability": {
+    "fields": {
+      "call15mSoak": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "call30mSoak": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "call60mSoak": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "bluetoothRoute": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "interruptionHandling": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "pushForeground": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "pushBackground": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "pushTerminated": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "notificationAction": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "batteryOptimization": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "oemAutostartPolicy": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "loginFlow": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "otpFlow": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "socialLoginFlow": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "sessionRefresh": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "authFailureMode": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "startupPerf": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "memoryRegression": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "batteryRegression": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "thermalRegression": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "playPrelaunchTriage": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "crashAnrClosure": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      },
+      "rcSignoffPack": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0
+      }
+    },
+    "groups": {
+      "stage49_soak": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 60,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage50_routeSwitch": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage51_interruptions": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage52_pushReliability": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 60,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage53_notificationActions": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage54_oemBatteryPolicy": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 40,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage55_authJourneys": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 60,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage56_sessionRecovery": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage57_authFailureModes": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage58_performanceThermals": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 80,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage59_playPrelaunchTriage": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 20,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      },
+      "stage60_releaseReadinessPack": {
+        "pass": 0,
+        "fail": 0,
+        "pending": 40,
+        "na": 0,
+        "executed": 0,
+        "successPct": 0
+      }
+    }
+  },
+  "tier1": {
+    "checks": 161,
+    "completedChecks": 0,
+    "completionPct": 0,
+    "hasFail": false
+  },
+  "decision": "IN_PROGRESS"
+}

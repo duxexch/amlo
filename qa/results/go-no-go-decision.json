@@ -1,0 +1,117 @@
+{
+  "generatedAt": "2026-03-23T11:42:33.986Z",
+  "decision": "NO-GO",
+  "checks": [
+    {
+      "key": "crashFreeSessionsPct",
+      "ok": true,
+      "value": 99.6,
+      "expected": ">= 99.5"
+    },
+    {
+      "key": "anrRatePct",
+      "ok": true,
+      "value": 0.4,
+      "expected": "< 0.5"
+    },
+    {
+      "key": "callSetupSuccessPct",
+      "ok": true,
+      "value": 98.2,
+      "expected": ">= 98"
+    },
+    {
+      "key": "callDropRatePct",
+      "ok": true,
+      "value": 1.9,
+      "expected": "<= 2"
+    },
+    {
+      "key": "pushDeliverySuccessPct",
+      "ok": true,
+      "value": 97.3,
+      "expected": ">= 97"
+    },
+    {
+      "key": "loginSuccessPct",
+      "ok": true,
+      "value": 99.1,
+      "expected": ">= 99"
+    },
+    {
+      "key": "apkInstallSuccessPct",
+      "ok": true,
+      "value": 99,
+      "expected": ">= 99"
+    },
+    {
+      "key": "aabPrelaunchCriticalIssues",
+      "ok": true,
+      "value": 0,
+      "expected": "<= 0"
+    },
+    {
+      "key": "lifecycleAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "compatibilityAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "callAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "reliabilityAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "finalQaReportDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    }
+  ],
+  "failed": [
+    {
+      "key": "lifecycleAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "compatibilityAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "callAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "reliabilityAuditDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    },
+    {
+      "key": "finalQaReportDecision",
+      "ok": false,
+      "value": "IN_PROGRESS",
+      "expected": "PASS"
+    }
+  ],
+  "openBlockingBlockers": []
+}

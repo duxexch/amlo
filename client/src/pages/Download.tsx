@@ -9,6 +9,10 @@ interface DownloadType {
   url: string;
   extension: string;
   description: string;
+  version?: string;
+  build?: string;
+  checksum?: string;
+  sizeBytes?: number;
 }
 
 interface DownloadSettings {
@@ -160,6 +164,22 @@ export function DownloadPage() {
     { icon: Star, label: t("download.featureFree") },
   ];
 
+  const formatBytes = (value?: number) => {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    const idx = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+    const num = n / Math.pow(1024, idx);
+    return `${num >= 100 ? num.toFixed(0) : num.toFixed(2)} ${units[idx]}`;
+  };
+
+  const formatChecksum = (value?: string) => {
+    const v = String(value || "").trim();
+    if (!v) return "";
+    if (v.length <= 16) return v;
+    return `${v.slice(0, 8)}...${v.slice(-8)}`;
+  };
+
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 relative overflow-hidden" dir={dir}>
       {/* Background effects */}
@@ -232,6 +252,26 @@ export function DownloadPage() {
                   <p className="text-white/50 text-xs mb-3">
                     {opt.data.description || t(`download.${opt.key}Desc`)}
                   </p>
+                  {(opt.key === "apk" || opt.key === "aab") && (
+                    <div className="mb-3 rounded-lg border border-white/10 bg-black/20 p-2.5 space-y-1.5">
+                      {!!opt.data.version && (
+                        <p className="text-[11px] text-white/70">
+                          Version: <span className="text-white font-semibold">{opt.data.version}</span>
+                          {!!opt.data.build && <span className="text-white/45"> ({opt.data.build})</span>}
+                        </p>
+                      )}
+                      {!!opt.data.checksum && (
+                        <p className="text-[11px] text-white/70 font-mono">
+                          SHA-256: <span className="text-white">{formatChecksum(opt.data.checksum)}</span>
+                        </p>
+                      )}
+                      {!!formatBytes(opt.data.sizeBytes) && (
+                        <p className="text-[11px] text-white/70">
+                          Size: <span className="text-white">{formatBytes(opt.data.sizeBytes)}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <button
                     onClick={() => handleDownload(opt.data, opt.key)}
                     disabled={opt.key === "pwa" && pwaInstalled}

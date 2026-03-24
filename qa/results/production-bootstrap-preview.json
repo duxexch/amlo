@@ -1,0 +1,208 @@
+{
+  "socialLogin": {
+    "google": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": ""
+    },
+    "apple": {
+      "enabled": false,
+      "serviceId": "",
+      "teamId": "",
+      "keyId": ""
+    },
+    "facebook": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": ""
+    },
+    "twitter": {
+      "enabled": false,
+      "apiKey": "",
+      "apiSecret": ""
+    },
+    "tiktok": {
+      "enabled": false,
+      "clientKey": "",
+      "clientSecret": ""
+    },
+    "snapchat": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": ""
+    },
+    "instagram": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": ""
+    },
+    "huawei": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": ""
+    }
+  },
+  "otp": {
+    "provider": "email",
+    "enabled": true,
+    "gmail": {
+      "enabled": true,
+      "host": "smtp.hostinger.com",
+      "port": 465,
+      "username": "info@mrco.live",
+      "password": "CHANGE_ME_EMAIL_PASSWORD",
+      "senderName": "Ablox",
+      "senderEmail": "info@mrco.live"
+    },
+    "sms": {
+      "enabled": false,
+      "provider": "twilio",
+      "phoneNumber": "",
+      "apiKey": "",
+      "apiSecret": "",
+      "senderId": ""
+    },
+    "otpConfig": {
+      "codeLength": 6,
+      "expiryMinutes": 5,
+      "maxAttempts": 5,
+      "cooldownMinutes": 5
+    }
+  },
+  "appDownload": {
+    "enabled": true,
+    "domain": "https://mrco.live",
+    "rollout": {
+      "enabled": false,
+      "apkPercent": 0,
+      "aabPercent": 0,
+      "allowTenants": [],
+      "blockTenants": []
+    },
+    "pwa": {
+      "enabled": true,
+      "url": "https://mrco.live",
+      "extension": "/",
+      "description": "نسخة الويب — تعمل من المتصفح مباشرة بدون تحميل"
+    },
+    "apk": {
+      "enabled": true,
+      "url": "https://mrco.live/download/ablox.apk",
+      "extension": ".apk",
+      "description": "ملف APK — للتثبيت المباشر على أجهزة أندرويد",
+      "version": "REPLACE_APK_VERSION",
+      "build": "REPLACE_APK_BUILD",
+      "checksum": "7fec82bf6223b5ca5410a69cde098ee5ea212392863e115e9d048168fe19d18a",
+      "sizeBytes": 1502084
+    },
+    "aab": {
+      "enabled": true,
+      "url": "https://mrco.live/download/ablox.aab",
+      "extension": ".aab",
+      "description": "ملف AAB — لرفعه على متجر جوجل بلاي",
+      "version": "REPLACE_AAB_VERSION",
+      "build": "REPLACE_AAB_BUILD",
+      "checksum": "c0cb39cb02fd66adb3efc4a738563cad2b5a74c4bc362934e0c3ea3818430d58",
+      "sizeBytes": 1622144
+    }
+  },
+  "gateways": {
+    "stripe": {
+      "enabled": false,
+      "displayName": "Stripe",
+      "countries": [
+        "*"
+      ],
+      "mode": "live",
+      "priority": 1,
+      "credentials": {
+        "publicKey": "",
+        "secretKey": "",
+        "webhookSecret": ""
+      }
+    },
+    "paypal": {
+      "enabled": false,
+      "displayName": "PayPal",
+      "countries": [
+        "*"
+      ],
+      "mode": "live",
+      "priority": 2,
+      "credentials": {
+        "clientId": "",
+        "clientSecret": "",
+        "webhookId": ""
+      }
+    },
+    "paymob": {
+      "enabled": false,
+      "displayName": "Paymob",
+      "countries": [
+        "EG",
+        "AE",
+        "SA",
+        "JO"
+      ],
+      "mode": "live",
+      "priority": 3,
+      "credentials": {
+        "apiKey": "",
+        "integrationId": "",
+        "iframeId": "",
+        "hmacSecret": ""
+      }
+    },
+    "myfatoorah": {
+      "enabled": false,
+      "displayName": "MyFatoorah",
+      "countries": [
+        "SA",
+        "AE",
+        "KW",
+        "QA",
+        "BH",
+        "OM"
+      ],
+      "mode": "live",
+      "priority": 4,
+      "credentials": {
+        "apiToken": "",
+        "webhookSecret": ""
+      }
+    },
+    "tap": {
+      "enabled": false,
+      "displayName": "Tap Payments",
+      "countries": [
+        "SA",
+        "AE",
+        "KW",
+        "BH",
+        "QA",
+        "OM"
+      ],
+      "mode": "live",
+      "priority": 5,
+      "credentials": {
+        "secretKey": "",
+        "publicKey": "",
+        "webhookSecret": ""
+      }
+    },
+    "moyasar": {
+      "enabled": false,
+      "displayName": "Moyasar",
+      "countries": [
+        "SA"
+      ],
+      "mode": "live",
+      "priority": 6,
+      "credentials": {
+        "secretKey": "",
+        "publishableKey": "",
+        "webhookSecret": ""
+      }
+    }
+  }
+}

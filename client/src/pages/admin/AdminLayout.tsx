@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Users, UserCog, Gift, Wallet, Flag, Settings,
   LogOut, Menu, X, ChevronLeft, Bell, Shield, ShieldAlert, MessageSquare,
-  LayoutGrid,
+  LayoutGrid, Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminAuth } from "@/lib/adminApi";
@@ -87,6 +87,7 @@ const navSections: NavSection[] = [
     sectionKey: "admin.sections.system",
     items: [
       { icon: LayoutGrid, labelKey: "admin.nav.sections", path: "/admin/sections" },
+      { icon: Link2, labelKey: "Providers Hub", path: "/admin/providers" },
       { icon: Settings, labelKey: "admin.nav.settings", path: "/admin/settings" },
     ],
   },

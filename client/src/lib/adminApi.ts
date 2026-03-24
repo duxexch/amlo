@@ -560,6 +560,28 @@ export const adminFinanceStats = {
   get: () => request<any>("/financial-stats"),
 };
 
+// ── Call QoS Snapshot ───────────────────────────────────
+
+export const adminCallQos = {
+  getSnapshot: (windowMinutes = 60) =>
+    request<any>(`/call-qos/snapshot?windowMinutes=${windowMinutes}`),
+  getAggregation: (windowMinutes = 180, bucketMinutes = 15) =>
+    request<any>(`/call-qos/aggregation?windowMinutes=${windowMinutes}&bucketMinutes=${bucketMinutes}`),
+  evaluateAlerts: (payload?: {
+    windowMinutes?: number;
+    thresholds?: {
+      minCalls?: number;
+      minConnectRatePct?: number;
+      maxMissedRatePct?: number;
+      maxBusyRatePct?: number;
+      maxFailedRatePct?: number;
+    };
+  }) => request<any>("/call-qos/evaluate-alerts", {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  }),
+};
+
 // ── Withdrawal Requests ──────────────────────────────────
 
 export interface WithdrawalFilters {

@@ -2,7 +2,7 @@
 
 ## ملخص التغييرات المطبقة
 
-### ✅ ما تم تحسينه:
+### ✅ ما تم تحسينه
 
 1. **إعدادات LiveKit الكاملة** (`config/livekit.yaml`)
    - ✓ خوادم ICE (STUN/TURN) مكتملة
@@ -98,9 +98,9 @@ netstat -tlnup | grep -E "7880|7881|7882|3478"
 
 ## 🧪 اختبار البث المباشر
 
-### من المتصفح:
+### من المتصفح
 
-1. **اذهب إلى:** https://mrco.live
+1. **اذهب إلى:** <https://mrco.live>
 2. **أنشئ بث مباشر جديد:**
    - اضغط "Create Stream"
    - اسمح بالوصول للكاميرا والميكروفون
@@ -119,7 +119,7 @@ netstat -tlnup | grep -E "7880|7881|7882|3478"
    - اضغط على بثك
    - يجب أن ترى الفيديو والصوت
 
-### من أداة سطر الأوامر (Server-side):
+### من أداة سطر الأوامر (Server-side)
 
 ```bash
 # تحقق من اتصالات TCP active
@@ -139,11 +139,13 @@ docker stats ablox_app ablox_livekit ablox_coturn
 ### ❌ الخطأ: "Failed to connect" أو "WebSocket connection failed"
 
 **احتمالات:**
+
 1. منافذ TCP غير مفتوحة (7880, 7881)
 2. Traefik/Nginx تحويل غير صحيح
 3. HTTPS/WSS غير متوفر
 
 **الحل:**
+
 ```bash
 # تحقق من Traefik
 docker compose logs traefik --tail=50 | grep livekit
@@ -157,11 +159,13 @@ curl -I -H "Host: lk.mrco.live" http://localhost:7880
 ### ❌ الخطأ: "Media connection failed" أو "No ICE candidates"
 
 **احتمالات:**
+
 1. منافذ UDP مغلقة (7882, 3478, 49152-49999)
 2. TURN server غير متاح
 3. Firewall يحظر بروتوكول UDP
 
 **الحل:**
+
 ```bash
 # تحقق من UDP ports
 sudo ufw status | grep udp
@@ -179,10 +183,12 @@ nc -uz 127.0.0.1 7882  # For media
 ### ❌ الخطأ: "Permission not granted" (Camera/Mic)
 
 **احتمالات:**
+
 1. الموقع ليس HTTPS
 2. متصفح يغير الصلاحيات
 
 **الحل:**
+
 - ✅ تأكد من استخدام `https://mrco.live`
 - ✅ السماح بـ Camera و Microphone في إعدادات المتصفح
 - ✅ جرب متصفح آخر (Chrome, Firefox, Edge)
@@ -191,7 +197,7 @@ nc -uz 127.0.0.1 7882  # For media
 
 ## 📊 مراقبة الأداء
 
-### استخدام الموارد:
+### استخدام الموارد
 
 ```bash
 # شاشة لحية :
@@ -219,7 +225,7 @@ df -h /var/lib/docker
 
 ---
 
-## 📞 إذا استمرت المشاكل:
+## 📞 إذا استمرت المشاكل
 
 ```bash
 # اجمع معلومات التشخيص:
@@ -234,11 +240,81 @@ echo "=== Logs ===" && docker compose logs --tail=50 | tail -100
 
 ---
 
-## Commit Reference:
+## Commit Reference
 
 🔗 **Code changes:** [2dff710](https://github.com/duxexch/amlo/commit/2dff710)
 
 **التغييرات:**
+
 - ✅ Enhanced `config/livekit.yaml` with complete ICE/TURN configuration
 - ✅ Added deployment script `deploy-streaming-fixes.sh`
 - ✅ Updated documentation with troubleshooting guide
+
+---
+
+## 📦 توقيع رسمي APK/AAB + نشر التحميل للمستخدمين
+
+### 1) توقيع الملفات (Official Signing)
+
+يوجد سكربت جاهز يقوم بتوقيع ملفات:
+
+- `client/public/download/ablox.apk`
+- `client/public/download/ablox.aab`
+
+ويخرج تقرير بالـ checksums:
+
+- `qa/results/signed-artifacts-manifest.json`
+
+الأمر:
+
+```bash
+npm run mobile:sign:artifacts
+```
+
+المتطلبات عبر البيئة:
+
+- `SIGNING_KEYSTORE_PATH`
+- `SIGNING_KEY_ALIAS`
+- `SIGNING_STORE_PASSWORD`
+- `SIGNING_KEY_PASSWORD`
+
+اختياري:
+
+- `SIGNING_CREATE_IF_MISSING=1` لإنشاء keystore تلقائيًا إذا كان غير موجود.
+
+### 2) تفعيل APK/AAB في التحميل للمستخدمين
+
+إعدادات التحميل أصبحت مفعلة افتراضيًا في إعدادات النظام (`appDownload`):
+
+- `apk.enabled=true`
+- `aab.enabled=true`
+
+مع روابط:
+
+- `https://mrco.live/download/ablox.apk`
+- `https://mrco.live/download/ablox.aab`
+
+### 3) تجهيز مزودي الخدمات للإنتاج
+
+سكريبت Bootstrap للمزودين:
+
+```bash
+# Dry-run (ينتج preview فقط)
+npm run prod:bootstrap:services
+
+# Apply to DB
+npm run prod:bootstrap:services:apply
+```
+
+مخرجات الـ dry-run:
+
+- `qa/results/production-bootstrap-preview.json`
+
+الفئات التي يتم تجهيزها:
+
+- `socialLogin`
+- `otp`
+- `appDownload`
+- `payment_gateways_config`
+
+> ملاحظة: التفعيل الفعلي لأي مزود يعتمد على وجود credentials صحيحة في `.env.production`.

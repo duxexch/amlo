@@ -1,0 +1,21 @@
+{
+    "releaseCandidate": "rc-2026.03.23",
+    "executedAt": "2026-03-23T12:30:00Z",
+    "crashFreeSessionsPct": 99.6,
+    "anrRatePct": 0.4,
+    "callSetupSuccessPct": 98.2,
+    "callDropRatePct": 1.9,
+    "pushDeliverySuccessPct": 97.3,
+    "loginSuccessPct": 99.1,
+    "apkInstallSuccessPct": 99.0,
+    "aabPrelaunchCriticalIssues": 0,
+    "blockers": [
+        {
+            "id": "MOB-201",
+            "severity": "P2",
+            "status": "resolved",
+            "area": "notifications",
+            "title": "Delayed push on battery saver"
+        }
+    ]
+}

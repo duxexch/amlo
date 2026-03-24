@@ -1,0 +1,78 @@
+{
+  "generatedAt": "2026-03-23T11:15:07.325Z",
+  "totalDevices": 20,
+  "invalidCells": 0,
+  "lifecycle": {
+    "installApk": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "installAab": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "upgradeApk": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "upgradeAab": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "uninstallApk": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "uninstallAab": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "reinstallApk": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    },
+    "reinstallAab": {
+      "pass": 0,
+      "fail": 0,
+      "pending": 20,
+      "na": 0,
+      "executed": 0,
+      "successPct": 0
+    }
+  },
+  "tier1": {
+    "checks": 56,
+    "completedChecks": 0,
+    "completionPct": 0,
+    "hasFail": false
+  },
+  "decision": "IN_PROGRESS"
+}

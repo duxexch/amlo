@@ -1,0 +1,10 @@
+{
+    "minCrashFreeSessionsPct": 99.5,
+    "maxAnrRatePct": 0.5,
+    "minCallSetupSuccessPct": 98,
+    "maxCallDropRatePct": 2,
+    "minPushDeliverySuccessPct": 97,
+    "minLoginSuccessPct": 99,
+    "minApkInstallSuccessPct": 99,
+    "maxAabPrelaunchCriticalIssues": 0
+}

@@ -18,11 +18,61 @@ import { io, getLiveTelemetrySnapshot } from "../index";
 import { getUserSocketId } from "../onlineUsers";
 import { decryptMessage } from "../utils/encryption";
 import { invalidatePricingCache } from "../pricingService";
+import {
+  ADMIN_CHAT_CONTENT_DISABLED_CODE,
+  ADMIN_CHAT_CONTENT_DISABLED_MESSAGE,
+} from "../utils/adminChatPrivacyPolicy";
 
 const router = Router();
 
 // Helper to safely get string param (Express 5 params can be string | string[])
 const p = (val: string | string[]): string => Array.isArray(val) ? val[0] : val;
+
+type ScopeTarget = {
+  scope: "request" | "global" | "tenant";
+  tenantId: string;
+};
+
+function sanitizeTenantId(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const value = input.trim();
+  if (!value) return null;
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(value)) return null;
+  return value;
+}
+
+function resolveScopeTarget(rawScope: unknown, rawTenantId: unknown, requestTenantId?: string | null): ScopeTarget | null {
+  const scope = rawScope === "global" || rawScope === "tenant" || rawScope === "request"
+    ? rawScope
+    : "request";
+  const requestTenant = sanitizeTenantId(requestTenantId || "");
+  const explicitTenant = sanitizeTenantId(rawTenantId);
+
+  if (scope === "global") {
+    return { scope, tenantId: "default" };
+  }
+
+  if (scope === "tenant") {
+    const tenantId = explicitTenant || requestTenant;
+    if (!tenantId) return null;
+    return { scope, tenantId };
+  }
+
+  return { scope: "request", tenantId: requestTenant || "default" };
+}
+
+function resolveTenantScopedKey(tenantId: string, key: string): string {
+  if (!tenantId || tenantId === "default") return key;
+  return `tenant:${tenantId}:${key}`;
+}
+
+function sensitiveContentBlocked(res: Response) {
+  return res.status(403).json({
+    success: false,
+    message: ADMIN_CHAT_CONTENT_DISABLED_MESSAGE,
+    code: ADMIN_CHAT_CONTENT_DISABLED_CODE,
+  });
+}
 
 // ══════════════════════════════════════════════════════════
 // OVERVIEW — إحصائيات الشات والبث
@@ -246,6 +296,8 @@ router.get("/overview/top-chatters", requireAdmin, async (_req, res) => {
 // ══════════════════════════════════════════════════════════
 
 router.get("/conversations", requireAdmin, async (req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
@@ -340,6 +392,8 @@ router.get("/conversations", requireAdmin, async (req, res) => {
 
 // Get conversation messages
 router.get("/conversations/:id/messages", requireAdmin, async (req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
@@ -420,6 +474,8 @@ router.delete("/conversations/:id", requireAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════
 
 router.get("/messages", requireAdmin, async (req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   const page = parseInt(req.query.page as string) || 1;
   const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
@@ -566,6 +622,8 @@ router.post("/messages/bulk-delete", requireAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════
 
 router.get("/calls", requireAdmin, async (req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
@@ -677,29 +735,55 @@ const defaultModerationSettings = {
 };
 
 /** Load moderation settings from DB, falling back to defaults */
-async function getModerationSettings(): Promise<typeof defaultModerationSettings> {
+async function getModerationSettingsForTenant(tenantId: string): Promise<{ settings: typeof defaultModerationSettings; category: string }> {
+  const category = resolveTenantScopedKey(tenantId, "moderation");
   try {
-    const cfg = await storage.getSystemConfig("moderation");
-    if (cfg && cfg.configData) {
+    const scopedConfig = category === "moderation" ? null : await storage.getSystemConfig(category);
+    const globalConfig = await storage.getSystemConfig("moderation");
+    const cfg = scopedConfig || globalConfig;
+    if (cfg?.configData) {
       const data = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
-      return { ...defaultModerationSettings, ...data };
+      return { settings: { ...defaultModerationSettings, ...data }, category: cfg.category || category };
     }
   } catch (e: any) { chatLog.warn(`Failed to parse moderation config: ${e.message}`); }
-  return { ...defaultModerationSettings };
+  return { settings: { ...defaultModerationSettings }, category };
 }
 
 /** Save moderation settings to DB */
-async function saveModerationSettings(settings: typeof defaultModerationSettings, adminId?: string) {
-  await storage.upsertSystemConfig("moderation", settings, adminId);
+async function saveModerationSettingsForTenant(tenantId: string, settings: typeof defaultModerationSettings, adminId?: string) {
+  const category = resolveTenantScopedKey(tenantId, "moderation");
+  await storage.upsertSystemConfig(category, settings, adminId);
+  return category;
 }
 
-router.get("/moderation/settings", requireAdmin, async (_req, res) => {
-  const settings = await getModerationSettings();
-  return res.json({ success: true, data: settings });
+router.get("/moderation/settings", requireAdmin, async (req, res) => {
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+  const result = await getModerationSettingsForTenant(target.tenantId);
+  return res.json({
+    success: true,
+    data: result.settings,
+    summary: { scope: target.scope, tenantId: target.tenantId, category: result.category },
+  });
 });
 
 router.put("/moderation/settings", requireAdmin, async (req, res) => {
-  const current = await getModerationSettings();
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
+  const current = (await getModerationSettingsForTenant(target.tenantId)).settings;
   const allowed = ["bannedWords", "autoDelete", "maxMessageLength", "maxMessagesPerMinute",
     "allowImages", "allowVoice", "allowGifts", "maxCallDuration", "minLevelToChat",
     "minLevelToCall", "minLevelToStream", "maxConcurrentStreams", "streamMaxViewers",
@@ -709,43 +793,103 @@ router.put("/moderation/settings", requireAdmin, async (req, res) => {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
   const updated = { ...current, ...updates } as typeof defaultModerationSettings;
-  await saveModerationSettings(updated, req.session.adminId);
-  await storage.addAdminLog(req.session.adminId!, "update_moderation", "settings", "", JSON.stringify(Object.keys(updates)));
-  return res.json({ success: true, data: updated, message: "تم تحديث إعدادات الرقابة" });
+  const category = await saveModerationSettingsForTenant(target.tenantId, updated, req.session.adminId);
+  await storage.addAdminLog(
+    req.session.adminId!,
+    "update_moderation",
+    "settings",
+    "",
+    `[scope=${target.scope}] category=${category} fields=${JSON.stringify(Object.keys(updates))}`,
+  );
+  return res.json({
+    success: true,
+    data: updated,
+    message: "تم تحديث إعدادات الرقابة",
+    summary: { scope: target.scope, tenantId: target.tenantId, category },
+  });
 });
 
 // Banned words management
-router.get("/moderation/banned-words", requireAdmin, async (_req, res) => {
-  const settings = await getModerationSettings();
-  return res.json({ success: true, data: settings.bannedWords });
+router.get("/moderation/banned-words", requireAdmin, async (req, res) => {
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+  const result = await getModerationSettingsForTenant(target.tenantId);
+  return res.json({
+    success: true,
+    data: result.settings.bannedWords,
+    summary: { scope: target.scope, tenantId: target.tenantId, category: result.category },
+  });
 });
 
 router.post("/moderation/banned-words", requireAdmin, async (req, res) => {
   const { word } = req.body;
   if (!word || typeof word !== "string") return res.status(400).json({ success: false, message: "يرجى إدخال كلمة" });
-  const settings = await getModerationSettings();
+
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
+  const settings = (await getModerationSettingsForTenant(target.tenantId)).settings;
   if (!settings.bannedWords.includes(word.trim())) {
     settings.bannedWords.push(word.trim());
   }
-  await saveModerationSettings(settings, req.session.adminId);
-  await storage.addAdminLog(req.session.adminId!, "add_banned_word", "moderation", "", word);
-  return res.json({ success: true, data: settings.bannedWords });
+  const category = await saveModerationSettingsForTenant(target.tenantId, settings, req.session.adminId);
+  await storage.addAdminLog(req.session.adminId!, "add_banned_word", "moderation", "", `[scope=${target.scope}] category=${category} word=${word}`);
+  return res.json({
+    success: true,
+    data: settings.bannedWords,
+    summary: { scope: target.scope, tenantId: target.tenantId, category },
+  });
 });
 
 router.delete("/moderation/banned-words/:word", requireAdmin, async (req, res) => {
   const word = p(req.params.word);
-  const settings = await getModerationSettings();
+
+  const target = resolveScopeTarget(
+    req.query.scope || req.body?.scope,
+    req.query.tenantId || req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
+  const settings = (await getModerationSettingsForTenant(target.tenantId)).settings;
   settings.bannedWords = settings.bannedWords.filter(w => w !== word);
-  await saveModerationSettings(settings, req.session.adminId);
-  await storage.addAdminLog(req.session.adminId!, "remove_banned_word", "moderation", "", word);
-  return res.json({ success: true, data: settings.bannedWords });
+  const category = await saveModerationSettingsForTenant(target.tenantId, settings, req.session.adminId);
+  await storage.addAdminLog(req.session.adminId!, "remove_banned_word", "moderation", "", `[scope=${target.scope}] category=${category} word=${word}`);
+  return res.json({
+    success: true,
+    data: settings.bannedWords,
+    summary: { scope: target.scope, tenantId: target.tenantId, category },
+  });
 });
 
 // ══════════════════════════════════════════════════════════
 // CHAT & BROADCAST SETTINGS — إعدادات الشات والبث
 // ══════════════════════════════════════════════════════════
 
-router.get("/settings", requireAdmin, async (_req, res) => {
+router.get("/settings", requireAdmin, async (req, res) => {
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
   const db = getDb();
   const defaults = {
     voice_call_rate: 5,
@@ -768,32 +912,53 @@ router.get("/settings", requireAdmin, async (_req, res) => {
     audio_streaming_enabled: true,
   };
 
-  if (!db) return res.json({ success: true, data: defaults });
+  if (!db) {
+    return res.json({ success: true, data: defaults, summary: { scope: target.scope, tenantId: target.tenantId } });
+  }
 
   try {
-    const settings = await db.select().from(schema.systemSettings);
+    const keys = Object.keys(defaults);
+    const scopedKeys = keys.map((key) => resolveTenantScopedKey(target.tenantId, key));
+    const queryKeys = target.tenantId === "default" ? keys : [...scopedKeys, ...keys];
+    const settings = await db
+      .select({ key: schema.systemSettings.key, value: schema.systemSettings.value })
+      .from(schema.systemSettings)
+      .where(inArray(schema.systemSettings.key, queryKeys));
+
     const result: Record<string, any> = { ...defaults };
-    settings.forEach(s => {
-      if (s.key in defaults) {
-        const val = s.value;
-        if (val === "true") result[s.key] = true;
-        else if (val === "false") result[s.key] = false;
-        else if (!isNaN(Number(val))) result[s.key] = Number(val);
-        else result[s.key] = val;
-      }
+    keys.forEach((key) => {
+      const scopedKey = resolveTenantScopedKey(target.tenantId, key);
+      const selected = settings.find((row) => row.key === scopedKey) || settings.find((row) => row.key === key);
+      if (!selected) return;
+      const val = selected.value;
+      if (val === "true") result[key] = true;
+      else if (val === "false") result[key] = false;
+      else if (!isNaN(Number(val))) result[key] = Number(val);
+      else result[key] = val;
     });
-    return res.json({ success: true, data: result });
+    return res.json({ success: true, data: result, summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch (err: any) {
-    return res.json({ success: true, data: defaults });
+    return res.json({ success: true, data: defaults, summary: { scope: target.scope, tenantId: target.tenantId } });
   }
 });
 
 router.put("/settings", requireAdmin, async (req, res) => {
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
   const db = getDb();
   const { settings } = req.body;
   if (!Array.isArray(settings)) return res.status(400).json({ success: false, message: "بيانات غير صالحة" });
 
-  if (!db) return res.json({ success: true, message: "تم التحديث" });
+  if (!db) {
+    return res.json({ success: true, message: "تم التحديث", summary: { scope: target.scope, tenantId: target.tenantId } });
+  }
 
   try {
     const updatedKeys = new Set<string>(
@@ -805,12 +970,14 @@ router.put("/settings", requireAdmin, async (req, res) => {
     // Batch upsert using ON CONFLICT instead of N sequential queries
     if (settings.length > 0) {
       await Promise.all(settings.map(({ key, value }: { key: string; value: any }) =>
-        db.insert(schema.systemSettings)
-          .values({ key, value: String(value), category: "chat" })
+      (typeof key === "string" && key.trim()
+        ? db.insert(schema.systemSettings)
+          .values({ key: resolveTenantScopedKey(target.tenantId, key), value: String(value), category: "chat" })
           .onConflictDoUpdate({
             target: schema.systemSettings.key,
             set: { value: String(value), updatedAt: new Date() },
           })
+        : Promise.resolve())
       ));
     }
 
@@ -820,11 +987,11 @@ router.put("/settings", requireAdmin, async (req, res) => {
       updatedKeys.has("message_cost") ||
       updatedKeys.has("chat_message_cost")
     ) {
-      await invalidatePricingCache();
+      await invalidatePricingCache(target.tenantId === "default" ? undefined : target.tenantId);
     }
 
-    await storage.addAdminLog(req.session.adminId!, "update_chat_settings", "settings", "", `تحديث ${settings.length} إعدادات`);
-    return res.json({ success: true, message: "تم تحديث الإعدادات" });
+    await storage.addAdminLog(req.session.adminId!, "update_chat_settings", "settings", "", `[scope=${target.scope}] تحديث ${settings.length} إعدادات`);
+    return res.json({ success: true, message: "تم تحديث الإعدادات", summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: "خطأ" });
   }
@@ -865,8 +1032,17 @@ interface StreamAlertHistoryEntry {
   isActive: boolean;
 }
 
-const streamAlertHistory = new Map<string, StreamAlertHistoryEntry>();
-let streamAlertHistoryHydrated = false;
+const streamAlertHistoryByCategory = new Map<string, Map<string, StreamAlertHistoryEntry>>();
+const streamAlertHistoryHydratedCategories = new Set<string>();
+
+function getStreamAlertHistoryStore(category: string) {
+  let store = streamAlertHistoryByCategory.get(category);
+  if (!store) {
+    store = new Map<string, StreamAlertHistoryEntry>();
+    streamAlertHistoryByCategory.set(category, store);
+  }
+  return store;
+}
 
 function buildStreamAlerts(
   telemetry: {
@@ -939,17 +1115,18 @@ function buildStreamAlerts(
   return alerts;
 }
 
-async function hydrateStreamAlertHistoryIfNeeded() {
-  if (streamAlertHistoryHydrated) return;
-  streamAlertHistoryHydrated = true;
+async function hydrateStreamAlertHistoryIfNeeded(category: string) {
+  if (streamAlertHistoryHydratedCategories.has(category)) return;
+  streamAlertHistoryHydratedCategories.add(category);
   try {
-    const cfg = await storage.getSystemConfig("stream_alert_history");
+    const cfg = await storage.getSystemConfig(category);
     if (!cfg?.configData) return;
     const parsed = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
     const history = Array.isArray(parsed?.history) ? parsed.history : [];
+    const store = getStreamAlertHistoryStore(category);
     for (const row of history) {
       if (!row?.id) continue;
-      streamAlertHistory.set(String(row.id), {
+      store.set(String(row.id), {
         id: String(row.id),
         level: row.level === "high" || row.level === "medium" ? row.level : "low",
         title: String(row.title || "تنبيه"),
@@ -965,23 +1142,24 @@ async function hydrateStreamAlertHistoryIfNeeded() {
   }
 }
 
-async function persistStreamAlertHistory(adminId?: string) {
-  const history = Array.from(streamAlertHistory.values())
+async function persistStreamAlertHistory(category: string, adminId?: string) {
+  const history = Array.from(getStreamAlertHistoryStore(category).values())
     .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
     .slice(0, 200);
-  await storage.upsertSystemConfig("stream_alert_history", { history }, adminId);
+  await storage.upsertSystemConfig(category, { history }, adminId);
 }
 
-async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], adminId?: string): Promise<StreamAlertHistoryEntry[]> {
-  await hydrateStreamAlertHistoryIfNeeded();
+async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], category: string, adminId?: string): Promise<StreamAlertHistoryEntry[]> {
+  await hydrateStreamAlertHistoryIfNeeded(category);
+  const store = getStreamAlertHistoryStore(category);
   const nowIso = new Date().toISOString();
   const activeIds = new Set(activeAlerts.map(a => a.id));
   let changed = false;
 
   for (const alert of activeAlerts) {
-    const existing = streamAlertHistory.get(alert.id);
+    const existing = store.get(alert.id);
     if (existing) {
-      streamAlertHistory.set(alert.id, {
+      store.set(alert.id, {
         ...existing,
         level: alert.level,
         title: alert.title,
@@ -992,7 +1170,7 @@ async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], adminI
       });
       changed = true;
     } else {
-      streamAlertHistory.set(alert.id, {
+      store.set(alert.id, {
         id: alert.id,
         level: alert.level,
         title: alert.title,
@@ -1006,9 +1184,9 @@ async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], adminI
     }
   }
 
-  for (const [id, entry] of streamAlertHistory.entries()) {
+  for (const [id, entry] of store.entries()) {
     if (!activeIds.has(id) && entry.isActive) {
-      streamAlertHistory.set(id, {
+      store.set(id, {
         ...entry,
         isActive: false,
       });
@@ -1017,16 +1195,16 @@ async function updateStreamAlertHistory(activeAlerts: StreamAlertEntry[], adminI
   }
 
   if (changed) {
-    await persistStreamAlertHistory(adminId);
+    await persistStreamAlertHistory(category, adminId);
   }
 
-  return Array.from(streamAlertHistory.values())
+  return Array.from(store.values())
     .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
     .slice(0, 100);
 }
 
-function getFilteredStreamAlertHistory(status: "all" | "active" | "resolved", level: "all" | "high" | "medium" | "low") {
-  const sorted = Array.from(streamAlertHistory.values())
+function getFilteredStreamAlertHistory(category: string, status: "all" | "active" | "resolved", level: "all" | "high" | "medium" | "low") {
+  const sorted = Array.from(getStreamAlertHistoryStore(category).values())
     .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime());
 
   const statusFiltered = status === "active"
@@ -1064,28 +1242,44 @@ function getStreamAlertSummary(entries: StreamAlertHistoryEntry[]) {
   };
 }
 
-async function getStreamAlertConfig(): Promise<typeof defaultStreamAlertConfig> {
+function resolveStreamAlertConfigCategory(tenantId: string): string {
+  return resolveTenantScopedKey(tenantId, "stream_alerts");
+}
+
+function resolveStreamAlertHistoryCategory(tenantId: string): string {
+  return resolveTenantScopedKey(tenantId, "stream_alert_history");
+}
+
+async function getStreamAlertConfigForTenant(tenantId: string): Promise<{ config: typeof defaultStreamAlertConfig; category: string }> {
+  const category = resolveStreamAlertConfigCategory(tenantId);
   try {
-    const cfg = await storage.getSystemConfig("stream_alerts");
+    const scopedConfig = category === "stream_alerts" ? null : await storage.getSystemConfig(category);
+    const globalConfig = await storage.getSystemConfig("stream_alerts");
+    const cfg = scopedConfig || globalConfig;
     if (cfg?.configData) {
       const parsed = typeof cfg.configData === "string" ? JSON.parse(cfg.configData) : cfg.configData;
       return {
-        giftsRateLimited: Math.max(0, Number(parsed.giftsRateLimited ?? defaultStreamAlertConfig.giftsRateLimited)),
-        chatBannedWordBlocked: Math.max(0, Number(parsed.chatBannedWordBlocked ?? defaultStreamAlertConfig.chatBannedWordBlocked)),
-        chatMutedBlocked: Math.max(0, Number(parsed.chatMutedBlocked ?? defaultStreamAlertConfig.chatMutedBlocked)),
-        giftsSocketRejected: Math.max(0, Number(parsed.giftsSocketRejected ?? defaultStreamAlertConfig.giftsSocketRejected)),
-        joinImbalanceOffset: Math.max(0, Number(parsed.joinImbalanceOffset ?? defaultStreamAlertConfig.joinImbalanceOffset)),
-        cooldownMinutes: Math.max(1, Number(parsed.cooldownMinutes ?? defaultStreamAlertConfig.cooldownMinutes)),
+        category: cfg.category || category,
+        config: {
+          giftsRateLimited: Math.max(0, Number(parsed.giftsRateLimited ?? defaultStreamAlertConfig.giftsRateLimited)),
+          chatBannedWordBlocked: Math.max(0, Number(parsed.chatBannedWordBlocked ?? defaultStreamAlertConfig.chatBannedWordBlocked)),
+          chatMutedBlocked: Math.max(0, Number(parsed.chatMutedBlocked ?? defaultStreamAlertConfig.chatMutedBlocked)),
+          giftsSocketRejected: Math.max(0, Number(parsed.giftsSocketRejected ?? defaultStreamAlertConfig.giftsSocketRejected)),
+          joinImbalanceOffset: Math.max(0, Number(parsed.joinImbalanceOffset ?? defaultStreamAlertConfig.joinImbalanceOffset)),
+          cooldownMinutes: Math.max(1, Number(parsed.cooldownMinutes ?? defaultStreamAlertConfig.cooldownMinutes)),
+        },
       };
     }
   } catch (err: any) {
     chatLog.warn(`Failed to parse stream alerts config: ${err.message}`);
   }
-  return { ...defaultStreamAlertConfig };
+  return { category, config: { ...defaultStreamAlertConfig } };
 }
 
-async function saveStreamAlertConfig(config: typeof defaultStreamAlertConfig, adminId?: string) {
-  await storage.upsertSystemConfig("stream_alerts", config, adminId);
+async function saveStreamAlertConfigForTenant(tenantId: string, config: typeof defaultStreamAlertConfig, adminId?: string) {
+  const category = resolveStreamAlertConfigCategory(tenantId);
+  await storage.upsertSystemConfig(category, config, adminId);
+  return category;
 }
 
 router.get("/streams/active", requireAdmin, async (_req, res) => {
@@ -1218,15 +1412,39 @@ router.get("/streams/telemetry", requireAdmin, async (_req, res) => {
   }
 });
 
-router.get("/streams/telemetry/alert-config", requireAdmin, async (_req, res) => {
-  const data = await getStreamAlertConfig();
-  return res.json({ success: true, data });
+router.get("/streams/telemetry/alert-config", requireAdmin, async (req, res) => {
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
+  const result = await getStreamAlertConfigForTenant(target.tenantId);
+  return res.json({
+    success: true,
+    data: result.config,
+    summary: { scope: target.scope, tenantId: target.tenantId, category: result.category },
+  });
 });
 
 router.get("/streams/telemetry/alerts", requireAdmin, async (req, res) => {
   try {
+    const target = resolveScopeTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
     const telemetry = getLiveTelemetrySnapshot();
-    const config = await getStreamAlertConfig();
+    const configResult = await getStreamAlertConfigForTenant(target.tenantId);
+    const config = configResult.config;
+    const historyCategory = resolveStreamAlertHistoryCategory(target.tenantId);
     const statusRaw = String(req.query.status || "all");
     const status: "all" | "active" | "resolved" =
       statusRaw === "active" || statusRaw === "resolved" ? statusRaw : "all";
@@ -1246,10 +1464,10 @@ router.get("/streams/telemetry/alerts", requireAdmin, async (req, res) => {
       giftsSocketRejected: telemetry.giftsSocketRejected,
     }, config);
 
-    await updateStreamAlertHistory(activeAlerts, req.session.adminId);
-    const allHistory = Array.from(streamAlertHistory.values());
+    await updateStreamAlertHistory(activeAlerts, historyCategory, req.session.adminId);
+    const allHistory = Array.from(getStreamAlertHistoryStore(historyCategory).values());
     const summary = getStreamAlertSummary(allHistory);
-    const filteredHistory = getFilteredStreamAlertHistory(status, level);
+    const filteredHistory = getFilteredStreamAlertHistory(historyCategory, status, level);
     const history = filteredHistory.slice(offset, offset + limit);
     return res.json({
       success: true,
@@ -1265,6 +1483,7 @@ router.get("/streams/telemetry/alerts", requireAdmin, async (req, res) => {
           totalPages: Math.max(1, Math.ceil(filteredHistory.length / limit)),
         },
       },
+      summary: { scope: target.scope, tenantId: target.tenantId, configCategory: configResult.category, historyCategory },
     });
   } catch {
     return res.json({
@@ -1287,27 +1506,39 @@ router.get("/streams/telemetry/alerts", requireAdmin, async (req, res) => {
 
 router.delete("/streams/telemetry/alerts/history", requireAdmin, async (req, res) => {
   try {
-    await hydrateStreamAlertHistoryIfNeeded();
+    const target = resolveScopeTarget(
+      req.query.scope,
+      req.query.tenantId,
+      req.tenantContext?.tenantId,
+    );
+    if (!target) {
+      return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+    }
+
+    const historyCategory = resolveStreamAlertHistoryCategory(target.tenantId);
+    await hydrateStreamAlertHistoryIfNeeded(historyCategory);
+    const historyStore = getStreamAlertHistoryStore(historyCategory);
     const modeRaw = String(req.query.mode || "all");
     const mode: "all" | "resolved" = modeRaw === "resolved" ? "resolved" : "all";
 
     if (mode === "all") {
-      streamAlertHistory.clear();
+      historyStore.clear();
     } else {
-      for (const [id, entry] of streamAlertHistory.entries()) {
-        if (!entry.isActive) streamAlertHistory.delete(id);
+      for (const [id, entry] of historyStore.entries()) {
+        if (!entry.isActive) historyStore.delete(id);
       }
     }
 
-    await persistStreamAlertHistory(req.session.adminId);
-    await storage.addAdminLog(req.session.adminId!, "clear_stream_alert_history", "settings", "", mode);
+    await persistStreamAlertHistory(historyCategory, req.session.adminId);
+    await storage.addAdminLog(req.session.adminId!, "clear_stream_alert_history", "settings", "", `[scope=${target.scope}] category=${historyCategory} mode=${mode}`);
 
     return res.json({
       success: true,
       message: mode === "all" ? "تم مسح سجل التنبيهات" : "تم مسح التنبيهات المحلولة",
       data: {
-        remaining: streamAlertHistory.size,
+        remaining: historyStore.size,
       },
+      summary: { scope: target.scope, tenantId: target.tenantId, historyCategory },
     });
   } catch {
     return res.status(500).json({ success: false, message: "تعذر مسح سجل التنبيهات" });
@@ -1315,7 +1546,16 @@ router.delete("/streams/telemetry/alerts/history", requireAdmin, async (req, res
 });
 
 router.put("/streams/telemetry/alert-config", requireAdmin, async (req, res) => {
-  const current = await getStreamAlertConfig();
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
+  const current = (await getStreamAlertConfigForTenant(target.tenantId)).config;
   const allowed: (keyof typeof defaultStreamAlertConfig)[] = [
     "giftsRateLimited",
     "chatBannedWordBlocked",
@@ -1335,9 +1575,14 @@ router.put("/streams/telemetry/alert-config", requireAdmin, async (req, res) => 
   }
 
   const next = { ...current, ...updates };
-  await saveStreamAlertConfig(next, req.session.adminId);
-  await storage.addAdminLog(req.session.adminId!, "update_stream_alert_config", "settings", "", JSON.stringify(Object.keys(updates)));
-  return res.json({ success: true, data: next, message: "تم تحديث إعدادات تنبيهات البث" });
+  const category = await saveStreamAlertConfigForTenant(target.tenantId, next, req.session.adminId);
+  await storage.addAdminLog(req.session.adminId!, "update_stream_alert_config", "settings", "", `[scope=${target.scope}] category=${category} fields=${JSON.stringify(Object.keys(updates))}`);
+  return res.json({
+    success: true,
+    data: next,
+    message: "تم تحديث إعدادات تنبيهات البث",
+    summary: { scope: target.scope, tenantId: target.tenantId, category },
+  });
 });
 
 router.post("/streams/:id/end", requireAdmin, async (req, res) => {
@@ -1579,14 +1824,51 @@ router.get("/streams/whitelist", requireAdmin, async (req, res) => {
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
 
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
   try {
-    // Get all whitelist entries from systemSettings
-    const entries = await db.select().from(schema.systemSettings)
-      .where(sql`${schema.systemSettings.key} LIKE 'stream_whitelist_%' AND ${schema.systemSettings.value} = 'true'`);
+    const scopedPrefix = resolveTenantScopedKey(target.tenantId, "stream_whitelist_");
+    const globalPrefix = "stream_whitelist_";
+    const entries = await db
+      .select({ key: schema.systemSettings.key, value: schema.systemSettings.value })
+      .from(schema.systemSettings)
+      .where(
+        target.tenantId === "default"
+          ? sql`${schema.systemSettings.key} LIKE ${`${globalPrefix}%`} AND ${schema.systemSettings.value} = 'true'`
+          : sql`(${schema.systemSettings.key} LIKE ${`${scopedPrefix}%`} OR ${schema.systemSettings.key} LIKE ${`${globalPrefix}%`}) AND ${schema.systemSettings.value} = 'true'`,
+      );
 
     if (!entries.length) return res.json({ success: true, data: [] });
 
-    const userIds = entries.map(e => e.key.replace('stream_whitelist_', ''));
+    const allowedByUser = new Map<string, boolean>();
+    for (const entry of entries) {
+      const key = String(entry.key || "");
+      const userId = key.startsWith(scopedPrefix)
+        ? key.slice(scopedPrefix.length)
+        : key.startsWith(globalPrefix)
+          ? key.slice(globalPrefix.length)
+          : "";
+      if (!userId) continue;
+      const isScoped = key.startsWith(scopedPrefix) && target.tenantId !== "default";
+      if (isScoped) {
+        allowedByUser.set(userId, true);
+        continue;
+      }
+      if (!allowedByUser.has(userId)) {
+        allowedByUser.set(userId, true);
+      }
+    }
+
+    const userIds = Array.from(allowedByUser.keys());
+    if (!userIds.length) return res.json({ success: true, data: [] });
+
     const users = await db.select({
       id: schema.users.id,
       username: schema.users.username,
@@ -1596,7 +1878,7 @@ router.get("/streams/whitelist", requireAdmin, async (req, res) => {
       canStream: schema.users.canStream,
     }).from(schema.users).where(inArray(schema.users.id, userIds));
 
-    return res.json({ success: true, data: users });
+    return res.json({ success: true, data: users, summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch (err: any) {
     return res.json({ success: true, data: [] });
   }
@@ -1607,11 +1889,20 @@ router.put("/streams/whitelist/:userId", requireAdmin, async (req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB" });
 
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
   const userId = p(req.params.userId);
   const { allowed } = req.body; // true or false
 
   try {
-    const key = `stream_whitelist_${userId}`;
+    const key = resolveTenantScopedKey(target.tenantId, `stream_whitelist_${userId}`);
     const existing = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.key, key)).limit(1);
 
     if (allowed) {
@@ -1626,8 +1917,8 @@ router.put("/streams/whitelist/:userId", requireAdmin, async (req, res) => {
       }
     }
 
-    await storage.addAdminLog(req.session.adminId!, allowed ? "whitelist_stream_user" : "remove_stream_whitelist", "user", userId, "");
-    return res.json({ success: true, message: allowed ? "تمت الإضافة للقائمة البيضاء" : "تمت الإزالة من القائمة البيضاء" });
+    await storage.addAdminLog(req.session.adminId!, allowed ? "whitelist_stream_user" : "remove_stream_whitelist", "user", userId, `[scope=${target.scope}] key=${key}`);
+    return res.json({ success: true, message: allowed ? "تمت الإضافة للقائمة البيضاء" : "تمت الإزالة من القائمة البيضاء", summary: { scope: target.scope, tenantId: target.tenantId, key } });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ" });
   }
@@ -1638,13 +1929,68 @@ router.put("/users/:userId/can-stream", requireAdmin, async (req, res) => {
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB" });
 
+  const target = resolveScopeTarget(
+    req.body?.scope,
+    req.body?.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
+
   const userId = p(req.params.userId);
   const { canStream } = req.body;
+  const canStreamValue = !!canStream;
 
   try {
-    await db.update(schema.users).set({ canStream: !!canStream }).where(eq(schema.users.id, userId));
-    await storage.addAdminLog(req.session.adminId!, canStream ? "enable_user_stream" : "disable_user_stream", "user", userId, "");
-    return res.json({ success: true, message: canStream ? "تم تفعيل البث للمستخدم" : "تم تعطيل البث للمستخدم" });
+    if (target.tenantId === "default") {
+      await db.update(schema.users).set({ canStream: canStreamValue }).where(eq(schema.users.id, userId));
+      await storage.addAdminLog(
+        req.session.adminId!,
+        canStreamValue ? "enable_user_stream" : "disable_user_stream",
+        "user",
+        userId,
+        `[scope=${target.scope}] users.canStream`,
+      );
+      return res.json({
+        success: true,
+        message: canStreamValue ? "تم تفعيل البث للمستخدم" : "تم تعطيل البث للمستخدم",
+        summary: { scope: target.scope, tenantId: target.tenantId, source: "users.canStream" },
+      });
+    }
+
+    const key = resolveTenantScopedKey(target.tenantId, `user_can_stream_${userId}`);
+    const existing = await db
+      .select({ key: schema.systemSettings.key })
+      .from(schema.systemSettings)
+      .where(eq(schema.systemSettings.key, key))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db
+        .update(schema.systemSettings)
+        .set({ value: String(canStreamValue), updatedAt: new Date() })
+        .where(eq(schema.systemSettings.key, key));
+    } else {
+      await db.insert(schema.systemSettings).values({
+        key,
+        value: String(canStreamValue),
+        category: "streaming",
+      });
+    }
+
+    await storage.addAdminLog(
+      req.session.adminId!,
+      canStreamValue ? "enable_user_stream" : "disable_user_stream",
+      "user",
+      userId,
+      `[scope=${target.scope}] key=${key}`,
+    );
+    return res.json({
+      success: true,
+      message: canStreamValue ? "تم تفعيل البث للمستخدم" : "تم تعطيل البث للمستخدم",
+      summary: { scope: target.scope, tenantId: target.tenantId, key, source: "systemSettings" },
+    });
   } catch {
     return res.status(500).json({ success: false, message: "خطأ" });
   }
@@ -1654,6 +2000,15 @@ router.put("/users/:userId/can-stream", requireAdmin, async (req, res) => {
 router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
   const db = getDb();
   if (!db) return res.json({ success: true, data: [] });
+
+  const target = resolveScopeTarget(
+    req.query.scope,
+    req.query.tenantId,
+    req.tenantContext?.tenantId,
+  );
+  if (!target) {
+    return res.status(400).json({ success: false, message: "Tenant scope requires a valid tenantId" });
+  }
 
   const q = (req.query.q as string || "").trim();
   if (!q || q.length < 2) return res.json({ success: true, data: [] });
@@ -1669,7 +2024,7 @@ router.get("/streams/whitelist/search", requireAdmin, async (req, res) => {
     }).from(schema.users)
       .where(sql`(${schema.users.username} ILIKE ${'%' + escapeLike(q) + '%'} OR ${schema.users.displayName} ILIKE ${'%' + escapeLike(q) + '%'})`)
       .limit(20);
-    return res.json({ success: true, data: users });
+    return res.json({ success: true, data: users, summary: { scope: target.scope, tenantId: target.tenantId } });
   } catch {
     return res.json({ success: true, data: [] });
   }
@@ -1686,6 +2041,8 @@ function toCsv(headers: string[], rows: string[][]): string {
 
 // Export conversations as CSV
 router.get("/export/conversations", requireAdmin, async (_req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
@@ -1728,6 +2085,8 @@ router.get("/export/conversations", requireAdmin, async (_req, res) => {
 
 // Export messages as CSV
 router.get("/export/messages", requireAdmin, async (_req, res) => {
+  return sensitiveContentBlocked(res);
+
   const db = getDb();
   if (!db) return res.status(500).json({ success: false, message: "DB unavailable" });
   try {
