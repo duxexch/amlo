@@ -133,6 +133,12 @@ npm run prod:validate:universal:strict -- --env .env
 npm run prod:gate:single-server
 ```
 
+For real production environment (strict secrets + real IP required):
+
+```bash
+npm run prod:gate:single-server:strict -- --env .env
+```
+
 1. For dedicated high-power deployment, you can start from:
 
 `.env.production.high-power.template`

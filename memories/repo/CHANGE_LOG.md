@@ -1421,3 +1421,29 @@ Impact:
 - Team can now separate template validation from strict production-secret enforcement and reduce go-live misconfiguration risk.
 Follow-up:
 - Before go-live, copy high-power template to real `.env`, replace all secret placeholders, then run strict validator.
+
+---
+
+Date: 2026-03-24
+Area: production verification hardening (no broken gate paths)
+Change:
+
+- Restored missing file `script/readiness-gate.ts` to fix broken npm command path `readiness:gate`.
+- Implemented readiness gate checks for single-server production control, RTC transport coverage, APK/AAB publication flags, and baseline security/env integrity.
+- Added strict mode support to readiness gate (`--strict-secrets`) similar to universal validator.
+- Added npm scripts:
+  - `readiness:gate:strict`
+  - `prod:gate:single-server:strict` (targets real `.env`)
+- Confirmed runtime verification:
+  - `npm run check` PASSED
+  - `npm run test` PASSED (77 tests)
+  - `npm run prod:validate:universal:recommended` PASSED
+  - `npm run readiness:gate` PASSED
+  - `npm run prod:gate:single-server` PASSED
+Reason:
+- User requested re-confirmation that project is production-ready and has no broken paths, unsafe/missing runtime gates, or fake readiness flow.
+Impact:
+- Production gate commands are now executable end-to-end and no longer fail due to missing script path.
+- Team now has clear template-safe and strict production validation modes.
+Follow-up:
+- Run strict gates on real production `.env` before final rollout: `prod:validate:universal:strict` and `prod:gate:single-server:strict`.
