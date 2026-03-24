@@ -1352,3 +1352,22 @@ Impact:
 - Pre-go-live validator now catches incomplete SMTP setup in OTP-email mode.
 Follow-up:
 - Add provider-side DNS email records (MX/SPF/DKIM/DMARC) and run end-to-end OTP send test.
+
+---
+
+Date: 2026-03-24
+Area: rollback of local-domain vixo migration
+Change:
+
+- Reverted commit `775a525` (`chore(domain): migrate runtime domain to vixo.uno`) to remove local-domain migration effects.
+- Resolved revert conflicts in:
+  - `script/validate-universal-env.ts`
+  - `memories/repo/CHANGE_LOG.md`
+- Removed remaining `vixo` SMTP references in `.env.production.recommended` and restored to `info@mrco.live`.
+- Verified no remaining `vixo.uno` references in primary env/docs/validator targets.
+Reason:
+- User requested complete removal of local `vixo.uno` effects and return to server domain workflow.
+Impact:
+- Project tracked configuration/docs are back to non-vixo domain setup suitable for server flow.
+Follow-up:
+- If local `.env` was manually modified for vixo testing, keep it aligned with server domain before run/deploy.
